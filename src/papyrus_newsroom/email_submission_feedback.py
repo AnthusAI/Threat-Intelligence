@@ -233,7 +233,7 @@ def _find_item_by_reference_id(find_result: dict[str, Any] | None) -> dict[str, 
     return indexed
 
 
-def _stored_title_subtitle_summary(reference: dict[str, Any]) -> dict[str, str]:
+def _stored_reference_display_fields(reference: dict[str, Any]) -> dict[str, str]:
     try:
         from papyrus_newsroom.reference_curation_signals import _load_reference_metadata_payload
 
@@ -242,11 +242,123 @@ def _stored_title_subtitle_summary(reference: dict[str, Any]) -> dict[str, str]:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    published = (
+        str(reference.get("sourcePublishedAt") or "").strip()
+        or str(payload.get("sourcePublishedAt") or payload.get("publishedAt") or "").strip()
+    )
     return {
         "title": str(payload.get("title") or "").strip(),
         "subtitle": str(payload.get("subtitle") or "").strip(),
         "summary": str(payload.get("summary") or "").strip(),
+        "sourcePublishedAt": published,
     }
+
+
+def _normalize_url_for_match(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    return f"{host}{path}".lower()
+
+
+def _match_intake_citation(
+    source_uri: str,
+    citations: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    if not citations:
+        return None
+    normalized_source = _normalize_url_for_match(source_uri)
+    if not normalized_source:
+        return None
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        citation_url = str(citation.get("url") or "").strip()
+        if not citation_url:
+            continue
+        if _normalize_url_for_match(citation_url) == normalized_source:
+            return citation
+        if citation_url.rstrip("/") == source_uri.rstrip("/"):
+            return citation
+    return None
+
+
+def _looks_like_placeholder_title(title: str, source_uri: str) -> bool:
+    normalized_title = str(title or "").strip()
+    if not normalized_title:
+        return True
+    normalized_uri = str(source_uri or "").strip()
+    if normalized_uri and normalized_title.lower() in {normalized_uri.lower(), normalized_uri.rstrip("/").lower()}:
+        return True
+    if re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", normalized_title, flags=re.IGNORECASE):
+        return True
+    if re.search(r"\barxiv[:\s]*\d{4}\.\d{4,5}", normalized_title, flags=re.IGNORECASE):
+        return True
+    basename = normalized_uri.rsplit("/", 1)[-1].lower()
+    if basename and normalized_title.lower() in {basename, basename.removesuffix(".pdf")}:
+        return True
+    return False
+
+
+def reference_entry_is_receipt_ready(entry: dict[str, Any]) -> bool:
+    title = str(entry.get("title") or "").strip()
+    subtitle = str(entry.get("subtitle") or "").strip()
+    summary = str(entry.get("summary") or "").strip()
+    if not (title and subtitle and summary):
+        return False
+    if _looks_like_placeholder_title(title, str(entry.get("sourceUri") or "")):
+        return False
+    return True
+
+
+def _format_publication_date_label(raw: str | None) -> str | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z?", value):
+        return value[:10]
+    return value
+
+
+def _human_pipeline_status(find_status: str, summarize_status: str, *, has_extracted_text: bool) -> list[str]:
+    notes: list[str] = []
+    normalized_find = str(find_status or "").strip().lower()
+    normalized_summarize = str(summarize_status or "").strip().lower()
+    if normalized_find in {"failed", "error"}:
+        notes.append("Source fetch did not complete — we could not retrieve the full text from the URL.")
+    elif normalized_find in {"skipped", "skipped_missing_text", "skipped-missing-text"}:
+        notes.append("Source fetch was skipped — no extractable text was available at the URL.")
+    elif normalized_find in {"not_run", "not-run"} and not has_extracted_text:
+        notes.append("Source fetch has not run yet.")
+    if normalized_summarize in {"failed", "error"}:
+        notes.append("Summary generation failed.")
+    elif normalized_summarize in {"skipped", "skipped_missing_text", "skipped-missing-text"}:
+        notes.append("Summary was skipped because there was no extracted text to summarize.")
+    elif normalized_summarize in {"not_run", "not-run"}:
+        notes.append("Summary has not been generated yet.")
+    return notes
+
+
+def build_intake_citation_entries(citations: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for citation in citations or []:
+        if not isinstance(citation, dict):
+            continue
+        url = str(citation.get("url") or "").strip()
+        if not url:
+            continue
+        rows.append(
+            {
+                "url": url,
+                "title": str(citation.get("title") or "").strip() or None,
+                "kind": str(citation.get("kind") or citation.get("sourceKind") or "").strip() or None,
+                "ingestionRationale": str(citation.get("ingestion_rationale") or citation.get("ingestionRationale") or "").strip()
+                or None,
+            }
+        )
+    return rows
 
 
 def build_reference_feedback_entries(
@@ -255,6 +367,7 @@ def build_reference_feedback_entries(
     attachments: list[dict[str, Any]],
     find_result: dict[str, Any] | None = None,
     process_result: dict[str, Any] | None = None,
+    intake_citations: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     find_by_id = _find_item_by_reference_id(find_result)
     process_by_id = _process_items_by_reference_id(process_result)
@@ -269,11 +382,18 @@ def build_reference_feedback_entries(
         generated_subtitle = str(process_item.get("subtitle") or "").strip()
         generated_summary = str(process_item.get("summary") or "").strip()
         generated_title = str(process_item.get("title") or "").strip()
-        stored = _stored_title_subtitle_summary(reference) if not (generated_title and generated_subtitle and generated_summary) else {
-            "title": "",
-            "subtitle": "",
-            "summary": "",
-        }
+        stored = (
+            _stored_reference_display_fields(reference)
+            if not (generated_title and generated_subtitle and generated_summary)
+            else {
+                "title": "",
+                "subtitle": "",
+                "summary": "",
+                "sourcePublishedAt": str(reference.get("sourcePublishedAt") or "").strip(),
+            }
+        )
+        source_uri = str(reference.get("sourceUri") or "")
+        intake_match = _match_intake_citation(source_uri, intake_citations)
         title = generated_title or stored["title"] or str(reference.get("title") or "").strip()
         subtitle = generated_subtitle or stored["subtitle"]
         summary = generated_summary or stored["summary"]
@@ -284,25 +404,40 @@ def build_reference_feedback_entries(
         academic = is_academic_paper_reference(reference, source_plugin=source_plugin)
         lineage_id = str(reference.get("lineageId") or reference.get("referenceLineageId") or "").strip()
         newsroom_url = build_newsroom_reference_public_url(lineage_id) if lineage_id else None
-        entries.append(
-            {
-                "referenceId": reference_id,
-                "referenceLineageId": lineage_id or None,
-                "newsroomUrl": newsroom_url,
-                "sourceUri": str(reference.get("sourceUri") or ""),
-                "title": title,
-                "subtitle": subtitle,
-                "summary": summary,
-                "sourcePlugin": source_plugin,
-                "findStatus": find_status or ("found" if has_extracted_text else "not_run"),
-                "summarizeStatus": summarize_status or ("generated" if generated_summary else "not_run"),
-                "pdfConfirmationRequired": academic,
-                "pdfLocated": pdf_info["pdfLocated"] if academic else None,
-                "pdfAttachmentId": pdf_info["pdfAttachmentId"],
-                "pdfFilename": pdf_info["pdfFilename"],
-                "attachments": summarize_recorded_attachments(reference, attachments),
-            }
+        publication_date = _format_publication_date_label(
+            stored.get("sourcePublishedAt") or str(reference.get("sourcePublishedAt") or "")
         )
+        entry = {
+            "referenceId": reference_id,
+            "referenceLineageId": lineage_id or None,
+            "newsroomUrl": newsroom_url,
+            "sourceUri": source_uri,
+            "receivedUrl": str(intake_match.get("url") or source_uri) if intake_match else source_uri,
+            "receivedTitle": str(intake_match.get("title") or "").strip() or None if intake_match else None,
+            "title": title,
+            "subtitle": subtitle,
+            "summary": summary,
+            "sourcePublishedAt": publication_date,
+            "sourcePlugin": source_plugin,
+            "findStatus": find_status or ("found" if has_extracted_text else "not_run"),
+            "summarizeStatus": summarize_status or ("generated" if generated_summary else "not_run"),
+            "pdfConfirmationRequired": academic,
+            "pdfLocated": pdf_info["pdfLocated"] if academic else None,
+            "pdfAttachmentId": pdf_info["pdfAttachmentId"],
+            "pdfFilename": pdf_info["pdfFilename"],
+            "attachments": summarize_recorded_attachments(reference, attachments),
+        }
+        entry["receiptReady"] = reference_entry_is_receipt_ready(entry)
+        entry["statusNotes"] = _human_pipeline_status(
+            str(entry.get("findStatus") or ""),
+            str(entry.get("summarizeStatus") or ""),
+            has_extracted_text=has_extracted_text,
+        )
+        if entry["receiptReady"]:
+            entry["statusNotes"] = ["Ready in your newsroom — title, subtitle, and summary are complete."]
+            if publication_date:
+                entry["statusNotes"].append(f"Publication date: {publication_date}")
+        entries.append(entry)
     return entries
 
 
@@ -323,6 +458,7 @@ def build_submission_feedback_report(
     find_summary = result.get("find") if isinstance(result.get("find"), dict) else {}
     process_summary = result.get("process") if isinstance(result.get("process"), dict) else {}
     citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
+    intake_citations = build_intake_citation_entries([row for row in citations if isinstance(row, dict)])
     return {
         "messageId": str(message.get("id") or ""),
         "subject": str(message.get("summary") or "Email submission"),
@@ -334,6 +470,7 @@ def build_submission_feedback_report(
         "rejectionKind": str(metadata.get("rejectionKind") or "").strip() or None,
         "intakeClassification": str(metadata.get("intakeClassification") or "").strip() or None,
         "directCitationCount": len(citations),
+        "intakeCitations": intake_citations,
         "registeredReferenceCount": int(result.get("registeredReferenceCount") or 0),
         "pipeline": {
             "find": {
@@ -450,9 +587,34 @@ def _status_label_html(status: str) -> str:
     )
 
 
+def _append_intake_citations_plain(lines: list[str], citations: list[dict[str, Any]]) -> None:
+    if not citations:
+        return
+    lines.extend(["", "What we received:"])
+    for index, citation in enumerate(citations, start=1):
+        if not isinstance(citation, dict):
+            continue
+        label = citation.get("title") or citation.get("url") or "(link)"
+        lines.append(f"  {index}. {label}")
+        url = str(citation.get("url") or "").strip()
+        if url and label != url:
+            lines.append(f"     {url}")
+        kind = str(citation.get("kind") or "").strip()
+        if kind:
+            lines.append(f"     Type: {kind}")
+
+
 def _append_reference_feedback_plain(lines: list[str], entry: dict[str, Any], index: int) -> None:
     lines.append("")
     lines.append(f"{index}. {entry.get('title') or '(untitled)'}")
+    received_title = str(entry.get("receivedTitle") or "").strip()
+    received_url = str(entry.get("receivedUrl") or entry.get("sourceUri") or "").strip()
+    if received_title and received_title != str(entry.get("title") or "").strip():
+        lines.append(f"   Received as: {received_title}")
+    if received_url:
+        lines.append(f"   Source URL: {received_url}")
+    if entry.get("sourcePublishedAt"):
+        lines.append(f"   Publication date: {entry.get('sourcePublishedAt')}")
     if entry.get("subtitle"):
         lines.append(f"   {entry.get('subtitle')}")
     if entry.get("summary"):
@@ -462,17 +624,13 @@ def _append_reference_feedback_plain(lines: list[str], entry: dict[str, Any], in
     if newsroom_url:
         lines.append("")
         lines.append(f"   {newsroom_url}")
-    if entry.get("sourceUri"):
-        lines.append(f"   {entry.get('sourceUri')}")
+    status_notes = entry.get("statusNotes") if isinstance(entry.get("statusNotes"), list) else []
+    for note in status_notes:
+        if isinstance(note, str) and note.strip():
+            lines.append(f"   {note.strip()}")
     plugin = entry.get("sourcePlugin")
     if plugin:
-        lines.append(f"   Fetch plugin: {plugin}")
-    find_status = entry.get("findStatus")
-    summarize_status = entry.get("summarizeStatus")
-    if find_status:
-        lines.append(f"   Find: {find_status}")
-    if summarize_status:
-        lines.append(f"   Summarize: {summarize_status}")
+        lines.append(f"   Source plugin: {plugin}")
     if entry.get("pdfConfirmationRequired"):
         located = entry.get("pdfLocated")
         if located is True:
@@ -495,6 +653,34 @@ def _append_reference_feedback_plain(lines: list[str], entry: dict[str, Any], in
             lines.append(f"     - {role}: {name}{suffix}")
 
 
+def _intake_citations_html_block(citations: list[dict[str, Any]]) -> str:
+    if not citations:
+        return ""
+    items: list[str] = []
+    for index, citation in enumerate(citations, start=1):
+        if not isinstance(citation, dict):
+            continue
+        url = str(citation.get("url") or "").strip()
+        label = str(citation.get("title") or url or "(link)")
+        escaped_label = html.escape(label)
+        row = f'<li style="margin:0 0 10px;color:{_EMAIL_INK};font-family:{_EMAIL_SANS};font-size:13px;line-height:1.4;">'
+        row += f'<span style="{_email_story_label_style(margin="0 0 4px")}">Received {index}</span><br/>'
+        if url:
+            escaped_url = html.escape(url, quote=True)
+            row += f'<a href="{escaped_url}" style="color:{_EMAIL_INK};text-decoration:underline;">{escaped_label}</a>'
+        else:
+            row += escaped_label
+        kind = str(citation.get("kind") or "").strip()
+        if kind:
+            row += f'<br/><span style="color:{_EMAIL_MUTED};font-size:11px;">{html.escape(kind)}</span>'
+        row += "</li>"
+        items.append(row)
+    return (
+        f'<p style="{_email_story_label_style(margin=f"{_EMAIL_RHYTHM_PX}px 0 12px")}">What we received</p>'
+        f'<ul style="margin:0 0 {_EMAIL_RHYTHM_PX}px;padding:0;list-style:none;">{"".join(items)}</ul>'
+    )
+
+
 def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
     title = html.escape(str(entry.get("title") or "(untitled)"))
     newsroom_url = str(entry.get("newsroomUrl") or "").strip()
@@ -504,6 +690,20 @@ def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
         f'<p style="{_email_story_label_style(margin="0 0 10px")}">Reference {index}</p>',
         f'<p style="{_email_reference_title_style()}">{title}</p>',
     ]
+    received_title = str(entry.get("receivedTitle") or "").strip()
+    received_url = str(entry.get("receivedUrl") or entry.get("sourceUri") or "").strip()
+    if received_title and received_title != str(entry.get("title") or "").strip():
+        parts.append(
+            f'<p style="margin:0 0 8px;color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};font-size:12px;line-height:1.34;">'
+            f"Received as: {html.escape(received_title)}</p>"
+        )
+    publication_date = str(entry.get("sourcePublishedAt") or "").strip()
+    if publication_date:
+        parts.append(
+            f'<p style="margin:0 0 8px;color:{_EMAIL_MUTED_STRONG};font-family:{_EMAIL_SANS};'
+            f'font-size:12px;font-weight:600;line-height:1.34;">'
+            f"Publication date: {html.escape(publication_date)}</p>"
+        )
     subtitle = str(entry.get("subtitle") or "").strip()
     if subtitle:
         parts.append(f'<p style="{_email_reference_subtitle_style()}">{html.escape(subtitle)}</p>')
@@ -519,33 +719,35 @@ def _reference_feedback_html_block(entry: dict[str, Any], index: int) -> str:
             f'font-size:11px;font-weight:900;letter-spacing:0.08em;line-height:32px;text-decoration:none;'
             f'text-transform:uppercase;">Open in Papyrus</a></p>'
         )
-    source_uri = str(entry.get("sourceUri") or "").strip()
-    if source_uri:
-        escaped_source = html.escape(source_uri, quote=True)
+    if received_url:
+        escaped_source = html.escape(received_url, quote=True)
         parts.append(
             f'<p style="margin:0 0 12px;font-family:{_EMAIL_SANS};font-size:12px;line-height:1.34;">'
             f'<a href="{escaped_source}" style="color:{_EMAIL_INK};text-decoration:underline;'
-            f'text-underline-offset:2px;word-break:break-all;">{html.escape(source_uri)}</a></p>'
+            f'text-underline-offset:2px;word-break:break-all;">{html.escape(received_url)}</a></p>'
         )
-    meta_tokens: list[str] = []
+    status_notes = entry.get("statusNotes") if isinstance(entry.get("statusNotes"), list) else []
+    for note in status_notes:
+        if not isinstance(note, str) or not note.strip():
+            continue
+        parts.append(
+            f'<p style="margin:0 0 8px;color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
+            f'font-size:12px;line-height:1.4;">{html.escape(note.strip())}</p>'
+        )
     plugin = entry.get("sourcePlugin")
-    if plugin:
-        meta_tokens.append(html.escape(str(plugin).upper()))
-    find_status = entry.get("findStatus")
-    if find_status:
-        meta_tokens.append(html.escape(str(find_status).upper()))
-    summarize_status = entry.get("summarizeStatus")
-    if summarize_status:
-        meta_tokens.append(html.escape(str(summarize_status).upper()))
+    pdf_note: str | None = None
     if entry.get("pdfConfirmationRequired"):
         located = entry.get("pdfLocated")
         if located is True:
             pdf_name = entry.get("pdfFilename") or entry.get("pdfAttachmentId") or "source PDF"
-            meta_tokens.append(f"PDF {html.escape(str(pdf_name).upper())}")
+            pdf_note = f"PDF on file: {pdf_name}"
         elif located is False:
-            meta_tokens.append("PDF MISSING")
-        else:
-            meta_tokens.append("PDF UNKNOWN")
+            pdf_note = "PDF not located yet"
+    meta_tokens: list[str] = []
+    if plugin:
+        meta_tokens.append(html.escape(str(plugin)))
+    if pdf_note:
+        meta_tokens.append(html.escape(pdf_note))
     if meta_tokens:
         parts.append(
             f'<p style="{_email_story_label_style(margin="0")}">{" · ".join(meta_tokens)}</p>'
@@ -638,8 +840,6 @@ def format_agent_intake_feedback_email(report: dict[str, Any]) -> tuple[str, str
 def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, str]:
     if is_unregistered_sender_rejection(report):
         return format_unregistered_sender_feedback_email(report)
-    if is_agent_intake_acknowledgment(report):
-        return format_agent_intake_feedback_email(report)
 
     subject, status = _feedback_email_subject(report)
 
@@ -674,10 +874,13 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
             ]
         )
 
+    intake_citations = report.get("intakeCitations") if isinstance(report.get("intakeCitations"), list) else []
+    _append_intake_citations_plain(lines, [row for row in intake_citations if isinstance(row, dict)])
+
     references = report.get("references") if isinstance(report.get("references"), list) else []
     reference_blocks_html: list[str] = []
     if references:
-        lines.extend(["", "References:"])
+        lines.extend(["", "References filed in Papyrus:"])
         index = 0
         for entry in references:
             if not isinstance(entry, dict):
@@ -714,10 +917,11 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
             process_summary=process_summary,
             registered_reference_count=int(report.get("registeredReferenceCount") or 0),
         )
+    intake_html = _intake_citations_html_block([row for row in intake_citations if isinstance(row, dict)])
     references_html = "".join(reference_blocks_html)
     if references_html:
         references_html = (
-            f'<p style="{_email_story_label_style(margin=f"{_EMAIL_RHYTHM_PX}px 0 12px")}">References</p>'
+            f'<p style="{_email_story_label_style(margin=f"{_EMAIL_RHYTHM_PX}px 0 12px")}">References filed in Papyrus</p>'
             f"{references_html}"
         )
 
@@ -733,6 +937,7 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         f'<p style="margin:0 0 {_EMAIL_RHYTHM_PX}px;">{_status_label_html(status)}</p>'
         f"{error_html}"
         f"{pipeline_html}"
+        f"{intake_html}"
         f"{references_html}"
         f'<p style="margin:calc({_EMAIL_RHYTHM_PX}px * 1.5) 0 0;padding-top:{_EMAIL_RHYTHM_PX}px;'
         f'border-top:1px solid {_EMAIL_RULE};color:{_EMAIL_MUTED};font-family:{_EMAIL_SANS};'
@@ -744,6 +949,135 @@ def format_submission_feedback_email(report: dict[str, Any]) -> tuple[str, str, 
         "</div></body></html>"
     )
     return subject, body_text, body_html
+
+
+FEEDBACK_EMAIL_MAX_DEFER_ATTEMPTS = 3
+
+
+def _registered_reference_ids_from_processing(processing_result: dict[str, Any] | None) -> set[str]:
+    if not isinstance(processing_result, dict):
+        return set()
+    ids = {
+        str(row).strip()
+        for row in (processing_result.get("registeredReferenceIds") or [])
+        if str(row).strip()
+    }
+    return ids
+
+
+def prepare_reference_entries_for_feedback(
+    client: Any,
+    *,
+    message: dict[str, Any],
+    metadata: dict[str, Any],
+    processing_result: dict[str, Any] | None = None,
+    reference_entries: list[dict[str, Any]] | None = None,
+    corpus_key: str | None = None,
+    steering_config_path: str | None = None,
+    re_enrich: bool = True,
+) -> list[dict[str, Any]]:
+    """Load references, optionally re-run enrichment, and build receipt-ready feedback rows."""
+    from papyrus_newsroom.email_submissions import (
+        DEFAULT_INBOUND_CORPUS_KEY,
+        DEFAULT_STEERING_CONFIG,
+        _load_registered_reference_processing_records,
+        run_registered_reference_enrichment,
+    )
+
+    result = processing_result if isinstance(processing_result, dict) else metadata.get("processingResult")
+    if not isinstance(result, dict):
+        result = {}
+    registered_reference_ids = _registered_reference_ids_from_processing(result)
+    import_run_id = str(result.get("importRunId") or "").strip() or None
+    resolved_corpus_key = (
+        str(corpus_key or os.environ.get("PAPYRUS_INBOUND_EMAIL_CORPUS_KEY") or DEFAULT_INBOUND_CORPUS_KEY).strip()
+    )
+    resolved_steering = steering_config_path or str(DEFAULT_STEERING_CONFIG)
+    citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
+
+    find_result: dict[str, Any] | None = None
+    process_result: dict[str, Any] | None = None
+    references: list[dict[str, Any]] = []
+    attachments: list[dict[str, Any]] = []
+
+    if registered_reference_ids and re_enrich:
+        references, attachments, _source_find, find_result, process_result = run_registered_reference_enrichment(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+            corpus_key=resolved_corpus_key,
+            steering_config_path=resolved_steering,
+        )
+    elif registered_reference_ids:
+        references, attachments, _relations = _load_registered_reference_processing_records(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+        )
+    elif reference_entries:
+        return reference_entries
+
+    if references:
+        return build_reference_feedback_entries(
+            references=references,
+            attachments=attachments,
+            find_result=find_result,
+            process_result=process_result,
+            intake_citations=[row for row in citations if isinstance(row, dict)],
+        )
+    if reference_entries:
+        return reference_entries
+    return []
+
+
+def references_are_receipt_ready(reference_entries: list[dict[str, Any]]) -> bool:
+    if not reference_entries:
+        return False
+    return all(reference_entry_is_receipt_ready(entry) for entry in reference_entries if isinstance(entry, dict))
+
+
+def _should_send_partial_failure_receipt(metadata: dict[str, Any]) -> bool:
+    attempts = int(metadata.get("feedbackEmailDeferAttempts") or 0)
+    return attempts >= FEEDBACK_EMAIL_MAX_DEFER_ATTEMPTS
+
+
+def _record_feedback_deferred(
+    client: Any,
+    *,
+    message_id: str,
+    metadata: dict[str, Any],
+    reason: str,
+    reference_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from papyrus_content.newsroom_commands import now_iso
+
+    metadata["feedbackEmailDeferred"] = True
+    metadata["feedbackEmailDeferReason"] = reason
+    metadata["feedbackEmailDeferAttempts"] = int(metadata.get("feedbackEmailDeferAttempts") or 0) + 1
+    metadata["feedbackEmailDeferredAt"] = now_iso()
+    if reference_entries is not None:
+        metadata["feedbackEmailPendingReferences"] = reference_entries
+    client.graphql(
+        """
+        mutation UpdateEmailSubmissionFeedbackDefer($input: UpdateMessageInput!) {
+          updateMessage(input: $input) { id }
+        }
+        """,
+        {
+            "input": {
+                "id": message_id,
+                "metadata": json.dumps(metadata, sort_keys=True),
+                "updatedAt": now_iso(),
+            }
+        },
+    )
+    return {
+        "sent": False,
+        "skipped": True,
+        "reason": "deferred-awaiting-enrichment",
+        "deferReason": reason,
+        "deferAttempts": metadata.get("feedbackEmailDeferAttempts"),
+    }
 
 
 def send_submission_feedback_email(
@@ -835,12 +1169,49 @@ def maybe_send_submission_feedback_email(
     if not sender_email:
         return {"sent": False, "skipped": True, "reason": "missing-sender"}
 
+    response_status = str(message.get("responseStatus") or metadata.get("responseStatus") or "").upper()
+    is_rejection = response_status == "REJECTED" or metadata.get("authorized") is False
+    resolved_processing = (
+        processing_result
+        if isinstance(processing_result, dict)
+        else metadata.get("processingResult") if isinstance(metadata.get("processingResult"), dict) else None
+    )
+    prepared_entries = reference_entries
+    if not is_rejection:
+        prepared_entries = prepare_reference_entries_for_feedback(
+            client,
+            message=message,
+            metadata=metadata,
+            processing_result=resolved_processing,
+            reference_entries=reference_entries,
+            re_enrich=not force,
+        )
+        registered_ids = _registered_reference_ids_from_processing(resolved_processing)
+        intake_classification = str(metadata.get("intakeClassification") or "").strip()
+        if intake_classification == "agent_intake" and not registered_ids and not force:
+            return _record_feedback_deferred(
+                client,
+                message_id=message_id,
+                metadata=metadata,
+                reason="agent-intake-awaiting-filed-references",
+                reference_entries=prepared_entries,
+            )
+        if registered_ids and prepared_entries and not references_are_receipt_ready(prepared_entries):
+            if not force and not _should_send_partial_failure_receipt(metadata):
+                return _record_feedback_deferred(
+                    client,
+                    message_id=message_id,
+                    metadata=metadata,
+                    reason="awaiting-title-subtitle-summary",
+                    reference_entries=prepared_entries,
+                )
+
     report = build_submission_feedback_report(
         message=message,
         metadata=metadata,
         processing_result=processing_result,
         processing_error=processing_error,
-        reference_entries=reference_entries,
+        reference_entries=prepared_entries,
     )
     subject, body_text, body_html = format_submission_feedback_email(report)
     send_result = send_submission_feedback_email(
@@ -859,6 +1230,9 @@ def maybe_send_submission_feedback_email(
     metadata["feedbackEmailTo"] = send_result.get("to")
     metadata["feedbackEmailFrom"] = send_result.get("from")
     metadata["feedbackReport"] = report
+    metadata.pop("feedbackEmailDeferred", None)
+    metadata.pop("feedbackEmailDeferReason", None)
+    metadata.pop("feedbackEmailPendingReferences", None)
     client.graphql(
         """
         mutation UpdateEmailSubmissionFeedbackMetadata($input: UpdateMessageInput!) {
@@ -883,10 +1257,7 @@ def send_feedback_only_for_message(
     ses_client: Any | None = None,
 ) -> dict[str, Any]:
     """Send acknowledgment for an existing message without re-running processing."""
-    from papyrus_newsroom.email_submissions import (
-        _load_registered_reference_processing_records,
-        _message_metadata,
-    )
+    from papyrus_newsroom.email_submissions import _message_metadata
 
     message = client.get_record("Message", message_id) or {}
     metadata = _message_metadata(message)
@@ -899,28 +1270,19 @@ def send_feedback_only_for_message(
         stored_feedback = processing_result.get("referenceFeedback")
         if isinstance(stored_feedback, list):
             reference_entries = [row for row in stored_feedback if isinstance(row, dict)]
-    if not reference_entries and isinstance(processing_result, dict):
-        import_run_id = str(processing_result.get("importRunId") or "").strip() or None
-        registered_reference_ids = {
-            str(row).strip()
-            for row in (processing_result.get("registeredReferenceIds") or [])
-            if str(row).strip()
-        }
-        if registered_reference_ids:
-            references, attachments, _relations = _load_registered_reference_processing_records(
-                client,
-                registered_reference_ids=registered_reference_ids,
-                import_run_id=import_run_id,
-            )
-            if references:
-                reference_entries = build_reference_feedback_entries(
-                    references=references,
-                    attachments=attachments,
-                )
+    if not reference_entries:
+        reference_entries = prepare_reference_entries_for_feedback(
+            client,
+            message=message,
+            metadata=metadata,
+            processing_result=processing_result if isinstance(processing_result, dict) else None,
+            reference_entries=None,
+        )
     return maybe_send_submission_feedback_email(
         client,
         message_id=message_id,
         reference_entries=reference_entries or None,
         processing_result=processing_result,
         ses_client=ses_client,
+        force=True,
     )

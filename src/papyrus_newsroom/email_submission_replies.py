@@ -706,12 +706,13 @@ def process_inbound_email_submission(
         result = {"mode": "agent_intake", "chat": chat, "citationCount": len(citations)}
         _mark_message_completed(client, message_id=message_id, finished_at=finished_at, result=result)
         release_inbound_mime_after_success(client, message_id=message_id)
-        feedback = _try_send_submission_feedback(
-            client,
-            message_id=message_id,
-            processing_result=result,
-            processing_error=None,
-        )
+        metadata["feedbackEmailDeferred"] = True
+        metadata["feedbackEmailDeferReason"] = "agent-intake-awaiting-filed-references"
+        feedback = {
+            "sent": False,
+            "skipped": True,
+            "reason": "deferred-agent-intake",
+        }
         client.graphql(
             """
             mutation UpdateEmailIntakeAgentMetadata($input: UpdateMessageInput!) {

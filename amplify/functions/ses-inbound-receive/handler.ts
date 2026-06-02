@@ -223,6 +223,19 @@ async function resumeExistingInboundSubmission(
   const responseStatus = String(existing.responseStatus ?? metadata.responseStatus ?? "").toUpperCase();
 
   if (responseStatus === "COMPLETED") {
+    const feedbackDeferred = metadata.feedbackEmailDeferred === true && !metadata.feedbackEmailSentAt;
+    if (feedbackDeferred && PROCESSOR_FUNCTION_NAME) {
+      await invokeEmailProcessor(existing.id, { sendFeedbackOnly: true });
+      return {
+        ok: true,
+        messageId: existing.id,
+        idempotent: true,
+        alreadyProcessed: true,
+        reattemptedDeferredFeedback: true,
+        recipientEmail,
+        senderEmail: inbound.senderEmail,
+      };
+    }
     return {
       ok: true,
       messageId: existing.id,

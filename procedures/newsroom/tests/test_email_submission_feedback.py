@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest import mock
 
@@ -153,7 +154,7 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
         self.assertIn("https://p.apyr.us/newsroom/references/lineage-example", body)
         self.assertNotIn("Subtitle:", body)
         self.assertNotIn("Summary:", body)
-        self.assertIn("Fetch plugin: default", body)
+        self.assertIn("Source plugin: default", body)
         self.assertIn("Open in Papyrus", html_body)
         self.assertNotIn(">Subtitle<", html_body)
         self.assertNotIn(">Summary<", html_body)
@@ -204,6 +205,58 @@ class EmailSubmissionFeedbackTests(unittest.TestCase):
         self.assertIn(b"Message-ID:", raw_message)
         email_body = b""
         self.assertIn(b"multipart/alternative", raw_message)
+        client.graphql.assert_called_once()
+
+    def test_reference_entry_is_receipt_ready_requires_metadata(self):
+        ready = {
+            "title": "Real Title",
+            "subtitle": "Real Subtitle",
+            "summary": "Real summary text.",
+            "sourceUri": "https://arxiv.org/abs/2603.06674",
+        }
+        self.assertTrue(email_submission_feedback.reference_entry_is_receipt_ready(ready))
+        placeholder = {
+            "title": "2603.06674",
+            "subtitle": "Sub",
+            "summary": "Sum",
+            "sourceUri": "https://arxiv.org/abs/2603.06674",
+        }
+        self.assertFalse(email_submission_feedback.reference_entry_is_receipt_ready(placeholder))
+
+    def test_maybe_send_defers_until_references_enriched(self):
+        client = mock.Mock()
+        client.get_record.return_value = {
+            "id": "message-1",
+            "summary": "Paper",
+            "responseStatus": "COMPLETED",
+            "metadata": json.dumps(
+                {
+                    "senderEmail": "editor@example.com",
+                    "authorized": True,
+                    "processingResult": {"registeredReferenceIds": ["ref-1"]},
+                }
+            ),
+        }
+        with mock.patch.dict("os.environ", {"PAPYRUS_INBOUND_FEEDBACK_EMAIL_ENABLED": "true"}, clear=False):
+            with mock.patch.object(
+                email_submission_feedback,
+                "prepare_reference_entries_for_feedback",
+                return_value=[
+                    {
+                        "title": "2603.06674",
+                        "subtitle": "Sub",
+                        "summary": "Sum",
+                        "sourceUri": "https://arxiv.org/abs/2603.06674",
+                    }
+                ],
+            ):
+                result = email_submission_feedback.maybe_send_submission_feedback_email(
+                    client,
+                    message_id="message-1",
+                    processing_result={"registeredReferenceIds": ["ref-1"]},
+                )
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "deferred-awaiting-enrichment")
         client.graphql.assert_called_once()
 
 
