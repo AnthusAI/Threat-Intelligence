@@ -121,6 +121,7 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
     research_mode = normalize_research_mode(options.get("research-mode") or options.get("researchMode"))
     now = _utc_now()
     assignment_type_key = normalize_string(options.get("type")) or "research.edition-candidate"
+    tavily_deep = assignment_type_key == "research.tavily-deep"
     status = normalize_string(options.get("status")) or "open"
     priority = normalize_non_negative_integer(options.get("priority"), "--priority") or 50
     queue_key = normalize_string(options.get("queue")) or f"research:{section_key or 'unsectioned'}:exploratory"
@@ -163,6 +164,14 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
                 "primaryFocusCategoryKey": primary_focus,
                 "contextProfile": "researcher",
                 "createdBy": "assignments create-research",
+                **(
+                    {
+                        "researchBackend": "tavily_deep",
+                        "tavilyModel": normalize_string(options.get("tavily-model")) or "auto",
+                    }
+                    if tavily_deep
+                    else {}
+                ),
             }
         ),
         "corpusId": normalize_string(options.get("corpus-id")) or knowledge_corpus_id({"key": corpus_key}),
@@ -206,10 +215,16 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
         "researchMode": research_mode,
         "changes": _count_delta(changes, "action"),
         "next": (
-            f"poetry run papyrus assignments run-research --assignment {assignment_id} "
-            f"--corpus-key {corpus_key} --research-mode {research_mode}"
+            (
+                f"poetry run papyrus assignments run-tavily-deep-research --assignment {assignment_id} "
+                f"--corpus-key {corpus_key} --wait"
+                if tavily_deep
+                else f"poetry run papyrus assignments run-research --assignment {assignment_id} "
+                f"--corpus-key {corpus_key} --research-mode {research_mode}"
+            )
             if apply
             else f"poetry run papyrus assignments create-research --title {json.dumps(title)} "
+            f"--type {assignment_type_key} "
             f"--section {section_key or '<section-key>'} --corpus-key {corpus_key} "
             f"--research-mode {research_mode}"
         ),
