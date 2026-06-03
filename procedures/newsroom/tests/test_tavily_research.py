@@ -4,6 +4,8 @@ import unittest
 from unittest import mock
 
 from papyrus_newsroom import tavily_research
+from papyrus_content.catalog import message_record
+from papyrus_content.model_attachments import expand_private_payload_records
 from papyrus_content.tavily_deep_research import (
     TAVILY_DEEP_ASSIGNMENT_TYPE,
     build_research_packet_from_tavily_completed,
@@ -88,6 +90,49 @@ class TavilyDeepResearchWorkflowTests(unittest.TestCase):
         self.assertEqual(len(packet["source_snapshots"]), 1)
         self.assertEqual(len(packet["proposed_references"]), 1)
         self.assertIn("Robotics world models", packet["summary"])
+        self.assertIn("Robotics world models", packet["_report_markdown"])
+
+    def test_build_packet_uses_report_fallback_field(self):
+        packet = build_research_packet_from_tavily_completed(
+            assignment={"id": "assignment-1"},
+            assignment_meta={},
+            completed={
+                "request_id": "req-2",
+                "report": "# Fallback report\n\nDetails.",
+                "sources": [],
+            },
+            research_mode="source_discovery",
+        )
+        self.assertIn("Fallback report", packet["_report_markdown"])
+
+    def test_message_record_expands_message_body_from_content(self):
+        now = "2026-05-31T12:00:00Z"
+        record = message_record(
+            {
+                "id": "message-insight-test",
+                "messageKind": "insight",
+                "messageDomain": "assignment_work",
+                "summary": "Insight summary",
+                "body": "# Tavily report\n\nFull body text.",
+                "threadId": "message-insight-test",
+                "sequenceNumber": 1,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+        self.assertEqual(record["expected"]["threadId"], "message-insight-test")
+        self.assertEqual(record["expected"]["sequenceNumber"], 1)
+        expanded = expand_private_payload_records([record])
+        attachments = [row for row in expanded if row["modelName"] == "ModelAttachment"]
+        body_attachments = [
+            row for row in attachments if row["expected"].get("role") == "message_body"
+        ]
+        self.assertEqual(len(body_attachments), 1)
+        self.assertEqual(
+            body_attachments[0]["attachmentBody"].decode("utf-8"),
+            "# Tavily report\n\nFull body text.",
+        )
+        self.assertEqual(body_attachments[0]["expected"]["filename"], "message.md")
 
     def test_research_input_prefers_instructions(self):
         assignment = {

@@ -5,11 +5,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .graphql_authoring import create_authoring_client
+from .assignments_workflow import load_message_metadata_payload, research_packet_body
+from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
 from .ids import hash_short
 from .message_contract import build_canonical_message_expected
-from .model_attachments import parse_jsonish, semantic_version_key
-from .options import parse_options
+from .model_attachments import (
+    _message_body_attachment_for_expected,
+    download_attachment_buffer,
+    parse_jsonish,
+    semantic_version_key,
+)
+from .options import (
+    normalize_non_negative_integer,
+    normalize_string,
+    parse_boolean_option,
+    parse_options,
+    resolve_mutation_apply,
+)
 from .records import apply_record_changes, build_record_changes
 from .relation_types import semantic_relation_type_fields_for_predicate
 from .relations_commands import print_category_import_summary, write_json_file
@@ -161,6 +173,198 @@ def legacy_knowledge_comment_records(comment: dict[str, Any] | None) -> list[dic
 
 def semantic_state_key(kind: str, lineage_id: str) -> str:
     return f"{kind}#{lineage_id}#current"
+
+
+def messages_backfill_insight_message_body(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "messages backfill-insight-message-body")
+    message_id = normalize_string(options.get("message-id"))
+    assignment_id = normalize_string(options.get("assignment-id"))
+    tavily_only = parse_boolean_option(options.get("tavily-only"), True, "--tavily-only")
+    max_scan_option = normalize_non_negative_integer(options.get("max-scan"), "--max-scan")
+    max_scan = max_scan_option if max_scan_option is not None else (None if apply else 500)
+    client, _ = create_authoring_client()
+
+    candidates = _insight_messages_for_backfill(
+        client,
+        message_id=message_id,
+        assignment_id=assignment_id,
+        tavily_only=tavily_only,
+        max_scan=max_scan,
+    )
+    planned: list[dict[str, Any]] = []
+    for message in candidates:
+        body_text = _resolve_insight_body_text(client, message)
+        if not body_text.strip():
+            planned.append({"messageId": message["id"], "action": "skip", "reason": "no-body-source"})
+            continue
+        if _message_has_active_message_body(client, str(message["id"])):
+            planned.append({"messageId": message["id"], "action": "noop", "reason": "message_body-exists"})
+            continue
+        planned.append(
+            {
+                "messageId": message["id"],
+                "action": "create-message_body",
+                "byteSize": len(body_text.encode("utf-8")),
+                "bodyPreview": body_text[:120],
+            }
+        )
+
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "messages backfill-insight-message-body",
+                    "apply": apply,
+                    "scanned": len(candidates),
+                    "planned": planned,
+                },
+                indent=2,
+            )
+        )
+    else:
+        for row in planned:
+            print(
+                "messages\tbackfill-insight-message-body\t"
+                f"{row['messageId']}\t{row['action']}\t{row.get('reason') or row.get('byteSize')}"
+            )
+
+    if not apply:
+        return
+
+    created = 0
+    for message in candidates:
+        message_id_value = str(message["id"])
+        if any(row["messageId"] == message_id_value and row["action"] != "create-message_body" for row in planned):
+            continue
+        body_text = _resolve_insight_body_text(client, message)
+        now = message.get("updatedAt") or message.get("createdAt") or _utc_now()
+        attachment_entry = _message_body_attachment_for_expected(
+            {"id": message_id_value, "content": body_text, "importRunId": message.get("importRunId")},
+            now=now,
+        )
+        if not attachment_entry:
+            continue
+        changes = build_record_changes(client, [attachment_entry])
+        apply_record_changes(client, changes)
+        created += 1
+        thread_updates = _insight_thread_id_updates(message)
+        if thread_updates:
+            client.update_record("Message", thread_updates)
+
+    if not options.get("json"):
+        print(f"messages\tbackfill-insight-message-body\tcreated\t{created}")
+
+
+def _insight_messages_for_backfill(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    message_id: str | None,
+    assignment_id: str | None,
+    tavily_only: bool,
+    max_scan: int | None,
+) -> list[dict[str, Any]]:
+    if message_id:
+        message = client.get_record("Message", message_id)
+        if not message or str(message.get("messageKind") or "") != "insight":
+            raise ValueError(f"Insight message not found: {message_id}")
+        return [message]
+
+    scanned = 0
+    truncated = False
+    candidates: list[dict[str, Any]] = []
+    next_token: str | None = None
+    while True:
+        rows, next_token = client.list_messages_safe(limit=100, next_token=next_token)
+        if max_scan is not None and scanned + len(rows) > max_scan:
+            rows = rows[: max(0, max_scan - scanned)]
+            truncated = True
+        scanned += len(rows)
+        for row in rows:
+            if str(row.get("messageKind") or "") != "insight":
+                continue
+            metadata = load_message_metadata_payload(client, row)
+            if assignment_id and normalize_string(metadata.get("assignmentId")) != assignment_id:
+                continue
+            if tavily_only and normalize_string(metadata.get("kind")) != "research.tavily.insight":
+                continue
+            candidates.append({**row, "_metadata": metadata})
+        if truncated or not next_token:
+            break
+    return candidates
+
+
+def _message_has_active_message_body(client: PapyrusGraphQLAuthoringClient, message_id: str) -> bool:
+    attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", message_id, limit=20)
+    return any(
+        normalize_string(entry.get("role")) == "message_body"
+        and normalize_string(entry.get("status")) not in {"deleted", "aborted"}
+        for entry in attachments
+    )
+
+
+def _read_message_body_attachment_text(client: PapyrusGraphQLAuthoringClient, message_id: str) -> str:
+    attachments = client.list_by_index("modelAttachmentsByOwnerRoleAndSortKey", message_id, limit=20)
+    body_attachments = [
+        entry
+        for entry in attachments
+        if normalize_string(entry.get("role")) == "message_body"
+        and normalize_string(entry.get("status")) not in {"deleted", "aborted"}
+    ]
+    body_attachments.sort(key=lambda entry: str(entry.get("updatedAt") or ""), reverse=True)
+    for attachment in body_attachments:
+        try:
+            payload = download_attachment_buffer(client, attachment)
+        except Exception:
+            continue
+        if payload:
+            return payload.decode("utf-8", errors="replace").strip()
+    return ""
+
+
+def _resolve_insight_body_text(client: PapyrusGraphQLAuthoringClient, message: dict[str, Any]) -> str:
+    direct = normalize_string(message.get("content")) or ""
+    if direct:
+        return direct
+    message_id = str(message["id"])
+    attachment_text = _read_message_body_attachment_text(client, message_id)
+    if attachment_text:
+        return attachment_text
+    metadata = message.get("_metadata")
+    if not isinstance(metadata, dict):
+        metadata = load_message_metadata_payload(client, message)
+    packet_message_id = normalize_string(metadata.get("researchPacketMessageId"))
+    if packet_message_id:
+        packet_message = client.get_record("Message", packet_message_id)
+        if packet_message:
+            packet_text = normalize_string(packet_message.get("content")) or ""
+            if packet_text:
+                return packet_text
+            packet_attachment = _read_message_body_attachment_text(client, packet_message_id)
+            if packet_attachment:
+                return packet_attachment
+            packet_metadata = load_message_metadata_payload(client, packet_message)
+            if isinstance(packet_metadata, dict) and packet_metadata:
+                synthesized = research_packet_body(packet_metadata)
+                if synthesized.strip():
+                    return synthesized
+    return ""
+
+
+def _insight_thread_id_updates(message: dict[str, Any]) -> dict[str, Any] | None:
+    message_id = str(message["id"])
+    thread_id = normalize_string(message.get("threadId"))
+    sequence_number = message.get("sequenceNumber")
+    if thread_id == message_id and sequence_number:
+        return None
+    now = message.get("updatedAt") or message.get("createdAt") or _utc_now()
+    return {
+        "id": message_id,
+        "threadId": message_id,
+        "sequenceNumber": int(sequence_number or 1),
+        "updatedAt": now,
+    }
 
 
 def load_json_file(path: str | Path) -> dict[str, Any]:
