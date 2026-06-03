@@ -25,8 +25,9 @@ from .analysis_profiles import (
     parse_analysis_overrides,
     print_analysis_reindex_plan,
 )
+from .corpus_storage_paths import corpus_storage_segment, legacy_mixed_case_corpus_segment
 from .corpora import maybe_sync_corpus_from_cloud_before_analysis
-from .env import PAPYRUS_ROOT
+from .env import PAPYRUS_ROOT, load_dotenv
 from .graphql_authoring import create_authoring_client
 from .ids import hash_short, knowledge_corpus_id, safe_id
 from .model_attachments import attachment_record, build_model_payload_attachment, upload_attachment_body
@@ -46,6 +47,7 @@ def analysis_reindex_plan(flags: list[str]) -> None:
 
 
 def analysis_entity_graph_preflight(flags: list[str]) -> None:
+    load_dotenv()
     options = parse_options(flags)
     profile_key = normalize_string(options.get("profile")) or "reference-entity-graph"
     plan_options = dict(options)
@@ -1176,24 +1178,41 @@ def _preflight_biblicus_catalog_compatibility(biblicus_workdir: Path, corpus_pat
         )
 
 
+def _resolve_biblicus_corpus_dir(biblicus_workdir: Path, corpus_path: str | Path) -> Path:
+    relative = Path(str(corpus_path))
+    if relative.is_absolute():
+        return relative
+    parts = relative.as_posix().split("/")
+    if len(parts) >= 2 and parts[0] == "corpora":
+        segment = parts[1]
+        legacy = legacy_mixed_case_corpus_segment(corpus_storage_segment(segment))
+        candidate = biblicus_workdir / "corpora" / legacy
+        if candidate.exists():
+            return candidate.resolve()
+    return (biblicus_workdir / relative).resolve()
+
+
 def _export_graph_snapshot_payload(
     *,
     biblicus_workdir: Path,
     corpus_path: Path,
     snapshot_ref: str,
 ) -> dict[str, Any]:
+    import sys
+
+    resolved_corpus = _resolve_biblicus_corpus_dir(biblicus_workdir, corpus_path)
     with tempfile.NamedTemporaryFile(prefix="papyrus-graph-export-", suffix=".json", delete=False) as temp_file:
         output_path = Path(temp_file.name)
     try:
         result = subprocess.run(
             [
-                "uv",
-                "run",
+                sys.executable,
+                "-m",
                 "biblicus",
                 "graph",
                 "export",
                 "--corpus",
-                str(corpus_path),
+                str(resolved_corpus),
                 "--snapshot",
                 snapshot_ref,
                 "--output",
