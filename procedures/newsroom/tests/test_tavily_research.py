@@ -111,6 +111,13 @@ class TavilyDeepResearchWorkflowTests(unittest.TestCase):
         )
         self.assertIn("Fallback report", packet["_report_markdown"])
 
+    def test_forum_title_ignores_h2_sources_heading(self):
+        title = derive_insight_forum_title(
+            report_markdown="## Sources\n\nBody text.",
+            assignment_title="Tavily body fix smoke test",
+        )
+        self.assertEqual(title, "Tavily body fix smoke test")
+
     def test_forum_title_prefers_assignment_when_report_has_no_heading(self):
         long_report = (
             "Retrieval-augmented generation (RAG) couples an external information retriever "

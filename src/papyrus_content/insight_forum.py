@@ -8,6 +8,18 @@ from typing import Any
 from .options import normalize_string
 
 INSIGHT_FORUM_TITLE_MAX_LEN = 120
+_GENERIC_HEADINGS = frozenset(
+    {
+        "sources",
+        "references",
+        "bibliography",
+        "conclusion",
+        "summary",
+        "abstract",
+        "introduction",
+        "appendix",
+    }
+)
 
 
 def derive_insight_forum_title(
@@ -21,13 +33,13 @@ def derive_insight_forum_title(
     if structured and len(structured) <= INSIGHT_FORUM_TITLE_MAX_LEN:
         return structured
 
-    heading = _first_markdown_heading(report_markdown)
-    if heading:
-        return _truncate_insight_forum_title(heading)
-
     assignment = normalize_string(assignment_title) or ""
     if assignment:
         return _truncate_insight_forum_title(assignment)
+
+    heading = _first_markdown_h1(report_markdown)
+    if heading and heading.lower() not in _GENERIC_HEADINGS:
+        return _truncate_insight_forum_title(heading)
 
     question = normalize_string(research_question) or ""
     if question:
@@ -74,12 +86,10 @@ def insight_summary_needs_title_repair(summary: str, body_text: str) -> bool:
     return False
 
 
-def _first_markdown_heading(markdown: str) -> str:
+def _first_markdown_h1(markdown: str) -> str:
     for line in str(markdown or "").splitlines():
         stripped = line.strip()
-        if not stripped.startswith("#"):
-            continue
-        match = re.match(r"^#{1,6}\s+(.+)$", stripped)
+        match = re.match(r"^# ([^#].+)$", stripped)
         if match:
             return match.group(1).strip()
     return ""

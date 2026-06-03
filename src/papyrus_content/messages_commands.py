@@ -202,10 +202,7 @@ def messages_repair_insight_titles(flags: list[str]) -> None:
         metadata = message.get("_metadata")
         if not isinstance(metadata, dict):
             metadata = load_message_metadata_payload(client, message)
-        current_summary = str(message.get("summary") or "")
-        if not insight_summary_needs_title_repair(current_summary, body_text):
-            planned.append({"messageId": message["id"], "action": "noop", "reason": "title-ok"})
-            continue
+        current_summary = str(message.get("summary") or "").strip()
         assignment_title = ""
         assignment_record_id = normalize_string(metadata.get("assignmentId"))
         if assignment_record_id:
@@ -218,6 +215,12 @@ def messages_repair_insight_titles(flags: list[str]) -> None:
             research_question="",
             structured_summary=normalize_string(metadata.get("insightTitle")) or "",
         )
+        if (
+            next_title == current_summary
+            and not insight_summary_needs_title_repair(current_summary, body_text)
+        ):
+            planned.append({"messageId": message["id"], "action": "noop", "reason": "title-ok"})
+            continue
         planned.append(
             {
                 "messageId": message["id"],
