@@ -182,7 +182,7 @@ def build_graph_export_publish_records(
                         "edgeCount": counts["edgeCount"],
                         "semanticNodeCount": counts["semanticNodeCount"],
                         "semanticRelationCount": None,
-                        "skippedItemNodes": counts["skippedItemNodes"],
+                        **{key: counts[key] for key in ("skippedReferenceAnchors", "skippedItemNodes")},
                         "unresolvedReferences": counts["unresolvedReferences"],
                         "unresolvedReferenceItemIds": counts["unresolvedReferenceItemIds"],
                     }
@@ -200,7 +200,7 @@ def build_graph_export_publish_records(
         "records": records,
         "semanticNodeCount": counts["semanticNodeCount"],
         "semanticRelationCount": None,
-        "skippedItemNodes": counts["skippedItemNodes"],
+        **{key: counts[key] for key in ("skippedReferenceAnchors", "skippedItemNodes")},
         "unresolvedReferences": counts["unresolvedReferences"],
         "unresolvedReferenceItemIds": counts["unresolvedReferenceItemIds"],
         "mentionEdgeCount": counts["mentionEdgeCount"],
@@ -221,14 +221,14 @@ def build_graph_export_import_records(
     edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
     records: list[dict[str, Any]] = []
     materialized_node_by_graph_node_id: dict[str, dict[str, Any]] = {}
-    skipped_item_nodes = 0
+    skipped_reference_anchors = 0
 
     for node in nodes:
         node_id = _clean_string(node.get("node_id"))
         if not node_id:
             continue
-        if _is_graph_item_node(node):
-            skipped_item_nodes += 1
+        if _is_graph_reference_anchor_node(node):
+            skipped_reference_anchors += 1
             continue
         if node_id in materialized_node_by_graph_node_id:
             continue
@@ -322,7 +322,7 @@ def build_graph_export_import_records(
                         "edgeCount": len(edges),
                         "semanticNodeCount": len(materialized_node_by_graph_node_id),
                         "semanticRelationCount": len(relation_records["records"]),
-                        "skippedItemNodes": skipped_item_nodes,
+                        **_graph_skipped_anchor_stats(skipped_reference_anchors),
                         "unresolvedReferences": relation_records["unresolvedReferences"],
                         "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
                     }
@@ -341,7 +341,7 @@ def build_graph_export_import_records(
         "records": records,
         "semanticNodeCount": len(materialized_node_by_graph_node_id),
         "semanticRelationCount": len(relation_records["records"]),
-        "skippedItemNodes": skipped_item_nodes,
+        **_graph_skipped_anchor_stats(skipped_reference_anchors),
         "unresolvedReferences": relation_records["unresolvedReferences"],
         "unresolvedReferenceItemIds": relation_records["unresolvedReferenceItemIds"],
         "mentionEdgeCount": relation_records["mentionEdgeCount"],
@@ -505,14 +505,14 @@ def _graph_export_publish_counts(
     nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
     edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
     node_ids: set[str] = set()
-    skipped_item_nodes = 0
+    skipped_reference_anchors = 0
     graph_node_by_id = {_clean_string(node.get("node_id")): node for node in nodes if _clean_string(node.get("node_id"))}
     for node in nodes:
         node_id = _clean_string(node.get("node_id"))
         if not node_id:
             continue
-        if _is_graph_item_node(node):
-            skipped_item_nodes += 1
+        if _is_graph_reference_anchor_node(node):
+            skipped_reference_anchors += 1
             continue
         node_ids.add(node_id)
     unresolved_references = 0
@@ -527,7 +527,7 @@ def _graph_export_publish_counts(
             continue
         src_node = graph_node_by_id.get(src) or {}
         dst_node = graph_node_by_id.get(dst) or {}
-        if not (_is_graph_item_node(src_node) or _is_graph_item_node(dst_node)):
+        if not (_is_graph_reference_anchor_node(src_node) or _is_graph_reference_anchor_node(dst_node)):
             continue
         mention_edge_count += 1
         source_item_id = (
@@ -549,7 +549,7 @@ def _graph_export_publish_counts(
         "nodeCount": len(nodes),
         "edgeCount": len(edges),
         "semanticNodeCount": len(node_ids),
-        "skippedItemNodes": skipped_item_nodes,
+        **_graph_skipped_anchor_stats(skipped_reference_anchors),
         "mentionEdgeCount": mention_edge_count,
         "unresolvedReferences": unresolved_references,
         "unresolvedReferenceItemIds": unresolved_reference_item_ids,
@@ -605,7 +605,7 @@ def _build_graph_export_relation_records(
             extraction_snapshot=extraction_snapshot,
             source_item_id=source_item_id,
         )
-        if _is_graph_item_node(src_node) or _is_graph_item_node(dst_node):
+        if _is_graph_reference_anchor_node(src_node) or _is_graph_reference_anchor_node(dst_node):
             mention_edge_count += 1
             entity_node = src_semantic or dst_semantic
             if not entity_node:
@@ -794,7 +794,7 @@ def _graph_relation_metadata(
     }
 
 
-def _is_graph_item_node(node: dict[str, Any]) -> bool:
+def _is_graph_reference_anchor_node(node: dict[str, Any]) -> bool:
     node_type = _clean_string(node.get("node_type"))
     node_id = _clean_string(node.get("node_id"))
     return (
@@ -802,6 +802,17 @@ def _is_graph_item_node(node: dict[str, Any]) -> bool:
         or (node_id or "").startswith("item:")
         or (node_id or "").startswith("reference:")
     )
+
+
+def _is_graph_item_node(node: dict[str, Any]) -> bool:
+    return _is_graph_reference_anchor_node(node)
+
+
+def _graph_skipped_anchor_stats(skipped_reference_anchors: int) -> dict[str, int]:
+    return {
+        "skippedReferenceAnchors": skipped_reference_anchors,
+        "skippedItemNodes": skipped_reference_anchors,
+    }
 
 
 def _graph_item_id_from_node(node: dict[str, Any]) -> str | None:
