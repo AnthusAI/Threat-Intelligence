@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from .assignments_workflow import load_message_metadata_payload, research_packet_body
+from .insight_forum import (
+    derive_insight_forum_title,
+    insight_summary_needs_title_repair,
+)
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
 from .ids import hash_short
 from .message_contract import build_canonical_message_expected
@@ -173,6 +177,115 @@ def legacy_knowledge_comment_records(comment: dict[str, Any] | None) -> list[dic
 
 def semantic_state_key(kind: str, lineage_id: str) -> str:
     return f"{kind}#{lineage_id}#current"
+
+
+def messages_repair_insight_titles(flags: list[str]) -> None:
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "messages repair-insight-titles")
+    message_id = normalize_string(options.get("message-id"))
+    assignment_id = normalize_string(options.get("assignment-id"))
+    tavily_only = parse_boolean_option(options.get("tavily-only"), True, "--tavily-only")
+    max_scan_option = normalize_non_negative_integer(options.get("max-scan"), "--max-scan")
+    max_scan = max_scan_option if max_scan_option is not None else (None if apply else 500)
+    client, _ = create_authoring_client()
+
+    candidates = _insight_messages_for_backfill(
+        client,
+        message_id=message_id,
+        assignment_id=assignment_id,
+        tavily_only=tavily_only,
+        max_scan=max_scan,
+    )
+    planned: list[dict[str, Any]] = []
+    for message in candidates:
+        body_text = _resolve_insight_body_text(client, message)
+        metadata = message.get("_metadata")
+        if not isinstance(metadata, dict):
+            metadata = load_message_metadata_payload(client, message)
+        current_summary = str(message.get("summary") or "").strip()
+        assignment_title = ""
+        assignment_record_id = normalize_string(metadata.get("assignmentId"))
+        if assignment_record_id:
+            assignment = client.get_record("Assignment", assignment_record_id)
+            if assignment:
+                assignment_title = str(assignment.get("title") or "")
+        next_title = derive_insight_forum_title(
+            report_markdown=body_text,
+            assignment_title=assignment_title,
+            research_question="",
+            structured_summary=normalize_string(metadata.get("insightTitle")) or "",
+        )
+        if (
+            next_title == current_summary
+            and not insight_summary_needs_title_repair(current_summary, body_text)
+        ):
+            planned.append({"messageId": message["id"], "action": "noop", "reason": "title-ok"})
+            continue
+        planned.append(
+            {
+                "messageId": message["id"],
+                "action": "update-title",
+                "previousTitle": current_summary[:80],
+                "nextTitle": next_title,
+            }
+        )
+
+    if options.get("json"):
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "command": "messages repair-insight-titles",
+                    "apply": apply,
+                    "scanned": len(candidates),
+                    "planned": planned,
+                },
+                indent=2,
+            )
+        )
+    else:
+        for row in planned:
+            print(
+                "messages\trepair-insight-titles\t"
+                f"{row['messageId']}\t{row['action']}\t{row.get('reason') or row.get('nextTitle')}"
+            )
+
+    if not apply:
+        return
+
+    updated = 0
+    for message in candidates:
+        message_id_value = str(message["id"])
+        row = next((entry for entry in planned if entry["messageId"] == message_id_value), None)
+        if not row or row["action"] != "update-title":
+            continue
+        body_text = _resolve_insight_body_text(client, message)
+        metadata = load_message_metadata_payload(client, message)
+        assignment_title = ""
+        assignment_record_id = normalize_string(metadata.get("assignmentId"))
+        if assignment_record_id:
+            assignment = client.get_record("Assignment", assignment_record_id)
+            if assignment:
+                assignment_title = str(assignment.get("title") or "")
+        next_title = derive_insight_forum_title(
+            report_markdown=body_text,
+            assignment_title=assignment_title,
+            research_question="",
+            structured_summary=normalize_string(metadata.get("insightTitle")) or "",
+        )
+        now = message.get("updatedAt") or message.get("createdAt") or _utc_now()
+        client.update_record(
+            "Message",
+            {
+                "id": message_id_value,
+                "summary": next_title[:500],
+                "updatedAt": now,
+            },
+        )
+        updated += 1
+
+    if not options.get("json"):
+        print(f"messages\trepair-insight-titles\tupdated\t{updated}")
 
 
 def messages_backfill_insight_message_body(flags: list[str]) -> None:
