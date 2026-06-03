@@ -93,7 +93,11 @@ from .categories_commands import (
 )
 from .content_commands import content_inspect, content_list, content_schema_check
 from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
-from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .messages_commands import (
+    messages_backfill_insight_message_body,
+    messages_export_legacy_comments,
+    messages_import_legacy_comments,
+)
 from .model_defaults import (
     DEFAULT_REFERENCE_FILTER_MODEL,
     DEFAULT_REFERENCE_SUMMARY_MODEL,
@@ -299,6 +303,7 @@ PORTED_COMMANDS = frozenset(
         "ontology:doctor",
         "messages:export-legacy-comments",
         "messages:import-legacy-comments",
+        "messages:backfill-insight-message-body",
         "categories:import-steering",
         "categories:import-config",
         "categories:sandbox-steering-config",
@@ -601,6 +606,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         messages_export_legacy_comments(flags)
     elif route == "messages:import-legacy-comments":
         messages_import_legacy_comments(flags)
+    elif route == "messages:backfill-insight-message-body":
+        messages_backfill_insight_message_body(flags)
     elif route == "categories:import-steering":
         categories_import_steering(flags)
     elif route == "categories:import-config":

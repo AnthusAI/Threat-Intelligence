@@ -300,6 +300,23 @@ def create_tavily_error_message_records(
     return records
 
 
+def _tavily_completed_report_markdown(completed: dict[str, Any]) -> tuple[str, str]:
+    content = completed.get("content")
+    if content is None:
+        for key in ("report", "output", "result"):
+            candidate = completed.get(key)
+            if candidate is not None:
+                content = candidate
+                break
+    if isinstance(content, dict):
+        report_markdown = json.dumps(content, indent=2, sort_keys=True)
+        summary = normalize_string(content.get("summary")) or report_markdown[:400]
+        return report_markdown, summary
+    report_markdown = str(content or "").strip()
+    summary = report_markdown.split("\n\n", 1)[0][:400] if report_markdown else "Tavily deep research completed."
+    return report_markdown, summary
+
+
 def build_research_packet_from_tavily_completed(
     *,
     assignment: dict[str, Any],
@@ -309,13 +326,7 @@ def build_research_packet_from_tavily_completed(
 ) -> dict[str, Any]:
     sources = completed.get("sources") if isinstance(completed.get("sources"), list) else []
     input_text = str(completed.get("input") or "")
-    content = completed.get("content")
-    if isinstance(content, dict):
-        report_markdown = json.dumps(content, indent=2, sort_keys=True)
-        summary = normalize_string(content.get("summary")) or report_markdown[:400]
-    else:
-        report_markdown = str(content or "").strip()
-        summary = report_markdown.split("\n\n", 1)[0][:400] if report_markdown else "Tavily deep research completed."
+    report_markdown, summary = _tavily_completed_report_markdown(completed)
 
     source_snapshots: list[dict[str, Any]] = []
     proposed_references: list[dict[str, Any]] = []
