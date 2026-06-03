@@ -6,6 +6,11 @@ from unittest import mock
 from papyrus_newsroom import tavily_research
 from papyrus_content.catalog import message_record
 from papyrus_content.model_attachments import expand_private_payload_records
+from papyrus_content.insight_forum import (
+    INSIGHT_FORUM_TITLE_MAX_LEN,
+    derive_insight_forum_title,
+    insight_summary_needs_title_repair,
+)
 from papyrus_content.tavily_deep_research import (
     TAVILY_DEEP_ASSIGNMENT_TYPE,
     build_research_packet_from_tavily_completed,
@@ -89,7 +94,8 @@ class TavilyDeepResearchWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(len(packet["source_snapshots"]), 1)
         self.assertEqual(len(packet["proposed_references"]), 1)
-        self.assertIn("Robotics world models", packet["summary"])
+        self.assertEqual(packet["_forum_title"], "Robotics world models")
+        self.assertIn("Summary paragraph", packet["summary"])
         self.assertIn("Robotics world models", packet["_report_markdown"])
 
     def test_build_packet_uses_report_fallback_field(self):
@@ -104,6 +110,20 @@ class TavilyDeepResearchWorkflowTests(unittest.TestCase):
             research_mode="source_discovery",
         )
         self.assertIn("Fallback report", packet["_report_markdown"])
+
+    def test_forum_title_prefers_assignment_when_report_has_no_heading(self):
+        long_report = (
+            "Retrieval-augmented generation (RAG) couples an external information retriever "
+            "with a language-model generator by processing a user query."
+        )
+        title = derive_insight_forum_title(
+            report_markdown=long_report,
+            assignment_title="Tavily body fix smoke test",
+            research_question="What is retrieval-augmented generation?",
+        )
+        self.assertEqual(title, "Tavily body fix smoke test")
+        self.assertLessEqual(len(title), INSIGHT_FORUM_TITLE_MAX_LEN)
+        self.assertTrue(insight_summary_needs_title_repair(long_report[:120], long_report))
 
     def test_message_record_expands_message_body_from_content(self):
         now = "2026-05-31T12:00:00Z"

@@ -40,6 +40,7 @@ from .assignments_workflow import (
     timestamp_for_path,
     update_newsroom_summary_after_research_packet_creates,
 )
+from .insight_forum import derive_insight_forum_title, derive_insight_packet_lede
 
 TAVILY_DEEP_ASSIGNMENT_TYPE = "research.tavily-deep"
 TAVILY_TASK_MESSAGE_KIND = "tavily_research_task"
@@ -300,7 +301,7 @@ def create_tavily_error_message_records(
     return records
 
 
-def _tavily_completed_report_markdown(completed: dict[str, Any]) -> tuple[str, str]:
+def _tavily_completed_report_content(completed: dict[str, Any]) -> tuple[str, str]:
     content = completed.get("content")
     if content is None:
         for key in ("report", "output", "result"):
@@ -310,11 +311,16 @@ def _tavily_completed_report_markdown(completed: dict[str, Any]) -> tuple[str, s
                 break
     if isinstance(content, dict):
         report_markdown = json.dumps(content, indent=2, sort_keys=True)
-        summary = normalize_string(content.get("summary")) or report_markdown[:400]
-        return report_markdown, summary
+        structured_summary = normalize_string(content.get("summary")) or ""
+        return report_markdown, structured_summary
     report_markdown = str(content or "").strip()
-    summary = report_markdown.split("\n\n", 1)[0][:400] if report_markdown else "Tavily deep research completed."
-    return report_markdown, summary
+    return report_markdown, ""
+
+
+def _tavily_completed_report_markdown(completed: dict[str, Any]) -> tuple[str, str]:
+    report_markdown, structured_summary = _tavily_completed_report_content(completed)
+    lede = derive_insight_packet_lede(report_markdown=report_markdown, structured_summary=structured_summary)
+    return report_markdown, lede
 
 
 def build_research_packet_from_tavily_completed(
@@ -326,7 +332,17 @@ def build_research_packet_from_tavily_completed(
 ) -> dict[str, Any]:
     sources = completed.get("sources") if isinstance(completed.get("sources"), list) else []
     input_text = str(completed.get("input") or "")
-    report_markdown, summary = _tavily_completed_report_markdown(completed)
+    report_markdown, structured_summary = _tavily_completed_report_content(completed)
+    packet_lede = derive_insight_packet_lede(
+        report_markdown=report_markdown,
+        structured_summary=structured_summary,
+    )
+    forum_title = derive_insight_forum_title(
+        report_markdown=report_markdown,
+        assignment_title=str(assignment.get("title") or ""),
+        research_question=input_text,
+        structured_summary=structured_summary,
+    )
 
     source_snapshots: list[dict[str, Any]] = []
     proposed_references: list[dict[str, Any]] = []
@@ -351,8 +367,8 @@ def build_research_packet_from_tavily_completed(
 
     return {
         "research_mode": research_mode,
-        "summary": summary,
-        "recommended_angle": normalize_string(assignment_meta.get("recommendedAngle")) or summary[:200],
+        "summary": packet_lede,
+        "recommended_angle": normalize_string(assignment_meta.get("recommendedAngle")) or packet_lede[:200],
         "source_snapshots": source_snapshots,
         "proposed_references": proposed_references,
         "evidence_item_ids": [],
@@ -370,10 +386,11 @@ def build_research_packet_from_tavily_completed(
             },
         },
         "synthesis": {
-            "summary": summary,
+            "summary": packet_lede,
             "recommendedAngle": normalize_string(assignment_meta.get("recommendedAngle")) or "",
         },
         "_report_markdown": report_markdown,
+        "_forum_title": forum_title,
         "_tavily_request_id": completed.get("request_id") or completed.get("requestId"),
     }
 
@@ -383,6 +400,7 @@ def create_assignment_insight_records(
     assignment: dict[str, Any],
     summary: str,
     body: str,
+    forum_title: str | None = None,
     task_message_id: str,
     research_packet_message_id: str,
     tavily_request_id: str,
@@ -390,21 +408,24 @@ def create_assignment_insight_records(
     actor_label: str,
     now: str,
 ) -> list[dict[str, Any]]:
-    message_id = f"message-assignment-insight-{hash_short([assignment['id'], tavily_request_id, summary])}"
+    title = normalize_string(forum_title) or normalize_string(summary) or "Tavily deep research insight"
+    message_id = f"message-assignment-insight-{hash_short([assignment['id'], tavily_request_id, title])}"
     message = message_record(
         {
             "id": message_id,
             "messageKind": "insight",
             "messageDomain": "assignment_work",
             "status": "active",
-            "summary": summary[:500] if summary else "Tavily deep research insight",
+            "summary": title[:500],
             "body": body,
             "threadId": message_id,
             "sequenceNumber": 1,
             "metadata": {
                 "kind": "research.tavily.insight",
+                "insightTitle": title,
                 "assignmentId": assignment["id"],
                 "assignmentTypeKey": assignment.get("assignmentTypeKey"),
+                "queueKey": assignment.get("queueKey"),
                 "tavilyRequestId": tavily_request_id,
                 "taskMessageId": task_message_id,
                 "researchPacketMessageId": research_packet_message_id,
@@ -515,6 +536,7 @@ def finalize_tavily_deep_research(
         research_mode=research_mode,
     )
     report_markdown = str(raw_packet.pop("_report_markdown", "") or "")
+    forum_title = normalize_string(raw_packet.pop("_forum_title", "")) or ""
     tavily_request_id = str(raw_packet.pop("_tavily_request_id", "") or "")
 
     apply_research_packet(
@@ -549,10 +571,18 @@ def finalize_tavily_deep_research(
     packet_entries = load_assignment_research_packet_entries(client, assignment_id)
     research_packet_message_id = packet_entries[0]["message"]["id"] if packet_entries else ""
 
+    if not forum_title:
+        forum_title = derive_insight_forum_title(
+            report_markdown=report_markdown,
+            assignment_title=str(assignment.get("title") or ""),
+            research_question=tavily_research_input_for_assignment(assignment, assignment_meta),
+            structured_summary=str(raw_packet.get("summary") or ""),
+        )
     insight_records = create_assignment_insight_records(
         assignment=assignment,
-        summary=raw_packet.get("summary") or "Tavily deep research",
+        summary=forum_title,
         body=report_markdown,
+        forum_title=forum_title,
         task_message_id=task_message_id,
         research_packet_message_id=research_packet_message_id,
         tavily_request_id=tavily_request_id,

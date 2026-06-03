@@ -1697,6 +1697,16 @@ async function loadInsightThreadMessages(threadId: string, root: MessageRecord):
   return hydrateMessageRecordsContent(merged);
 }
 
+function insightForumThreadTitle(root: MessageRecord): string {
+  const metadata = normalizeJsonValue(root.metadata);
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const explicit = String((metadata as Record<string, unknown>).insightTitle || "").trim();
+    if (explicit) return explicit;
+  }
+  const summary = String(root.summary || "").trim();
+  return summary || "Insight";
+}
+
 function buildInsightForumThread(root: MessageRecord, messages: MessageRecord[]): ForumThreadWithMessages {
   const activeMessages = messages.filter((message) => String(message.status || "active") === "active");
   const sorted = [...activeMessages].sort(
@@ -1708,7 +1718,7 @@ function buildInsightForumThread(root: MessageRecord, messages: MessageRecord[])
     id: root.id,
     threadKind: "insight_forum",
     status: "active",
-    title: root.summary ?? "Insight",
+    title: insightForumThreadTitle(root),
     summary: formatInsightForumDomainLabel(root.messageDomain),
     primaryAnchorKind: "message",
     primaryAnchorId: root.id,
