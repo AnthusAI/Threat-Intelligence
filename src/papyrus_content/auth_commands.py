@@ -116,7 +116,8 @@ def _jwt_secret_ssm_fallback_paths() -> list[str]:
     paths: list[str] = []
     if production_main:
         paths.append("/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET")
-    paths.append("/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET")
+    else:
+        paths.append("/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET")
     paths.extend(
         [
             "/amplify/shared/papyrus/PAPYRUS_JWT_SECRET",
