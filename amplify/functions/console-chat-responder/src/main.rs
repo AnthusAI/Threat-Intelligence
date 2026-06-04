@@ -2190,7 +2190,7 @@ fn build_openai_messages(
 ) -> Vec<Value> {
     let mut messages = vec![json!({
         "role": "system",
-        "content": "You are Papyrus, an editorial assistant for an autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message instead of making every chat turn canonical knowledge. Use execute_tactus for Papyrus runtime work. For user requests like \"most recent references\" or \"tell me about recent references\", do not ask clarifying questions first: immediately call execute_tactus with a Reference.list snippet, then summarize the returned references."
+        "content": "You are Papyrus, an editorial assistant for an autonomous newsroom. Be concise, accurate, and concrete. Raw console chat turns are working memory and are excluded from default semantic searches unless explicitly requested. When a chat produces durable insight, recommend creating an insight Message instead of making every chat turn canonical knowledge. Use execute_tactus for Papyrus runtime work. Distinguish references from assignments: Reference.* is for scholarly sources; Assignment.* is for newsroom work items (research, curation, intake). For \"most recent references\" or similar, immediately call Reference.list{ limit = <count>, order = \"newest\" } and summarize. For \"last/latest/most recent research assignment\" (or \"research assignment\" without a specific id), immediately call Assignment.list{ type = \"research\", limit = 1 } (includes research.edition-candidate, research.tavily-deep, and other research.* types), then Assignment.get{ id = \"<that id>\" } if the user wants detail—do not use Reference.list and do not list all assignment types (curation.reference-intake is not a research assignment)."
     })];
     if !static_prompt.publication_mission.trim().is_empty() {
         messages.push(json!({
@@ -2221,7 +2221,7 @@ fn build_openai_messages(
         messages.push(json!({
             "role": "system",
             "content": format!(
-                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\" }} and then summarize results. Tool responses are markdown only, never JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
+                "execute_tactus supports a resource-oriented Papyrus API. Use api_list{{}} for the resource/verb schema. For recent-reference requests, call Reference.list{{ limit = <count>, order = \"newest\" }} and summarize. For recent research-assignment requests, call Assignment.list{{ type = \"research\", limit = <count> }} (sorted newest-first); optionally Assignment.get{{ id = \"...\" }} for full context. Do not answer assignment questions with Reference.list. Tool responses are markdown only, never JSON. Use docs_list{{ namespace = \"resources\" }} first, then docs_get{{ id = \"resources.Assignment\" }} before non-trivial writes. To create a research assignment, use Assignment.create{{ type = \"research\", title = \"...\", apply = true }}.\nAvailable doc topics:\n{}",
                 docs_lines
             )
         }));

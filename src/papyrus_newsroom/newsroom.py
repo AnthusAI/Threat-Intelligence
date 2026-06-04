@@ -1139,8 +1139,19 @@ def papyrus_list_assignments(
     if status:
         assignments = [item for item in assignments if str(item.get("status") or "") == status]
     if type:
-        expected_type = _assignment_type_key_for_resource_type(type)
-        assignments = [item for item in assignments if str(item.get("assignmentTypeKey") or "") == expected_type]
+        type_token = str(type).strip()
+        if type_token == "research":
+            # Research assignments span multiple keys (edition-candidate, tavily-deep, ...).
+            assignments = [
+                item
+                for item in assignments
+                if str(item.get("assignmentTypeKey") or "").startswith("research.")
+            ]
+        else:
+            expected_type = _assignment_type_key_for_resource_type(type_token)
+            assignments = [
+                item for item in assignments if str(item.get("assignmentTypeKey") or "") == expected_type
+            ]
     if section_key:
         assignments = [item for item in assignments if str(item.get("sectionKey") or "") == section_key]
     if import_run_id:
