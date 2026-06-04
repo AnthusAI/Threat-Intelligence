@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_content import graphql_http  # noqa: E402
+from papyrus_content.auth_commands import _jwt_secret_ssm_fallback_paths  # noqa: E402
 from papyrus_content.env import decode_jwt_claims, ensure_graphql_authoring_jwt, lambda_auth_header  # noqa: E402
 
 
@@ -41,6 +42,28 @@ class GraphQLHttpTests(unittest.TestCase):
             clear=False,
         ):
             self.assertFalse(graphql_http.graphql_use_iam())
+
+    def test_jwt_secret_fallback_prefers_production_path_on_main_appsync(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PAPYRUS_GRAPHQL_ENDPOINT": "https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql",
+            },
+            clear=True,
+        ):
+            paths = _jwt_secret_ssm_fallback_paths()
+        self.assertEqual(
+            paths[0],
+            "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET",
+        )
+
+    def test_jwt_secret_fallback_honors_explicit_ssm_param(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PAPYRUS_JWT_SECRET_SSM_PARAM": "/custom/PAPYRUS_JWT_SECRET"},
+            clear=True,
+        ):
+            self.assertEqual(_jwt_secret_ssm_fallback_paths(), ["/custom/PAPYRUS_JWT_SECRET"])
 
     def test_ensure_graphql_authoring_jwt_mints_when_missing(self) -> None:
         with patch("papyrus_content.auth_commands._resolve_secret", return_value="test-secret"), patch.dict(
