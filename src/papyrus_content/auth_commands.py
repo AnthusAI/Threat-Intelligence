@@ -97,6 +97,36 @@ def _read_ssm_secret(parameter_name: str) -> str:
     return _read_ssm_secret_boto(parameter_name)
 
 
+def _jwt_secret_ssm_fallback_paths() -> list[str]:
+    """SSM paths for PAPYRUS_JWT_SECRET when AMPLIFY_SSM_ENV_CONFIG is unavailable.
+
+    Production console-chat-responder must not read the Ryan sandbox secret: AppSync
+    verifies JWTs with the branch secret under amplify/dbsyytcm9drqa/...
+    """
+    explicit = normalize_string(os.environ.get("PAPYRUS_JWT_SECRET_SSM_PARAM"))
+    if explicit:
+        return [explicit]
+
+    graphql = normalize_string(os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT"))
+    app_id = normalize_string(os.environ.get("AWS_APP_ID"))
+    production_main = (
+        app_id == "dbsyytcm9drqa"
+        or "64hviw44q5cq5nwjcigmasowlq.appsync-api" in graphql
+    )
+    paths: list[str] = []
+    if production_main:
+        paths.append("/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET")
+    else:
+        paths.append("/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET")
+    paths.extend(
+        [
+            "/amplify/shared/papyrus/PAPYRUS_JWT_SECRET",
+            "/amplify/shared/PAPYRUS_JWT_SECRET",
+        ]
+    )
+    return paths
+
+
 def _resolve_amplify_ssm_secret(name: str) -> str | None:
     raw_config = normalize_string(os.environ.get("AMPLIFY_SSM_ENV_CONFIG"))
     if not raw_config:
@@ -138,11 +168,7 @@ def _resolve_secret(options: dict[str, Any]) -> str:
     amplify_secret = _resolve_amplify_ssm_secret("PAPYRUS_JWT_SECRET")
     if amplify_secret:
         return amplify_secret
-    for fallback_param in (
-        "/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET",
-        "/amplify/shared/papyrus/PAPYRUS_JWT_SECRET",
-        "/amplify/shared/PAPYRUS_JWT_SECRET",
-    ):
+    for fallback_param in _jwt_secret_ssm_fallback_paths():
         try:
             return _read_ssm_secret(fallback_param)
         except Exception:
