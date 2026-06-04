@@ -22,6 +22,7 @@
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
     "auth:refresh-jwt": "poetry run papyrus auth refresh-jwt",
+    "dispatch:chorus-code-review-research": "bash scripts/dispatch-chorus-code-review-research.sh",
     "test:assignments": "poetry run papyrus analysis test category-mappers",
     "test:categories": "poetry run papyrus analysis test category-mappers",
     "test:doi-backfill": "poetry run papyrus analysis test doi-backfill",
