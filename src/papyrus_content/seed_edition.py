@@ -757,7 +757,7 @@ def seed_page_article_block(item_id: str, page_number: int, media: dict[str, Any
 
 
 def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any] | None) -> dict[str, Any]:
-    return {
+    block = {
         "id": f"{item_id}-page-{page_number}",
         "type": "articleFrame",
         "presetId": "article.mediaInset",
@@ -781,6 +781,7 @@ def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any
             ],
         } if media else None,
     }
+    return {key: value for key, value in block.items() if value is not None}
 
 
 def article_media_placement(asset_role: str, media: dict[str, Any]) -> dict[str, Any]:
