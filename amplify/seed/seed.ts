@@ -2,19 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { addToUserGroup, createAndSignUpUser, signInUser } from "@aws-amplify/seed";
-import { Amplify } from "aws-amplify";
+import { Amplify, type ResourcesConfig } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import { signOut } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
 import YAML from "yaml";
 import type { Schema } from "../data/resource";
 import type { Article, ArticleImageAsset } from "../../lib/articles";
-import * as amplifyServerRuntimeModule from "../../lib/amplify-server-runtime";
 import { getSeedEditionConfig, getSeedEditionProfileInfo, seedEditionArticles } from "./seed-edition-content";
-import { getArticleImageAssets } from "../../lib/articles";
-
-const amplifyServerRuntime = getRuntimeModule(amplifyServerRuntimeModule);
-const { getAmplifyServerRuntime } = amplifyServerRuntime as typeof import("../../lib/amplify-server-runtime");
 
 const EDITOR_GROUP = "editor";
 const ADMIN_GROUP = "admin";
@@ -238,18 +233,13 @@ const PROCEDURE_SEEDS: ProcedureSeed[] = [
 
 let cachedClient: DataClient | null = null;
 
-function getRuntimeModule<T extends object>(module: T): T {
-  return "default" in module && typeof module.default === "object" && module.default !== null ? (module.default as T) : module;
-}
-
 function getSeedClient(): DataClient {
   if (!cachedClient) cachedClient = generateClient<Schema>({ authMode: "userPool" });
   return cachedClient;
 }
 
 async function main() {
-  const runtime = getAmplifyServerRuntime();
-  Amplify.configure(runtime.config);
+  Amplify.configure(loadSeedAmplifyOutputs());
   await signInSeedEditor();
   const seedProfile = getSeedEditionProfileInfo();
   console.log(`seed\tedition-profile\t${seedProfile.id}\t${seedProfile.sourcePath}`);
@@ -301,6 +291,14 @@ async function main() {
   } finally {
     await signOut();
   }
+}
+
+function loadSeedAmplifyOutputs(): ResourcesConfig {
+  const outputsPath = path.join(process.cwd(), "amplify_outputs.json");
+  if (!fs.existsSync(outputsPath)) {
+    throw new Error("Missing amplify_outputs.json. Run `npm run sandbox` before seeding.");
+  }
+  return JSON.parse(fs.readFileSync(outputsPath, "utf8")) as ResourcesConfig;
 }
 
 async function signInSeedEditor() {
@@ -442,7 +440,9 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
     metadata: toAwsJson({}),
   });
 
-  const imageAssets = getArticleImageAssets(article);
+  await clearArticleMediaAssets(itemId, publishedItemId(itemId));
+
+  const imageAssets = getSeedArticleImageAssets(article);
   for (const [assetIndex, asset] of imageAssets.entries()) {
     const uploaded = await uploadSeedImage(article, asset, assetIndex);
     const mediaId = `media-${article.slug}-${assetIndex}`;
@@ -509,6 +509,19 @@ async function clearEditionItemLinks(editionId: string, publishedEditionIdValue:
   await Promise.all([
     ...editionItems.map((item) => deleteSeedModelRecord("EditionItem", String(item.id))),
     ...publishedEditionItems.map((item) => deleteSeedModelRecord("PublishedEditionItem", String(item.id))),
+  ]);
+}
+
+async function clearArticleMediaAssets(itemId: string, publishedItemIdValue: string) {
+  const mediaAssets = await listSeedModelByIndex("MediaAsset", "listMediaAssetsByItemAndSortKey", { itemId });
+  const publishedMediaAssets = await listSeedModelByIndex(
+    "PublishedMediaAsset",
+    "listPublishedMediaAssetsByItemAndSortKey",
+    { publishedItemId: publishedItemIdValue },
+  );
+  await Promise.all([
+    ...publishedMediaAssets.map((asset) => deleteSeedModelRecord("PublishedMediaAsset", String(asset.id))),
+    ...mediaAssets.map((asset) => deleteSeedModelRecord("MediaAsset", String(asset.id))),
   ]);
 }
 
@@ -762,6 +775,20 @@ async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index
     height: asset.layout?.preferredHeight,
     themeVariants: Object.keys(themeVariants).length ? themeVariants : undefined,
   };
+}
+
+function getSeedArticleImageAssets(article: Article): ArticleImageAsset[] {
+  const imageAssets = article.assets?.filter((asset) => asset.type === "image") ?? [];
+  if (imageAssets.length > 0) return imageAssets;
+  if (!article.image?.src) return [];
+  return [
+    {
+      ...article.image,
+      id: `${article.slug}-primary-image`,
+      type: "image",
+      roles: ["lead", "continuation", "continuationInset"],
+    },
+  ];
 }
 
 async function uploadSeedImageVariant(

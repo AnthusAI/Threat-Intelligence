@@ -15,20 +15,6 @@
       "deck": "AI changes the security contest by giving attackers more speed, scale, persistence, and patience than defenders can absorb with old habits.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
-      "image": {
-        "src": "/seed-art/source-graph.png",
-        "alt": "An abstract evidence graph with connected security signals",
-        "caption": "The defensive advantage depends on seeing patterns before isolated signals become incidents.",
-        "credit": "Anthus AI Solutions seed art",
-        "layout": {
-          "minHeight": 120,
-          "preferredHeight": 230,
-          "maxHeight": 420,
-          "aspectRatio": 1.5009,
-          "crop": "contain",
-          "wrapsText": true
-        }
-      },
       "pullQuotes": [
         "The old cycle gave defenders time to notice. AI narrows that interval.",
         "A control that depends on attacker fatigue is not a control."
@@ -53,20 +39,6 @@
       "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
-      "image": {
-        "src": "/seed-art/data-ledger.png",
-        "alt": "An abstract ledger of sensitive data records and review marks",
-        "caption": "AI/ML systems create new records of value that often sit outside mature security inventories.",
-        "credit": "Anthus AI Solutions seed art",
-        "layout": {
-          "minHeight": 120,
-          "preferredHeight": 230,
-          "maxHeight": 420,
-          "aspectRatio": 1.5009,
-          "crop": "contain",
-          "wrapsText": true
-        }
-      },
       "pullQuotes": [
         "A model project can create a sensitive data estate faster than governance can name it.",
         "The first control is knowing what now exists."
@@ -92,20 +64,6 @@
       "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
-      "image": {
-        "src": "/seed-art/quality-loop.png",
-        "alt": "An abstract quality loop around a defensive checklist",
-        "caption": "Lessons matter when they become repeatable checks, controls, and habits.",
-        "credit": "Anthus AI Solutions seed art",
-        "layout": {
-          "minHeight": 120,
-          "preferredHeight": 230,
-          "maxHeight": 420,
-          "aspectRatio": 1.5009,
-          "crop": "contain",
-          "wrapsText": true
-        }
-      },
       "pullQuotes": [
         "The useful question is what the defender can inspect before the lesson becomes personal.",
         "We want intelligence that changes behavior."

@@ -50,7 +50,7 @@ export type Article = {
   deck: string;
   byline: string;
   dateline: string;
-  image: ArticleImage;
+  image?: ArticleImage;
   assets?: ArticleAsset[];
   pullQuotes?: string[];
   body: string[];
@@ -279,6 +279,7 @@ export function getArticleText(article: Article): string {
 export function getArticleImageAssets(article: Article): ArticleImageAsset[] {
   const imageAssets = article.assets?.filter((asset) => asset.type === "image") ?? [];
   if (imageAssets.length > 0) return imageAssets;
+  if (!article.image) return [];
 
   return [
     {

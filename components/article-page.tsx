@@ -28,18 +28,20 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
             <span>{article.dateline}</span>
           </div>
         </header>
-        <figure className="article-photo">
-          <Image
-            src={article.image.src}
-            alt={article.image.alt}
-            width={1200}
-            height={680}
-            sizes="(max-width: 980px) 100vw, 900px"
-            priority
-            unoptimized={shouldBypassImageOptimization(article.image.src)}
-          />
-          <figcaption>{article.image.caption ?? article.image.credit}</figcaption>
-        </figure>
+        {article.image ? (
+          <figure className="article-photo">
+            <Image
+              src={article.image.src}
+              alt={article.image.alt}
+              width={1200}
+              height={680}
+              sizes="(max-width: 980px) 100vw, 900px"
+              priority
+              unoptimized={shouldBypassImageOptimization(article.image.src)}
+            />
+            <figcaption>{article.image.caption ?? article.image.credit}</figcaption>
+          </figure>
+        ) : null}
         <div className="article-body">
           {article.body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>

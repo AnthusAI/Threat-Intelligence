@@ -72,11 +72,13 @@ export function clonePublicationItems(items: PublicationItem[]): PublicationItem
 export function cloneArticle(article: Article): Article {
   return {
     ...article,
-    image: {
-      ...article.image,
-      layout: cloneImageLayout(article.image.layout),
-      themeVariants: cloneImageThemeVariants(article.image.themeVariants),
-    },
+    image: article.image
+      ? {
+          ...article.image,
+          layout: cloneImageLayout(article.image.layout),
+          themeVariants: cloneImageThemeVariants(article.image.themeVariants),
+        }
+      : undefined,
     assets: article.assets?.map((asset) => ({
       ...asset,
       layout: cloneImageLayout(asset.layout),
@@ -109,7 +111,7 @@ function cloneNonArticleItem(item: NonArticlePublicationItem): NonArticlePublica
   };
 }
 
-function cloneImageLayout<T extends Article["image"]["layout"]>(layout: T): T {
+function cloneImageLayout<T extends ArticleImage["layout"]>(layout: T): T {
   if (!layout) return undefined as T;
   return {
     ...layout,
@@ -118,7 +120,7 @@ function cloneImageLayout<T extends Article["image"]["layout"]>(layout: T): T {
   } as T;
 }
 
-function cloneImageThemeVariants<T extends Article["image"]["themeVariants"]>(themeVariants: T): T {
+function cloneImageThemeVariants<T extends ArticleImage["themeVariants"]>(themeVariants: T): T {
   if (!themeVariants) return undefined as T;
   return {
     ...themeVariants,

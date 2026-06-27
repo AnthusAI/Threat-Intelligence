@@ -215,6 +215,7 @@ function createNoPullQuoteArticles(): Article[] {
 function createFurnitureSufficiencyArticles(): Article[] {
   return cloneArticles(articles).map((article) => {
     if (article.slug === "schools-reading-lab") {
+      if (!article.image) return article;
       return {
         ...article,
         pullQuotes: [],
@@ -312,6 +313,7 @@ function createThemedInkStudyArticles(): Article[] {
 function createLongImageCaptionArticles(): Article[] {
   return cloneArticles(articles).map((article) => {
     if (article.slug !== "market-hall") return article;
+    if (!article.image) return article;
     return {
       ...article,
       image: {

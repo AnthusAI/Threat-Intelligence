@@ -34,6 +34,7 @@ def seed_edition_content(flags: list[str]) -> None:
     records = build_seed_edition_records(payload)
     client, _claims = create_authoring_client()
     changes = build_record_changes_targeted_by_id(client, records)
+    stale_media_records = list_stale_seed_media_records(client, payload)
     counts = summarize_changes(changes)
     result = {
         "ok": True,
@@ -44,11 +45,13 @@ def seed_edition_content(flags: list[str]) -> None:
         "articleCount": len(payload["articles"]),
         "recordCount": len(records),
         "changes": counts,
+        "deleteStaleMedia": summarize_stale_media(stale_media_records),
         "apply": apply,
     }
     if apply:
         if upload_media:
             upload_seed_media(payload, bucket=str(bucket))
+        delete_stale_seed_media_records(client, stale_media_records)
         apply_record_changes(client, changes)
         result["applied"] = True
     if options.get("json"):
@@ -163,7 +166,7 @@ def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
             "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
         },
         "articleOrder": item_ids,
-        "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(item_ids), payload.get("houseAds")),
+        "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(payload["articles"]), payload.get("houseAds")),
     }
 
 
@@ -351,6 +354,34 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
     return records
 
 
+def list_stale_seed_media_records(client: PapyrusGraphQLAuthoringClient, payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    stale = {"MediaAsset": [], "PublishedMediaAsset": []}
+    for article in payload["articles"]:
+        item_id = f"item-{article['slug']}"
+        published_id = published_item_id(item_id)
+        stale["MediaAsset"].extend(client.list_by_index("mediaAssetsByItemAndSortKey", item_id))
+        stale["PublishedMediaAsset"].extend(client.list_by_index("publishedMediaAssetsByItemAndSortKey", published_id))
+    return stale
+
+
+def summarize_stale_media(records_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+    return {model_name: len(records) for model_name, records in records_by_model.items()}
+
+
+def delete_stale_seed_media_records(
+    client: PapyrusGraphQLAuthoringClient,
+    records_by_model: dict[str, list[dict[str, Any]]],
+) -> None:
+    for model_name in ("PublishedMediaAsset", "MediaAsset"):
+        seen_ids: set[str] = set()
+        for record_entry in records_by_model.get(model_name, []):
+            record_id = normalize_string(record_entry.get("id"))
+            if not record_id or record_id in seen_ids:
+                continue
+            seen_ids.add(record_id)
+            client.delete_record(model_name, record_id)
+
+
 def upload_seed_media(payload: dict[str, Any], *, bucket: str) -> None:
     for article in payload["articles"]:
         for asset_index, asset in enumerate(article_image_assets(article)):
@@ -448,9 +479,11 @@ def article_image_assets(article: dict[str, Any]) -> list[dict[str, Any]]:
     assets = [asset for asset in article.get("assets") or [] if asset.get("type") == "image"]
     if assets:
         return assets
+    if not isinstance(article.get("image"), dict) or not normalize_string(article["image"].get("src")):
+        return []
     return [
         {
-            **(article.get("image") or {}),
+            **article["image"],
             "id": f"{article['slug']}-primary-image",
             "type": "image",
             "roles": ["lead", "continuation", "continuationInset"],
@@ -487,12 +520,21 @@ def image_extension(content_type: str, src: str) -> str:
     return suffix or "jpg"
 
 
-def create_seed_edition_layout_plan(item_ids: list[str]) -> dict[str, Any]:
+def create_seed_edition_layout_plan(articles: list[dict[str, Any]]) -> dict[str, Any]:
+    item_ids = [str(article["slug"]) for article in articles]
+    image_by_item_id = {str(article["slug"]): article_has_image(article) for article in articles}
     front_item_ids = item_ids[: min(len(item_ids), 4)]
     follow_on_blocks = [
-        *[seed_continuation_block(item_id, 0, seed_media_placement(0)) for item_id in front_item_ids],
         *[
-            seed_page_article_block(item_id, 0, seed_media_placement(index + len(front_item_ids)))
+            seed_continuation_block(item_id, 0, seed_media_placement(0) if image_by_item_id.get(item_id) else None)
+            for item_id in front_item_ids
+        ],
+        *[
+            seed_page_article_block(
+                item_id,
+                0,
+                seed_media_placement(index + len(front_item_ids)) if image_by_item_id.get(item_id) else None,
+            )
             for index, item_id in enumerate(item_ids[len(front_item_ids) :])
         ],
     ]
@@ -509,7 +551,10 @@ def create_seed_edition_layout_plan(item_ids: list[str]) -> dict[str, Any]:
                         "type": "fullPage",
                         "localGrid": {"columns": {"min": 1, "preferred": 6, "max": 6}},
                         "responsiveLayouts": seed_front_responsive_layouts(),
-                        "blocks": [seed_front_block(item_id, index) for index, item_id in enumerate(front_item_ids)],
+                        "blocks": [
+                            seed_front_block(item_id, index, image_by_item_id.get(item_id, False))
+                            for index, item_id in enumerate(front_item_ids)
+                        ],
                     }
                 ],
             },
@@ -518,8 +563,16 @@ def create_seed_edition_layout_plan(item_ids: list[str]) -> dict[str, Any]:
     }
 
 
-def seed_front_block(item_id: str, index: int) -> dict[str, Any]:
+def article_has_image(article: dict[str, Any]) -> bool:
+    assets = article.get("assets") if isinstance(article.get("assets"), list) else []
+    return any(asset.get("type") == "image" and normalize_string(asset.get("src")) for asset in assets) or bool(
+        normalize_string((article.get("image") or {}).get("src") if isinstance(article.get("image"), dict) else None)
+    )
+
+
+def seed_front_block(item_id: str, index: int, has_image: bool) -> dict[str, Any]:
     preferred_span = [1, 4, 1, 2, 2, 2][index] if index < 6 else 1
+    is_feature = index == 1
     block = {
         "id": f"front-{item_id}",
         "type": "articleFrame",
@@ -527,14 +580,14 @@ def seed_front_block(item_id: str, index: int) -> dict[str, Any]:
         "itemId": item_id,
         "flowKey": item_id,
         "startCursor": "beginning",
-        "role": "feature" if index == 1 else "rail" if index in {0, 2} else "standard",
-        "editorialPriority": "primary" if index == 1 else "secondary" if index in {0, 2} else "tertiary",
-        "typography": {"headlineScale": "feature" if index == 1 else "standard"},
+        "role": "feature" if is_feature else "rail" if index in {0, 2} else "standard",
+        "editorialPriority": "primary" if is_feature else "secondary" if index in {0, 2} else "tertiary",
+        "typography": {"headlineScale": "feature" if is_feature else "standard"},
         "span": {"min": 1, "preferred": preferred_span, "max": preferred_span},
         "media": [],
         "cutPolicy": seed_cut_policy(item_id, index),
     }
-    if index == 1:
+    if is_feature:
         block["localGrid"] = {"columns": {"min": 1, "preferred": 4, "max": 4}}
         block["media"] = [
             {
@@ -549,12 +602,12 @@ def seed_front_block(item_id: str, index: int) -> dict[str, Any]:
                     "wrapsText": True,
                 },
             }
-        ]
-        block["composition"] = seed_feature_composition()
+        ] if has_image else []
+        block["composition"] = seed_feature_composition(has_image)
     return {key: value for key, value in block.items() if value is not None}
 
 
-def seed_feature_composition() -> dict[str, Any]:
+def seed_feature_composition(has_image: bool) -> dict[str, Any]:
     left_title_span = {
         "columnStart": 1,
         "span": {"min": 1, "preferred": 3, "max": 3},
@@ -565,6 +618,25 @@ def seed_feature_composition() -> dict[str, Any]:
         "wrapsText": False,
     }
     left_lead_span = {**left_title_span, "wrapsText": True}
+    lead = [
+        {"slot": "deck", "placement": left_lead_span},
+        {"slot": "byline", "placement": left_lead_span},
+    ]
+    if has_image:
+        lead.append(
+            {
+                "slot": "media",
+                "mediaIndex": 0,
+                "placement": {
+                    "anchor": "right",
+                    "span": {"min": 1, "preferred": 1, "max": 1},
+                    "vertical": "top",
+                    "collapse": "inline",
+                    "crop": "preserve",
+                    "wrapsText": True,
+                },
+            }
+        )
     return {
         "title": [
             {
@@ -580,22 +652,7 @@ def seed_feature_composition() -> dict[str, Any]:
             },
             {"slot": "headline", "placement": left_title_span},
         ],
-        "lead": [
-            {"slot": "deck", "placement": left_lead_span},
-            {"slot": "byline", "placement": left_lead_span},
-            {
-                "slot": "media",
-                "mediaIndex": 0,
-                "placement": {
-                    "anchor": "right",
-                    "span": {"min": 1, "preferred": 1, "max": 1},
-                    "vertical": "top",
-                    "collapse": "inline",
-                    "crop": "preserve",
-                    "wrapsText": True,
-                },
-            },
-        ],
+        "lead": lead,
     }
 
 
@@ -685,7 +742,7 @@ def media_spec(anchor: str, min_span: int, preferred: int, max_span: int, vertic
     }
 
 
-def seed_page_article_block(item_id: str, page_number: int, media: dict[str, Any]) -> dict[str, Any]:
+def seed_page_article_block(item_id: str, page_number: int, media: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "id": f"{item_id}-page-{page_number}-lead",
         "type": "articleFrame",
@@ -695,11 +752,11 @@ def seed_page_article_block(item_id: str, page_number: int, media: dict[str, Any
         "startCursor": "beginning",
         "role": "primary",
         "localGrid": {"columns": {"min": 2, "preferred": 6, "max": 6}},
-        "media": [article_media_placement("lead", media)],
+        "media": [article_media_placement("lead", media)] if media else [],
     }
 
 
-def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any]) -> dict[str, Any]:
+def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "id": f"{item_id}-page-{page_number}",
         "type": "articleFrame",
@@ -709,7 +766,7 @@ def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any
         "startCursor": "current",
         "role": "primary",
         "localGrid": {"columns": {"min": 2, "preferred": 6, "max": 6}},
-        "media": [article_media_placement("continuationInset", media)],
+        "media": [article_media_placement("continuationInset", media)] if media else [],
         "pullQuote": {
             "required": False,
             "placements": [
@@ -722,7 +779,7 @@ def seed_continuation_block(item_id: str, page_number: int, media: dict[str, Any
                     "wrapsText": True,
                 }
             ],
-        },
+        } if media else None,
     }
 
 

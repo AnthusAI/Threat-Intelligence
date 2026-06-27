@@ -542,7 +542,7 @@ async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsse
   const assets = (
     await Promise.all(mediaAssets.filter((asset) => asset.type === "image").map((asset) => normalizeImageAsset(item, asset)))
   ).filter((asset): asset is ArticleImageAsset => asset !== null);
-  const primaryImage = assets.find((asset) => asset.roles?.includes("lead")) ?? assets[0] ?? getFallbackImage(item);
+  const primaryImage = assets.find((asset) => asset.roles?.includes("lead")) ?? assets[0];
 
   return {
     slug: item.slug,
