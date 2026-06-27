@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "id": "edition-current",
+  "slug": "current",
+  "title": "Anthus Threat Intelligence",
+  "description": "Practical AI/ML security analysis from Anthus AI Solutions.",
+  "publishDate": "2026-05-22",
+  "suppressNewsDeskAppendix": true,
+  "articles": [
+    {
+      "slug": "the-balance-of-power-is-moving",
+      "shortSlug": "BALANCE",
+      "section": "Mission",
+      "headline": "The Balance of Power Is Moving",
+      "deck": "AI changes the security contest by giving attackers more speed, scale, persistence, and patience than defenders can absorb with old habits.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "MISSION",
+      "image": {
+        "src": "/seed-art/source-graph.png",
+        "alt": "An abstract evidence graph with connected security signals",
+        "caption": "The defensive advantage depends on seeing patterns before isolated signals become incidents.",
+        "credit": "Anthus AI Solutions seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 230,
+          "maxHeight": 420,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "The old cycle gave defenders time to notice. AI narrows that interval.",
+        "A control that depends on attacker fatigue is not a control."
+      ],
+      "body": [
+        "Information security has always been a contest of attention. Attackers look for a weakness, defenders try to harden the system, and both sides learn from what happens next. AI does not end that contest. It changes the tempo.",
+        "The practical shift is not that every attacker suddenly becomes brilliant. It is that many more attackers can become fast, persistent, and systematic. Reconnaissance can be repeated. Variants can be generated. Weak signals can be correlated. Failed attempts can become training material for the next attempt.",
+        "That matters because many defensive programs still assume scarcity on the other side. They assume attackers will miss obscure assets, get tired of low-value targets, or stop after noisy probes. Those assumptions are becoming more expensive. A control that depends on attacker fatigue is not a control.",
+        "The defender's job is therefore changing from responding to isolated events toward reducing the number of useful opportunities an automated adversary can discover. The question is not only whether a vulnerability exists. The question is whether the system leaks enough structure for an agentic attacker to find, test, and chain it before the organization understands the pattern.",
+        "Anthus Threat Intelligence exists to study that shift as a practical operating problem. We are not interested in a stream of disconnected alarms. We are interested in the trends that tell defenders where the pressure is moving and what habits reduce exposure before the next incident makes the lesson obvious.",
+        "What to check now: inventory the places where outsiders, partners, contractors, customers, and internal tools can discover system shape. Include public endpoints, documentation, metadata, error messages, repository history, shared notebooks, data catalogs, model cards, prompts, and support workflows.",
+        "What to check now: measure detection latency, not just detection coverage. If an automated adversary can run many small probes before your team can connect them, the control is incomplete. Logs, alerts, and review queues need to show sequences, not only single events.",
+        "What to check now: remove low-value ambiguity. Stale permissions, ownerless assets, unclassified data stores, and undocumented model-adjacent services are useful to attackers because they slow defenders down. The best first defense is often to make the estate easier for your own team to understand.",
+        "This publication will treat each trend as a question for defenders: what did the attacker learn, what did the defender miss, what would have changed the outcome, and what can a reader inspect in their own environment this week?"
+      ]
+    },
+    {
+      "slug": "the-new-sensitive-data-estate",
+      "shortSlug": "DATA",
+      "section": "Mission",
+      "headline": "The New Sensitive Data Estate",
+      "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "MISSION",
+      "image": {
+        "src": "/seed-art/data-ledger.png",
+        "alt": "An abstract ledger of sensitive data records and review marks",
+        "caption": "AI/ML systems create new records of value that often sit outside mature security inventories.",
+        "credit": "Anthus AI Solutions seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 230,
+          "maxHeight": 420,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "A model project can create a sensitive data estate faster than governance can name it.",
+        "The first control is knowing what now exists."
+      ],
+      "body": [
+        "AI/ML programs do not merely consume sensitive data. They create new forms of it. A training corpus may contain customer records, internal decisions, private communications, proprietary process knowledge, regulated artifacts, or operational history. The work around that corpus then creates derivatives: embeddings, prompts, evaluation sets, labels, notebooks, traces, generated outputs, and tuning decisions.",
+        "Those derivatives can be just as valuable as the source data. An embedding index may reveal semantic relationships. A prompt log may expose business logic. A notebook may contain credentials, sample records, or a shortcut that became production practice. An evaluation set may encode exactly what the organization fears the system will mishandle.",
+        "This is the new sensitive data estate. It does not always look like a database. It may be a bucket, a vector index, a workspace, a cache, a queue, a transcript, a dashboard export, a model artifact, or a pile of operational logs kept because they were useful during development.",
+        "The security challenge is that this estate grows through normal work. Teams experiment, copy samples, run evaluations, inspect failures, and preserve traces for debugging. None of that is inherently careless. The risk comes when the security model still sees only the old source systems while the AI/ML pipeline has created new stores of concentrated context.",
+        "The practical defensive principle is simple: treat AI/ML artifacts according to what they can reveal, not according to what file extension, product category, or team boundary they happen to have.",
+        "What to check now: build an inventory of AI/ML data stores and derivatives. Include training data, validation data, embeddings, feature stores, prompt and response logs, human review queues, notebooks, experiment trackers, model artifacts, and exports used for debugging or evaluation.",
+        "What to check now: map access by task, not by team. A person or service may need to evaluate model quality without needing raw sensitive records. A support workflow may need a summary without needing prompt history. A development environment may need synthetic examples instead of production traces.",
+        "What to check now: review retention defaults. AI/ML systems often keep logs and intermediate artifacts because they are useful. That usefulness needs an expiration policy. If an artifact is sensitive enough to harm the organization when copied, it is sensitive enough to deserve an owner, a retention window, and monitoring.",
+        "What to check now: look for silent data multiplication. Backups, notebook downloads, manual test files, copied evaluation sets, cached retrieval results, and ad hoc exports often carry the real blast radius. The official system may be governed while the working copies are not.",
+        "Anthus Threat Intelligence will keep returning to this estate because it is where many AI security failures become practical. The problem is not only model behavior. It is the shape, movement, and memory of the data around the model."
+      ]
+    },
+    {
+      "slug": "from-lessons-learned-to-defenses-checked",
+      "shortSlug": "CHECKS",
+      "section": "Mission",
+      "headline": "From Lessons Learned to Defenses Checked",
+      "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "MISSION",
+      "image": {
+        "src": "/seed-art/quality-loop.png",
+        "alt": "An abstract quality loop around a defensive checklist",
+        "caption": "Lessons matter when they become repeatable checks, controls, and habits.",
+        "credit": "Anthus AI Solutions seed art",
+        "layout": {
+          "minHeight": 120,
+          "preferredHeight": 230,
+          "maxHeight": 420,
+          "aspectRatio": 1.5009,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "The useful question is what the defender can inspect before the lesson becomes personal.",
+        "We want intelligence that changes behavior."
+      ],
+      "body": [
+        "Threat reporting often stops at the most dramatic part of the story. Something was exposed, bypassed, chained, extracted, or abused. The details may be interesting, but interest is not enough. The useful question is what the defender can inspect before the lesson becomes personal.",
+        "Anthus Threat Intelligence will approach the AI/ML information-security space as a living body of evidence. Individual attacks, near misses, research findings, architectural mistakes, and operational failures become more valuable when they are connected to each other. The goal is to find patterns that explain how risk is moving.",
+        "That means the publication should not behave like a feed of recent vulnerabilities. A feed can tell readers what happened. It does not necessarily tell them which habit to change, which control to verify, or which assumption to retire. We want intelligence that changes behavior.",
+        "Our editorial pattern is straightforward: identify the trend, explain the failure mode, extract the defensive lesson, and translate that lesson into checks that security and AI/ML teams can run against their own systems.",
+        "Some checks will be immediate and specific: review access to prompt logs, confirm who can export embeddings, test whether service accounts can read training artifacts they do not need, or inspect where notebook outputs are stored. Other checks will mature into generalized best practices tagged by cloud service, vendor, system type, control family, and use case.",
+        "What to check now: when reading any incident or research note, ask what class of asset made the failure possible. Was it identity, data movement, retrieval, logging, model interaction, supply chain, human review, or deployment automation? If the class exists in your environment, the lesson may apply even when the product names differ.",
+        "What to check now: maintain a defensible lessons register. For each lesson, record the trend, the relevant assets, the control that would reduce risk, the owner who can verify it, and the date it was last checked. A lesson that cannot be assigned or checked will decay into awareness.",
+        "What to check now: separate confidence from urgency. Some threats are real but poorly understood. Some are mundane but already active. A practical program needs room for both: investigation where evidence is thin, and immediate control work where the failure mode is already clear.",
+        "Over time, Anthus Threat Intelligence should become more than a stream of articles. It should become a curated map of AI/ML security lessons, defensive practices, and recurring checks. The first obligation is modest and strict: every article should help readers defend something they are responsible for."
+      ]
+    }
+  ]
+}

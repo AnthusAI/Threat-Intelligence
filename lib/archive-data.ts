@@ -13,16 +13,10 @@ export async function loadArchiveEditionPreviews({ limit = ARCHIVE_BATCH_SIZE, n
     limit: safeLimit,
     nextToken,
   });
-  const previews = await Promise.all(
-    editions.map(async (edition) => ({
-      edition,
-      content: await contentRepository.loadEditionContent({
-        editionDate: edition.editionDate,
-        editionSlug: edition.slug,
-      }),
-      href: getEditionDatePath(edition.editionDate),
-    })),
-  );
+  const previews = editions.map((edition) => ({
+    edition,
+    href: getEditionDatePath(edition.editionDate),
+  }));
 
   return {
     previews,

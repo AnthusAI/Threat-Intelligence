@@ -13,6 +13,7 @@ import {
   type PublicationItem,
   type PublicationItemType,
 } from "./publication-items";
+import { SITE_BRAND } from "./site-brand";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
@@ -386,6 +387,7 @@ function summarizeEditionRoute(edition: GraphQLEdition): EditionRouteSummary {
     title: edition.title,
     editionDate: edition.editionDate,
     publishedAt: edition.publishedAt,
+    description: edition.description ?? null,
   };
 }
 
@@ -548,7 +550,7 @@ async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsse
     section: item.section ?? "News",
     headline: item.headline ?? item.title ?? item.slug,
     deck: item.deck ?? "",
-    byline: item.byline ?? "Papyrus Staff",
+    byline: item.byline ?? SITE_BRAND.placeholderByline,
     dateline: item.dateline ?? "NEWSROOM",
     image: primaryImage,
     assets,

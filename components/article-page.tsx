@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Article } from "../lib/articles";
 import { shouldBypassImageOptimization } from "../lib/image-url";
 import type { PublicationItem } from "../lib/publication-items";
+import { SITE_BRAND } from "../lib/site-brand";
 
 type ArticlePageViewProps = {
   article: Article;
@@ -10,7 +11,7 @@ type ArticlePageViewProps = {
   backLabel?: string;
 };
 
-export function ArticlePageView({ article, backHref, backLabel = "Back to front page" }: ArticlePageViewProps) {
+export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.backToHomeLabel }: ArticlePageViewProps) {
   return (
     <main className="article-shell">
       <nav className="article-nav">

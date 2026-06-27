@@ -31,7 +31,7 @@ const SITE_BRANDS: Record<SiteBrandId, SiteBrand> = {
     id: "threat-intelligence",
     appTitle: "Threat Intelligence",
     appDescription: "ANTHUS THREAT INTELLIGENCE from Anthus AI Solutions.",
-    mastheadTitle: "ANTHUS THREAT INTELLIGENCE",
+    mastheadTitle: "THREAT INTELLIGENCE",
     mastheadSubtitle: "from Anthus AI Solutions",
     backToHomeLabel: "Back to Threat Intelligence",
     articleTitleSuffix: "Threat Intelligence",

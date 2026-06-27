@@ -61,6 +61,7 @@ export type EditionRouteSummary = {
   title: string;
   editionDate: string;
   publishedAt?: string | null;
+  description?: string | null;
 };
 
 export type ListPublishedEditionsOptions = {

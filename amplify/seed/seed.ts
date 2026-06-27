@@ -10,7 +10,7 @@ import YAML from "yaml";
 import type { Schema } from "../data/resource";
 import type { Article, ArticleImageAsset } from "../../lib/articles";
 import * as amplifyServerRuntimeModule from "../../lib/amplify-server-runtime";
-import { getSeedEditionConfig, seedEditionArticles } from "./seed-edition-content";
+import { getSeedEditionConfig, getSeedEditionProfileInfo, seedEditionArticles } from "./seed-edition-content";
 import { getArticleImageAssets } from "../../lib/articles";
 
 const amplifyServerRuntime = getRuntimeModule(amplifyServerRuntimeModule);
@@ -251,6 +251,8 @@ async function main() {
   const runtime = getAmplifyServerRuntime();
   Amplify.configure(runtime.config);
   await signInSeedEditor();
+  const seedProfile = getSeedEditionProfileInfo();
+  console.log(`seed\tedition-profile\t${seedProfile.id}\t${seedProfile.sourcePath}`);
   const editionConfig = getSeedEditionConfig();
 
   try {
@@ -286,6 +288,7 @@ async function main() {
       layoutPlan: toAwsJson(editionConfig.layoutPlan),
       metadata: toAwsJson(editionConfig.metadata),
     });
+    await clearEditionItemLinks(editionConfig.id, publishedEditionId(editionConfig.id));
     await seedNewsroomSections(editionConfig.publishedAt);
     await seedPublicationDoctrine(editionConfig.publishedAt);
     await seedProcedureDefinitions(editionConfig.publishedAt);
@@ -496,6 +499,19 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
   }
 }
 
+async function clearEditionItemLinks(editionId: string, publishedEditionIdValue: string) {
+  const editionItems = await listSeedModelByIndex("EditionItem", "listEditionItemsByEditionAndSortKey", { editionId });
+  const publishedEditionItems = await listSeedModelByIndex(
+    "PublishedEditionItem",
+    "listPublishedEditionItemsByEditionAndSortKey",
+    { publishedEditionId: publishedEditionIdValue },
+  );
+  await Promise.all([
+    ...editionItems.map((item) => deleteSeedModelRecord("EditionItem", String(item.id))),
+    ...publishedEditionItems.map((item) => deleteSeedModelRecord("PublishedEditionItem", String(item.id))),
+  ]);
+}
+
 async function seedNewsroomSections(importedAt: string) {
   const sections = loadNewsroomSectionSeeds();
   for (const section of sections) {
@@ -599,6 +615,7 @@ function safeProcedureId(value: string): string {
 }
 
 function loadRequiredCliProcedureKeys(configPath = REQUIRED_PROCEDURES_CONFIG_PATH): string[] {
+  if (!fs.existsSync(configPath)) return [];
   const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
     requiredCliProcedures?: Record<string, unknown>;
   };
@@ -625,6 +642,7 @@ function loadNewsroomSectionSeeds(configPath = NEWSROOM_SECTIONS_CONFIG_PATH): N
 }
 
 function loadPublicationDoctrineSeeds(configPath = PUBLICATION_DOCTRINE_CONFIG_PATH): PublicationDoctrineSeed[] {
+  if (!fs.existsSync(configPath)) return [];
   const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
     schemaVersion?: number;
     doctrine?: Array<Record<string, unknown>>;
@@ -799,6 +817,35 @@ async function upsert(modelName: keyof DataClient["models"], record: Record<stri
   const response = current.data
     ? await model.update(record, { authMode: "userPool" })
     : await model.create(record, { authMode: "userPool" });
+  assertNoGraphQLErrors(response.errors);
+}
+
+async function listSeedModelByIndex(
+  modelName: keyof DataClient["models"],
+  queryName: string,
+  input: Record<string, unknown>,
+): Promise<Array<Record<string, unknown>>> {
+  const model = (getSeedClient().models as Record<string, unknown>)[String(modelName)] as Record<string, unknown>;
+  const query = model[queryName] as (
+    input: Record<string, unknown>,
+    options: { authMode: "userPool"; nextToken?: string | null },
+  ) => Promise<{ data?: Array<Record<string, unknown> | null> | null; errors?: unknown[]; nextToken?: string | null }>;
+  const items: Array<Record<string, unknown>> = [];
+  let nextToken: string | null | undefined;
+  do {
+    const response = await query(input, { authMode: "userPool", nextToken });
+    assertNoGraphQLErrors(response.errors);
+    items.push(...(response.data ?? []).filter((item): item is Record<string, unknown> => item !== null));
+    nextToken = response.nextToken;
+  } while (nextToken);
+  return items;
+}
+
+async function deleteSeedModelRecord(modelName: keyof DataClient["models"], id: string) {
+  const model = (getSeedClient().models as Record<string, unknown>)[String(modelName)] as {
+    delete(input: { id: string }, options: { authMode: "userPool" }): Promise<{ errors?: unknown[] }>;
+  };
+  const response = await model.delete({ id }, { authMode: "userPool" });
   assertNoGraphQLErrors(response.errors);
 }
 

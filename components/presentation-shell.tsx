@@ -31,17 +31,19 @@ export type PresentationTarget =
   | { kind: "section"; sectionKey: string };
 
 const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
+const SANS_TEXT_FONT = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+const PRESENTATION_TEXT_FONT = SITE_BRAND.id === "threat-intelligence" ? SANS_TEXT_FONT : SERIF_TEXT_FONT;
 const BLOG_TEXT_STYLE = {
   fontSize: 18,
   lineHeight: 28,
   linePaintHeight: 24,
-  fontFamily: SERIF_TEXT_FONT,
+  fontFamily: PRESENTATION_TEXT_FONT,
 };
 const MAGAZINE_TEXT_STYLE = {
   fontSize: 17,
   lineHeight: 25,
   linePaintHeight: 22,
-  fontFamily: SERIF_TEXT_FONT,
+  fontFamily: PRESENTATION_TEXT_FONT,
 };
 
 export function PresentationShell({

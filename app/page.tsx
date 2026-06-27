@@ -210,7 +210,7 @@ function createEmptyEditionLandingItem(slug: string): PublicationItem {
           src: "/papyrus-plant-placeholder-dark.png",
         },
       },
-      alt: "A black papyrus plant silhouette",
+      alt: "Anthus Threat Intelligence emblem",
       credit: "",
       layout: {
         minHeight: 120,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import tempfile
@@ -16,14 +17,14 @@ from .options import normalize_string, parse_boolean_option, parse_options, reso
 from .records import apply_record_changes, build_record_changes_targeted_by_id
 
 SEED_CONTENT_PATH = PAPYRUS_ROOT / "amplify" / "seed" / "seed-edition-content.json"
+DEFAULT_SEED_PROFILE = "default"
+SEED_PROFILE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def seed_edition_content(flags: list[str]) -> None:
     options = parse_options(flags)
     apply = resolve_mutation_apply(options, "content seed-edition")
-    seed_path = Path(normalize_string(options.get("seed")) or SEED_CONTENT_PATH)
-    if not seed_path.is_absolute():
-        seed_path = PAPYRUS_ROOT / seed_path
+    seed_path, seed_profile = resolve_seed_content_path(options)
     upload_media = parse_boolean_option(options.get("upload-media"), default=True, label="--upload-media")
     bucket = normalize_string(options.get("bucket")) or storage_bucket_from_amplify_outputs()
     if apply and upload_media and not bucket:
@@ -38,6 +39,7 @@ def seed_edition_content(flags: list[str]) -> None:
         "ok": True,
         "command": "content seed-edition",
         "seedPath": str(seed_path),
+        "seedProfile": seed_profile,
         "editionId": payload["id"],
         "articleCount": len(payload["articles"]),
         "recordCount": len(records),
@@ -53,6 +55,38 @@ def seed_edition_content(flags: list[str]) -> None:
         print(json.dumps(result, indent=2))
     else:
         print_seed_summary(result)
+
+
+def resolve_seed_content_path(options: dict[str, Any]) -> tuple[Path, str]:
+    explicit_seed = normalize_string(options.get("seed"))
+    if explicit_seed:
+        seed_path = Path(explicit_seed)
+        if not seed_path.is_absolute():
+            seed_path = PAPYRUS_ROOT / seed_path
+        return seed_path, normalize_string(options.get("profile")) or "custom"
+
+    profile_id = (
+        normalize_string(options.get("profile"))
+        or normalize_string(os.environ.get("PAPYRUS_SEED_PROFILE"))
+        or DEFAULT_SEED_PROFILE
+    ).lower()
+    if not SEED_PROFILE_PATTERN.match(profile_id):
+        raise ValueError(f"Invalid seed profile '{profile_id}'. Use lowercase letters, numbers, '-', or '_'.")
+
+    if profile_id == DEFAULT_SEED_PROFILE:
+        return SEED_CONTENT_PATH, profile_id
+
+    candidates = [
+        PAPYRUS_ROOT / "amplify" / "seed" / "profiles" / profile_id / "seed-edition-content.json",
+        SEED_CONTENT_PATH,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate, profile_id
+    raise ValueError(
+        f"Could not find seed edition content for profile '{profile_id}'. "
+        f"Checked: {', '.join(str(candidate) for candidate in candidates)}"
+    )
 
 
 def load_seed_payload(path: Path = SEED_CONTENT_PATH) -> dict[str, Any]:
@@ -454,13 +488,14 @@ def image_extension(content_type: str, src: str) -> str:
 
 
 def create_seed_edition_layout_plan(item_ids: list[str]) -> dict[str, Any]:
-    featured_front_item_ids = [
-        "papyrus-reader-contract",
-        "papyrus-introduction",
-        "papyrus-agent-workflow",
-        "papyrus-data-ownership",
+    front_item_ids = item_ids[: min(len(item_ids), 4)]
+    follow_on_blocks = [
+        *[seed_continuation_block(item_id, 0, seed_media_placement(0)) for item_id in front_item_ids],
+        *[
+            seed_page_article_block(item_id, 0, seed_media_placement(index + len(front_item_ids)))
+            for index, item_id in enumerate(item_ids[len(front_item_ids) :])
+        ],
     ]
-    front_item_ids = item_ids if len(item_ids) < 3 else [item_id for item_id in featured_front_item_ids if item_id in item_ids]
     return {
         "pages": [
             {
@@ -478,48 +513,7 @@ def create_seed_edition_layout_plan(item_ids: list[str]) -> dict[str, Any]:
                     }
                 ],
             },
-            seed_region_stack_page(
-                2,
-                [
-                    ("papyrus-reader-contract-continuation", "top", "papyrus-reader-contract", "continuation", "center", 1, 2, 3, "upperThird", True),
-                    ("papyrus-data-ownership-continuation", "bottom", "papyrus-data-ownership", "continuation", "right", 1, 2, 2, "top", False),
-                ],
-            ),
-            seed_region_stack_page(
-                3,
-                [
-                    ("papyrus-introduction-tail", "top", "papyrus-introduction", "continuation", "right", 1, 2, 2, "top", False),
-                    ("papyrus-workflow-tail", "bottom", "papyrus-agent-workflow", "continuation", "center", 2, 2, 2, "top", False),
-                ],
-            ),
-            seed_region_stack_page(
-                4,
-                [
-                    ("newsroom-how-to-first-install", "top", "papyrus-first-install", "page", "right", 1, 2, 2, "top", False),
-                    ("newsroom-how-to-dispatch-research", "bottom", "howto-dispatch-research-agents", "page", "center", 1, 2, 3, "upperThird", False),
-                ],
-            ),
-            seed_region_stack_page(
-                5,
-                [
-                    ("newsroom-how-to-curate-references", "top", "howto-curate-references", "page", "right", 1, 2, 2, "top", False),
-                    ("newsroom-how-to-register-source-material", "bottom", "howto-register-source-material", "page", "center", 1, 2, 3, "upperThird", False),
-                ],
-            ),
-            seed_region_stack_page(
-                6,
-                [
-                    ("newsroom-how-to-maintain-reference-quality", "top", "howto-maintain-reference-quality", "page", "right", 1, 2, 2, "top", False),
-                    ("papyrus-steering-and-curation-guide", "bottom", "papyrus-steering-and-curation", "page", "center", 1, 2, 3, "upperThird", False),
-                ],
-            ),
-            seed_region_stack_page(
-                7,
-                [
-                    ("papyrus-operating-modes-guide", "top", "papyrus-operating-modes", "page", "right", 1, 2, 2, "top", False),
-                    ("papyrus-reference-governance-guide", "bottom", "papyrus-reference-governance", "page", "center", 1, 2, 3, "upperThird", False),
-                ],
-            ),
+            *seed_follow_on_pages(follow_on_blocks),
         ]
     }
 
@@ -538,7 +532,7 @@ def seed_front_block(item_id: str, index: int) -> dict[str, Any]:
         "typography": {"headlineScale": "feature" if index == 1 else "standard"},
         "span": {"min": 1, "preferred": preferred_span, "max": preferred_span},
         "media": [],
-        "cutPolicy": seed_cut_policy(item_id),
+        "cutPolicy": seed_cut_policy(item_id, index),
     }
     if index == 1:
         block["localGrid"] = {"columns": {"min": 1, "preferred": 4, "max": 4}}
@@ -641,6 +635,47 @@ def seed_region_stack_page(page_number: int, region_specs: list[tuple]) -> dict[
     }
 
 
+def seed_follow_on_pages(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pages: list[dict[str, Any]] = []
+    for page_index, page_blocks in enumerate(chunk(blocks, 2)):
+        page_number = page_index + 2
+        pages.append(
+            {
+                "id": f"page-{page_number}",
+                "pageNumber": page_number,
+                "presetId": "page.regionStack",
+                "grid": {"columns": {"min": 1, "preferred": 6, "max": 6}},
+                "regions": [
+                    {
+                        "id": f"{block['itemId']}-page-{page_number}-{'top' if block_index == 0 else 'bottom'}",
+                        "type": "stack",
+                        "role": "top" if block_index == 0 else "bottom",
+                        "size": {"ratio": 1 if len(page_blocks) == 1 else 0.5},
+                        "blocks": [
+                            {
+                                **block,
+                                "id": f"{block['id']}-page-{page_number}",
+                                **({} if block.get("startCursor") == "current" else {"startCursor": "beginning"}),
+                            }
+                        ],
+                    }
+                    for block_index, block in enumerate(page_blocks)
+                ],
+            }
+        )
+    return pages
+
+
+def chunk(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def seed_media_placement(index: int) -> dict[str, Any]:
+    if index % 2 == 0:
+        return media_spec("right", 1, 2, 2, "top", False)
+    return media_spec("center", 1, 2, 3, "upperThird", False)
+
+
 def media_spec(anchor: str, min_span: int, preferred: int, max_span: int, vertical: str, required: bool) -> dict[str, Any]:
     return {
         "required": required,
@@ -716,7 +751,6 @@ def seed_front_responsive_layouts() -> list[dict[str, Any]]:
                 priority_slot("secondary", 1, 1, 1, 1, 1),
                 priority_slot("primary", 1, 2, 4, 1, 1),
                 priority_slot("secondary", 2, 6, 1, 1, 1),
-                block_slot("front-papyrus-data-ownership", 1, 6, 2, 1),
             ],
             "overflow": {"columnSpan": "full", "rowSpan": 1},
         },
@@ -728,7 +762,6 @@ def seed_front_responsive_layouts() -> list[dict[str, Any]]:
                 priority_slot("secondary", 1, 1, 1, 1, 1),
                 priority_slot("primary", 1, 2, 3, 1, 1),
                 priority_slot("secondary", 2, 5, 1, 1, 1),
-                block_slot("front-papyrus-data-ownership", 1, 5, 2, 1),
             ],
             "overflow": {"columnSpan": "full", "rowSpan": 1},
         },
@@ -740,7 +773,6 @@ def seed_front_responsive_layouts() -> list[dict[str, Any]]:
                 priority_slot("primary", 1, 1, 4, 1, 1),
                 priority_slot("secondary", 1, 1, 2, 2, 1),
                 priority_slot("secondary", 2, 3, 2, 2, 1),
-                block_slot("front-papyrus-data-ownership", 1, 4, 3, 1),
             ],
             "overflow": {"columnSpan": "full", "rowSpan": 1},
         },
@@ -765,26 +797,13 @@ def priority_slot(priority: str, occurrence: int, column_start: int, column_span
     }
 
 
-def block_slot(block_id: str, column_start: int, column_span: int, row_start: int, row_span: int) -> dict[str, Any]:
+def seed_cut_policy(_item_id: str, index: int) -> dict[str, Any] | None:
+    if index > 3:
+        return None
     return {
-        "blockId": block_id,
-        "columnStart": column_start,
-        "columnSpan": column_span,
-        "rowStart": row_start,
-        "rowSpan": row_span,
+        "bodyDepthRows": 8 if index == 3 else 14,
+        "jumpTargetPage": index // 2 + 2,
     }
-
-
-def seed_cut_policy(item_id: str) -> dict[str, Any] | None:
-    if item_id == "papyrus-reader-contract":
-        return {"bodyDepthRows": 14, "jumpTargetPage": 2}
-    if item_id == "papyrus-introduction":
-        return {"bodyDepthRows": 14, "jumpTargetPage": 3}
-    if item_id == "papyrus-agent-workflow":
-        return {"bodyDepthRows": 14, "jumpTargetPage": 3}
-    if item_id == "papyrus-data-ownership":
-        return {"bodyDepthRows": 8, "jumpTargetPage": 2}
-    return None
 
 
 def order_articles(source: list[dict[str, Any]], article_order: list[str]) -> list[dict[str, Any]]:
