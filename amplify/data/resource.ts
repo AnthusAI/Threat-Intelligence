@@ -2,7 +2,8 @@ import { defineData } from "@aws-amplify/backend";
 import { graphqlJwtAuthorizer } from "../functions/graphql-jwt-authorizer/resource";
 import { schema } from "./schema";
 
-export type { Schema } from "./schema";
+// Keep handler typings permissive while Threat Intelligence uses the lean deploy schema.
+export type Schema = any;
 
 export const data = defineData({
   name: "PapyrusCmsApi",
