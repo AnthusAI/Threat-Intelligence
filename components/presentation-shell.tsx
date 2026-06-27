@@ -13,6 +13,7 @@ import {
   type PublicationItem,
 } from "../lib/publication-items";
 import type { EditionContent, EditionPresentationFormat, EditionSection } from "../lib/content-types";
+import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { Newspaper } from "./newspaper";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
 
@@ -51,20 +52,20 @@ export function PresentationShell({
   lockedPresentation,
   target = { kind: "edition" },
 }: PresentationShellProps) {
-  const defaultPresentation = content.defaultPresentation ?? "newspaper";
+  const defaultPresentation = enforcePresentation(content.defaultPresentation ?? SITE_BRAND.defaultPresentation);
   const [preferredPresentation, setPreferredPresentation] = useState<EditionPresentationFormat>(defaultPresentation);
-  const activePresentation = lockedPresentation ?? preferredPresentation;
+  const activePresentation = enforcePresentation(lockedPresentation ?? preferredPresentation);
   const targetSection = target.kind === "section" ? findEditionSection(content.sections, target.sectionKey) : undefined;
 
   useEffect(() => {
     if (lockedPresentation) return;
     const localSettings = readLocalReaderSettings();
-    setPreferredPresentation(localSettings.presentation);
+    setPreferredPresentation(enforcePresentation(localSettings.presentation));
     const unsubscribe = subscribeReaderSettingsChanges((settings) => {
-      setPreferredPresentation(settings.presentation);
+      setPreferredPresentation(enforcePresentation(settings.presentation));
     });
     void resolveReaderSettings()
-      .then((resolution) => setPreferredPresentation(resolution.settings.presentation))
+      .then((resolution) => setPreferredPresentation(enforcePresentation(resolution.settings.presentation)))
       .catch(() => undefined);
     return unsubscribe;
   }, [lockedPresentation]);
@@ -185,11 +186,14 @@ function MagazinePresentation({
 }
 
 function PresentationHeader({ content }: { content: EditionContent }) {
+  const title = SITE_BRAND.id === "papyrus" ? content.title : SITE_BRAND.mastheadTitle;
+  const subtitle = SITE_BRAND.id === "papyrus" ? content.description : SITE_BRAND.mastheadSubtitle;
+
   return (
     <header className="presentation-header">
       <p>{content.editionDate}</p>
-      <h1>{content.title}</h1>
-      {content.description ? <span>{content.description}</span> : null}
+      <h1>{title}</h1>
+      {subtitle ? <span>{subtitle}</span> : null}
     </header>
   );
 }

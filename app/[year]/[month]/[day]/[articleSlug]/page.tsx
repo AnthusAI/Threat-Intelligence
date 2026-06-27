@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { ItemPageView } from "../../../../../components/article-page";
 import { contentRepository } from "../../../../../lib/content-repository";
 import { getEditionDatePath, parseEditionArticleRoute } from "../../../../../lib/edition-routes";
+import { SITE_BRAND } from "../../../../../lib/site-brand";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function generateMetadata({ params }: DateScopedArticlePageProps) {
   if (!item) return {};
 
   return {
-    title: `${item.type === "article" ? item.headline : item.title} | Papyrus`,
+    title: `${item.type === "article" ? item.headline : item.title} | ${SITE_BRAND.articleTitleSuffix}`,
     description: item.deck,
   };
 }

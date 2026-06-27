@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { Playfair_Display } from "next/font/google";
+import { Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import Script from "next/script";
 import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SITE_BRAND } from "../lib/site-brand";
 import "./tailwind.css";
 import "./globals.css";
 
@@ -12,11 +13,17 @@ const playfairDisplay = Playfair_Display({
   variable: "--font-serif",
 });
 
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
 const faviconVersion = "20260517-1";
+const defaultTheme = SITE_BRAND.id === "threat-intelligence" ? "light" : "system";
 
 export const metadata: Metadata = {
-  title: "Papyrus",
-  description: "A Pretext-powered responsive newspaper layout lab.",
+  title: SITE_BRAND.appTitle,
+  description: SITE_BRAND.appDescription,
   icons: {
     icon: [
       { url: `/icon-light.png?v=${faviconVersion}`, type: "image/png" },
@@ -27,14 +34,20 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-papyrus-theme="system" suppressHydrationWarning>
-      <body className={playfairDisplay.variable}>
+    <html
+      lang="en"
+      data-papyrus-theme={defaultTheme}
+      data-site-brand={SITE_BRAND.id}
+      suppressHydrationWarning
+    >
+      <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable}`}>
         <Script id="papyrus-favicon-color-scheme" strategy="beforeInteractive">
           {`(() => {
   const version = "${faviconVersion}";
   const lightHref = "/icon-light.png?v=" + version;
   const darkHref = "/icon-dark.png?v=" + version;
   const settingsStorageKey = "papyrus:reader-settings";
+  const defaultTheme = "${defaultTheme}";
 
   const getLink = () => {
     const existingTagged = document.querySelector('link[rel="icon"][data-papyrus-theme-icon="true"]');
@@ -61,9 +74,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       const parsed = stored ? JSON.parse(stored) : null;
       return parsed && (parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system")
         ? parsed.theme
-        : "system";
+        : defaultTheme;
     } catch {
-      return "system";
+      return defaultTheme;
     }
   };
   const isDarkTheme = (theme) => theme === "dark" || (theme === "system" && media.matches);

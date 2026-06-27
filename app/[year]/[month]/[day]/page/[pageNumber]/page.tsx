@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { EditionRoutePage } from "../../edition-route-page";
 import { parseEditionPageRoute } from "../../../../../../lib/edition-routes";
+import { SITE_BRAND } from "../../../../../../lib/site-brand";
 
 export const dynamic = "force-dynamic";
 
@@ -19,5 +20,13 @@ export default async function EditionPageRoute({ params }: EditionPageRouteProps
   if (!route) notFound();
   if (!route.isCanonical) redirect(route.canonicalPath);
 
-  return <EditionRoutePage day={day} initialPageNumber={route.pageNumber} lockedPresentation="newspaper" month={month} year={year} />;
+  return (
+    <EditionRoutePage
+      day={day}
+      initialPageNumber={route.pageNumber}
+      lockedPresentation={SITE_BRAND.forcedPresentation ?? "newspaper"}
+      month={month}
+      year={year}
+    />
+  );
 }

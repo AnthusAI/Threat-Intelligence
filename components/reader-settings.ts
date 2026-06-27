@@ -3,6 +3,7 @@
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import type { EditionPresentationFormat } from "../lib/content-types";
+import { SITE_BRAND, enforcePresentation, getPresentationChoices } from "../lib/site-brand";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot } from "./reader-auth-state";
 
@@ -48,12 +49,12 @@ const LEGACY_COOKIE_CLEANUP_STORAGE_KEY = "papyrus:legacy-presentation-cookie-cl
 const SETTINGS_EVENT = "papyrus:settings-changed";
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
-  presentation: "newspaper",
-  theme: "system",
+  presentation: enforcePresentation(SITE_BRAND.defaultPresentation),
+  theme: SITE_BRAND.id === "threat-intelligence" ? "light" : "system",
   motion: "standard",
 };
 
-export const PRESENTATION_OPTIONS: Array<{
+const ALL_PRESENTATION_OPTIONS: Array<{
   value: EditionPresentationFormat;
   label: string;
   description: string;
@@ -74,6 +75,12 @@ export const PRESENTATION_OPTIONS: Array<{
     description: "Feature-led section spreads using the same edition items.",
   },
 ];
+
+const ALLOWED_PRESENTATION_CHOICES = new Set<EditionPresentationFormat>(getPresentationChoices());
+
+export const PRESENTATION_OPTIONS = ALL_PRESENTATION_OPTIONS.filter((option) =>
+  ALLOWED_PRESENTATION_CHOICES.has(option.value),
+);
 
 export const THEME_OPTIONS: Array<{
   value: ReaderThemeSetting;
@@ -259,7 +266,11 @@ function parseStoredSettings(value: string | null): Partial<ReaderSettings> | nu
 }
 
 function normalizePresentation(value: unknown): EditionPresentationFormat {
-  return value === "blog" || value === "magazine" || value === "newspaper" ? value : DEFAULT_READER_SETTINGS.presentation;
+  const normalized =
+    value === "blog" || value === "magazine" || value === "newspaper"
+      ? value
+      : DEFAULT_READER_SETTINGS.presentation;
+  return enforcePresentation(normalized);
 }
 
 function normalizeTheme(value: unknown): ReaderThemeSetting {
@@ -271,7 +282,8 @@ function normalizeMotion(value: unknown): ReaderMotionSetting {
 }
 
 function readPresentationValue(value: string | null | undefined): EditionPresentationFormat | null {
-  return value === "newspaper" || value === "blog" || value === "magazine" ? value : null;
+  if (value !== "newspaper" && value !== "blog" && value !== "magazine") return null;
+  return enforcePresentation(value);
 }
 
 function cleanupLegacyPresentationCookie() {

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { ArticlePageView } from "../../../components/article-page";
 import { contentRepository, isGraphQLContentSource } from "../../../lib/content-repository";
+import { SITE_BRAND } from "../../../lib/site-brand";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export async function generateMetadata({ params }: ArticlePageProps) {
   const article = await contentRepository.getArticle(slug);
   if (!article) return {};
   return {
-    title: `${article.headline} | Papyrus`,
+    title: `${article.headline} | ${SITE_BRAND.articleTitleSuffix}`,
     description: article.deck,
   };
 }

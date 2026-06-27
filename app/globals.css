@@ -115,6 +115,9 @@
   --rhythm-overlay-blue-alpha: 0.045;
   --rhythm-overlay-yellow-rgb: 255 184 0;
   --rhythm-overlay-yellow-alpha: 0.045;
+  --site-body-font: Georgia, "Times New Roman", serif;
+  --site-display-font: var(--font-serif), Georgia, "Times New Roman", serif;
+  --site-ui-font: Arial, Helvetica, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -207,7 +210,7 @@ body {
   margin: 0;
   background: var(--substrate);
   color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--site-body-font);
 }
 
 a {
@@ -9889,4 +9892,85 @@ img {
   display: flex;
   gap: 0.45rem;
   flex-wrap: wrap;
+}
+
+:root[data-site-brand="threat-intelligence"] {
+  color-scheme: light;
+  --ink-solid-rgb: 17 24 39;
+  --ink-alpha: 0.94;
+  --ink-display-alpha: 0.92;
+  --muted-alpha: 0.64;
+  --muted-strong-alpha: 0.78;
+  --accent-alpha: 0.78;
+  --caption-alpha: 0.72;
+  --disabled-alpha: 0.42;
+  --rule-alpha: 0.24;
+  --paper: #ffffff;
+  --paper-rgb: 255 255 255;
+  --paper-deep: #f4f7fb;
+  --empty-bg: #f7f9fc;
+  --substrate-rgb: 240 244 250;
+  --paper-grain-alpha: 0;
+  --paper-grain-highlight-alpha: 0;
+  --paper-fiber-alpha: 0;
+  --paper-mottle-light-alpha: 0;
+  --paper-mottle-shadow-alpha: 0;
+  --paper-edge-left-alpha: 0;
+  --paper-edge-right-alpha: 0;
+  --paper-edge-right-highlight-alpha: 0;
+  --paper-edge-top-alpha: 0;
+  --paper-edge-bottom-alpha: 0;
+  --paper-background:
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  --paper-background-size: 100% 100%;
+  --paper-page-background: var(--paper-background);
+  --paper-page-background-size: 100% 100%;
+  --paper-drop-shadow: 0 16px 32px -24px rgb(15 23 42 / 0.35);
+  --site-body-font:
+    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  --site-display-font:
+    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  --site-ui-font:
+    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+:root[data-site-brand="threat-intelligence"] .paper-page,
+:root[data-site-brand="threat-intelligence"] .site-shell,
+:root[data-site-brand="threat-intelligence"] .presentation-page,
+:root[data-site-brand="threat-intelligence"] .article-page,
+:root[data-site-brand="threat-intelligence"] .settings-page {
+  font-family: var(--site-body-font);
+}
+
+:root[data-site-brand="threat-intelligence"] .masthead h1,
+:root[data-site-brand="threat-intelligence"] .presentation-header h1,
+:root[data-site-brand="threat-intelligence"] .presentation-item__header h2,
+:root[data-site-brand="threat-intelligence"] .article-page h1 {
+  font-family: var(--site-display-font);
+  letter-spacing: -0.02em;
+}
+
+:root[data-site-brand="threat-intelligence"] .masthead h1 {
+  font-size: clamp(2rem, 4.9vw, 4rem);
+  line-height: 1.06;
+  text-transform: uppercase;
+}
+
+:root[data-site-brand="threat-intelligence"] .masthead::before,
+:root[data-site-brand="threat-intelligence"] .masthead::after {
+  display: none;
+}
+
+:root[data-site-brand="threat-intelligence"] .masthead__rule,
+:root[data-site-brand="threat-intelligence"] .masthead__meta::after {
+  border-top-width: 1px;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-header p,
+:root[data-site-brand="threat-intelligence"] .presentation-section-header p,
+:root[data-site-brand="threat-intelligence"] .presentation-item__header p,
+:root[data-site-brand="threat-intelligence"] .presentation-header span,
+:root[data-site-brand="threat-intelligence"] .presentation-section-header span,
+:root[data-site-brand="threat-intelligence"] .presentation-item__header span {
+  font-family: var(--site-ui-font);
 }
