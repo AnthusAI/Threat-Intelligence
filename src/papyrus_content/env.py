@@ -21,6 +21,11 @@ def resolve_papyrus_root() -> Path:
 
 PAPYRUS_ROOT = resolve_papyrus_root()
 BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
+_DOTENV_OVERRIDE_KEYS = frozenset({
+    "PAPYRUS_GRAPHQL_JWT",
+    "PAPYRUS_GRAPHQL_ENDPOINT",
+    "PAPYRUS_JWT_TTL_SECONDS",
+})
 
 
 def load_dotenv() -> None:
@@ -34,7 +39,9 @@ def load_dotenv() -> None:
                 continue
             key, value = line.split("=", 1)
             key = key.strip()
-            if not key or key in os.environ:
+            if not key:
+                continue
+            if key in os.environ and key not in _DOTENV_OVERRIDE_KEYS:
                 continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -77,6 +84,16 @@ def graphql_jwt() -> str:
     return normalized
 
 
+def graphql_jwt_ttl_seconds(default: int = 43_200) -> int:
+    raw = os.environ.get("PAPYRUS_JWT_TTL_SECONDS", "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
 def graphql_timeout_seconds(default: float = 30.0) -> float:
     raw = os.environ.get("PAPYRUS_GRAPHQL_TIMEOUT_SECONDS", "").strip()
     if not raw:
@@ -103,6 +120,45 @@ def is_jwt_expired(claims: dict) -> bool:
     import time
 
     return float(exp) <= time.time()
+
+
+def running_in_aws_lambda() -> bool:
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip())
+
+
+def ensure_graphql_authoring_jwt(*, ttl_seconds: int | None = None) -> str:
+    """Mint or refresh ``PAPYRUS_GRAPHQL_JWT`` for AppSync custom authoring auth in Lambda."""
+    existing = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip()
+    if existing:
+        normalized = normalize_jwt(existing)
+        claims = decode_jwt_claims(normalized)
+        if claims and not is_jwt_expired(claims):
+            return normalized
+
+    from .auth_commands import _mint_jwt, _resolve_secret
+
+    resolved_ttl = ttl_seconds if ttl_seconds is not None else graphql_jwt_ttl_seconds()
+    issuer = os.environ.get("PAPYRUS_JWT_ISSUER", "").strip() or "papyrus-cli"
+    subject = os.environ.get("PAPYRUS_JWT_SUBJECT", "").strip() or "papyrus-cli"
+    audience = os.environ.get("PAPYRUS_JWT_AUDIENCE", "").strip() or "papyrus-authoring"
+    scope = (
+        os.environ.get("PAPYRUS_JWT_REQUIRED_SCOPE", "").strip()
+        or os.environ.get("PAPYRUS_JWT_AUTHORING_VALUE", "").strip()
+        or "papyrus:write"
+    )
+    groups_raw = os.environ.get("PAPYRUS_JWT_GROUPS", "").strip() or "editor"
+    groups = [entry.strip() for entry in groups_raw.split(",") if entry.strip()] or ["editor"]
+    token = _mint_jwt(
+        secret=_resolve_secret({}),
+        issuer=issuer,
+        subject=subject,
+        audience=audience,
+        scope=scope,
+        groups=groups,
+        ttl_seconds=max(int(resolved_ttl), 60),
+    )
+    os.environ["PAPYRUS_GRAPHQL_JWT"] = token
+    return token
 
 
 def decode_jwt_claims(token: str) -> dict:

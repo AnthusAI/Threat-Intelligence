@@ -1407,21 +1407,28 @@ class ReferenceCommandsTests(unittest.TestCase):
         ):
             _run_biblicus_article_text({"extracted_text": "hello"})
 
+    @mock.patch("papyrus_content.reference_metadata_generation._apply_metadata_attachment_records")
     @mock.patch("papyrus_content.reference_metadata_generation.resolve_storage_bucket_name", return_value="test-bucket")
+    @mock.patch("papyrus_content.reference_metadata_generation.create_authoring_client")
     @mock.patch("papyrus_content.reference_metadata_generation.reference_curation_signals.reference_generate_metadata_from_extracted_text")
     @mock.patch("papyrus_content.reference_metadata_generation.boto3.client")
     def test_run_reference_metadata_generation_from_extracted_text_skips_missing_and_generates(
         self,
         mock_boto_client,
         mock_generate,
+        mock_create_client,
         _mock_bucket,
+        _mock_apply_attachments,
     ):
+        mock_client = mock.Mock()
+        mock_create_client.return_value = (mock_client, None)
         mock_s3 = mock.Mock()
         mock_s3.get_object.return_value = {"Body": io.BytesIO(b"Full extracted text from attachment")}
         mock_boto_client.return_value = mock_s3
         mock_generate.return_value = {
             "status": "generated",
             "generated": {"title": "Generated title", "subtitle": "Generated subtitle", "summary": "Generated summary"},
+            "records": [{"modelName": "ModelAttachment", "input": {"id": "model-attachment-test"}, "body": "{}"}],
         }
         references = [
             {
@@ -1467,7 +1474,10 @@ class ReferenceCommandsTests(unittest.TestCase):
         call_kwargs = mock_generate.call_args.kwargs
         self.assertEqual(call_kwargs["reference_id"], "reference-1")
         self.assertEqual(call_kwargs["original_title"], "Original title")
+        self.assertFalse(call_kwargs["apply"])
         self.assertIn("Full extracted text", call_kwargs["extracted_text"])
+        _mock_apply_attachments.assert_called_once()
+        mock_client.upsert.assert_called_once()
         statuses = [item["status"] for item in result["items"]]
         self.assertIn("generated", statuses)
         self.assertIn("skipped_missing_text", statuses)

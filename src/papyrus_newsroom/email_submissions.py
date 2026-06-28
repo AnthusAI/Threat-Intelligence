@@ -18,6 +18,12 @@ from papyrus_content.records import apply_record_changes, build_record_changes
 from papyrus_content.steering import load_steering_config, require_corpus_config
 
 MESSAGE_KIND_EMAIL_SUBMISSION = "email_submission"
+
+REJECTION_KIND_UNREGISTERED_SENDER = "unregistered_sender"
+UNREGISTERED_SENDER_RESPONSE_ERROR = (
+    "This submission was not accepted because only registered Papyrus users "
+    "may send reference submissions by email."
+)
 MESSAGE_DOMAIN_REFERENCE_INTAKE = "reference_intake"
 MESSAGE_TYPE_INBOUND_EMAIL = "INBOUND_EMAIL"
 RESPONSE_TARGET_EMAIL_PROCESSOR = "email_submission_processor"
@@ -51,11 +57,29 @@ def archive_inbound_mime_object(*, bucket: str, key: str, s3_client: Any | None 
     if not should_process_inbound_s3_key(key):
         return {"archived": False, "reason": "skip"}
     import boto3
+    from botocore.exceptions import ClientError
 
     client = s3_client or boto3.client("s3")
     relative = key[len(INBOUND_EMAIL_INTAKE_PREFIX) :] if key.startswith(INBOUND_EMAIL_INTAKE_PREFIX) else key
     archive_key = f"{INBOUND_EMAIL_ARCHIVE_PREFIX}{relative}"
-    client.copy_object(Bucket=bucket, Key=archive_key, CopySource={"Bucket": bucket, "Key": key})
+
+    def _object_exists(object_key: str) -> bool:
+        try:
+            client.head_object(Bucket=bucket, Key=object_key)
+            return True
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+
+    if not _object_exists(key):
+        if _object_exists(archive_key):
+            return {"archived": True, "archiveKey": archive_key, "alreadyArchived": True}
+        return {"archived": False, "reason": "source-missing"}
+
+    if not _object_exists(archive_key):
+        client.copy_object(Bucket=bucket, Key=archive_key, CopySource={"Bucket": bucket, "Key": key})
     client.delete_object(Bucket=bucket, Key=key)
     return {"archived": True, "archiveKey": archive_key}
 
@@ -88,6 +112,8 @@ def release_inbound_mime_after_success(client: PapyrusGraphQLAuthoringClient, *,
                 }
             },
         )
+        if result.get("alreadyArchived"):
+            return {"released": True, "alreadyArchived": True, **result}
         return {"released": True, **result}
     except Exception as error:
         metadata["inboundMimeArchiveError"] = str(error)
@@ -291,7 +317,7 @@ def build_email_submission_message_record(
     response_status: str,
     response_error: str | None = None,
 ) -> dict[str, Any]:
-    metadata = {
+    metadata: dict[str, Any] = {
         "channel": "email",
         "senderEmail": sender_email,
         "recipientEmail": recipient_email,
@@ -302,6 +328,8 @@ def build_email_submission_message_record(
         "directCitationCount": len(citations),
         "directCitations": citations,
     }
+    if not authorized:
+        metadata["rejectionKind"] = REJECTION_KIND_UNREGISTERED_SENDER
     return build_canonical_message_expected(
         {
             "id": message_id,
@@ -356,10 +384,55 @@ def register_inbound_email_message(
     normalized_sender = normalize_email_address(sender_email)
     profile_id = lookup_registered_user_profile_id(client, normalized_sender)
     authorized = bool(profile_id)
-    citations = extract_direct_citations(body_text) if authorized else []
+    citations: list[dict[str, str]] = []
+    parent_submission_message_id: str | None = None
+    intake_classification = "new_submission"
+    inbound_attachment_count = 0
+    inbound_in_reply_to: str | None = None
+    inbound_references: str | None = None
+    envelope = None
+    if bucket_name and key_name:
+        from papyrus_newsroom.email_submission_replies import (
+            load_inbound_mime_envelope_from_metadata,
+            resolve_parent_submission_message_id,
+        )
+
+        envelope = load_inbound_mime_envelope_from_metadata({"s3Bucket": bucket_name, "s3Key": key_name})
+        if envelope:
+            inbound_in_reply_to = envelope.in_reply_to
+            inbound_references = envelope.references_header
+            inbound_attachment_count = len(envelope.attachments)
+            parent_submission_message_id = resolve_parent_submission_message_id(
+                in_reply_to=envelope.in_reply_to,
+                references_header=envelope.references_header,
+            )
+    if authorized:
+        if envelope and envelope.html_parts:
+            from papyrus_newsroom.email_mime_intake import extract_direct_citations_from_intake_text
+
+            citations = extract_direct_citations_from_intake_text(
+                body_text=envelope.body_text,
+                html_parts=list(envelope.html_parts),
+            )
+        elif envelope:
+            citations = extract_direct_citations(envelope.body_text)
+        else:
+            citations = extract_direct_citations(body_text)
+    from papyrus_newsroom.email_submission_replies import classify_inbound_email_intake
+
+    intake_classification = classify_inbound_email_intake(
+        body_text=envelope.body_text if envelope else body_text,
+        citations=citations,
+        parent_message_id=parent_submission_message_id,
+        attachments=envelope.attachments if envelope else [],
+    )
+    attachment_only_reply = intake_classification == "attachment_only_reply"
+    conversational_reply = intake_classification == "conversational_reply"
+    agent_intake = intake_classification == "agent_intake"
+    pdf_only_intake = intake_classification == "pdf_only_intake"
     status = "received" if authorized else "rejected"
     response_status = "PENDING" if authorized else "REJECTED"
-    response_error = None if authorized else "Sender email is not registered to an active Papyrus user."
+    response_error = None if authorized else UNREGISTERED_SENDER_RESPONSE_ERROR
     if authorized and looks_like_research_assignment_request(body_text, citation_count=len(citations)):
         status = "rejected"
         response_status = "REJECTED"
@@ -367,7 +440,14 @@ def register_inbound_email_message(
             "Submission looks like a research assignment request. "
             "Send direct citations (URLs or DOIs), not open-ended research tasks."
         )
-    elif authorized and not citations:
+    elif (
+        authorized
+        and not citations
+        and not attachment_only_reply
+        and not conversational_reply
+        and not agent_intake
+        and not pdf_only_intake
+    ):
         status = "rejected"
         response_status = "REJECTED"
         response_error = "No direct citations (URL or DOI) were found in the email body."
@@ -390,6 +470,15 @@ def register_inbound_email_message(
         response_status=response_status,
         response_error=response_error,
     )
+    metadata = record.get("metadata")
+    if isinstance(metadata, str) and metadata:
+        metadata_payload = json.loads(metadata)
+        metadata_payload["parentSubmissionMessageId"] = parent_submission_message_id
+        metadata_payload["intakeClassification"] = intake_classification
+        metadata_payload["inboundInReplyTo"] = inbound_in_reply_to
+        metadata_payload["inboundReferences"] = inbound_references
+        metadata_payload["inboundAttachmentCount"] = inbound_attachment_count
+        record["metadata"] = json.dumps(metadata_payload, sort_keys=True)
     changes = build_record_changes(client, [{"modelName": "Message", "expected": record}])
     apply_record_changes(client, changes)
     return {
@@ -411,55 +500,20 @@ def process_email_submission_message(
     steering_config_path: str | None = None,
     apply: bool = True,
 ) -> dict[str, Any]:
-    from papyrus_content.newsroom_commands import now_iso
+    from papyrus_newsroom.email_submission_replies import process_inbound_email_submission
 
     message = client.get_record("Message", message_id)
     if not message:
         raise ValueError(f"Message not found: {message_id}")
     if str(message.get("messageKind") or "") != MESSAGE_KIND_EMAIL_SUBMISSION:
         raise ValueError(f"Message {message_id} is not an email submission.")
-    metadata = _message_metadata(message)
-    if not metadata.get("authorized"):
-        return {
-            "ok": False,
-            "messageId": message_id,
-            "status": "rejected",
-            "error": metadata.get("responseError") or "Unauthorized sender.",
-        }
-    citations = metadata.get("directCitations") if isinstance(metadata.get("directCitations"), list) else []
-    if not citations:
-        return {
-            "ok": False,
-            "messageId": message_id,
-            "status": "rejected",
-            "error": "No direct citations to process.",
-        }
-
-    started_at = now_iso()
-    _mark_message_processing(client, message_id=message_id, started_at=started_at)
-    try:
-        result = _create_find_process_direct_citations(
-            client,
-            message=message,
-            citations=citations,
-            corpus_key=corpus_key,
-            steering_config_path=steering_config_path or str(DEFAULT_STEERING_CONFIG),
-            apply=apply,
-        )
-        finished_at = now_iso()
-        _mark_message_completed(
-            client,
-            message_id=message_id,
-            finished_at=finished_at,
-            result=result,
-        )
-        mime_release = release_inbound_mime_after_success(client, message_id=message_id)
-        return {"ok": True, "messageId": message_id, "status": "completed", "mimeRelease": mime_release, **result}
-    except Exception as error:
-        finished_at = now_iso()
-        error_message = str(error)
-        _mark_message_failed(client, message_id=message_id, finished_at=finished_at, error_message=error_message)
-        return {"ok": False, "messageId": message_id, "status": "failed", "error": error_message}
+    return process_inbound_email_submission(
+        client,
+        message_id=message_id,
+        corpus_key=corpus_key,
+        steering_config_path=steering_config_path,
+        apply=apply,
+    )
 
 
 def run_email_submission_cloud_procedure(
@@ -483,6 +537,113 @@ def run_email_submission_cloud_procedure(
             "apply": True,
         },
     )
+
+
+def _load_registered_reference_processing_records(
+    client: Any,
+    *,
+    registered_reference_ids: set[str],
+    import_run_id: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Point lookups for inbound email processing — avoid scanning entire Reference tables."""
+    if not registered_reference_ids:
+        return [], [], []
+    references_by_id = client.get_records_by_id("Reference", sorted(registered_reference_ids))
+    references = list(references_by_id.values())
+    attachments: list[dict[str, Any]] = []
+    seen_attachment_ids: set[str] = set()
+    for reference in references:
+        lineage_id = str(
+            reference.get("lineageId") or reference.get("referenceLineageId") or reference.get("id") or ""
+        ).strip()
+        if not lineage_id:
+            continue
+        for attachment in client.list_reference_attachments_by_lineage(lineage_id):
+            attachment_id = str(attachment.get("id") or "")
+            if attachment_id and attachment_id in seen_attachment_ids:
+                continue
+            if attachment_id:
+                seen_attachment_ids.add(attachment_id)
+            attachments.append(attachment)
+    relations: list[dict[str, Any]] = []
+    if import_run_id:
+        relations = client.list_semantic_relations_by_import_run_and_imported_at(import_run_id)
+    return references, attachments, relations
+
+
+def run_registered_reference_enrichment(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    registered_reference_ids: set[str],
+    import_run_id: str | None,
+    corpus_key: str,
+    steering_config_path: str,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Re-run source find, text extraction, and summarization for registered references."""
+    from papyrus_content.ids import knowledge_corpus_id
+    from papyrus_content.reference_metadata_generation import run_reference_metadata_generation_from_extracted_text
+    from papyrus_content.reference_url_text import run_reference_source_find, run_reference_url_text_extraction
+
+    steering_config = load_steering_config(steering_config_path) or {}
+    corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
+    if not registered_reference_ids:
+        empty_find = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
+        empty_process = {"attemptedCount": 0, "generatedCount": 0, "items": []}
+        return [], [], empty_find, empty_find, empty_process
+
+    scoped_references, scoped_attachments, scoped_relations = _load_registered_reference_processing_records(
+        client,
+        registered_reference_ids=registered_reference_ids,
+        import_run_id=import_run_id,
+    )
+    corpus_id = knowledge_corpus_id(corpus_config)
+    corpus_key_by_id = {corpus_id: str(corpus_config.get("key") or "")}
+    source_find_result = run_reference_source_find(
+        client=client,
+        references=scoped_references,
+        attachments=scoped_attachments,
+        corpus_key_by_id=corpus_key_by_id,
+        corpus_id=corpus_id,
+        reference_ids=registered_reference_ids,
+        curation_status="pending",
+        apply=True,
+    )
+    scoped_references, scoped_attachments, scoped_relations = _load_registered_reference_processing_records(
+        client,
+        registered_reference_ids=registered_reference_ids,
+        import_run_id=import_run_id,
+    )
+    find_result = run_reference_url_text_extraction(
+        client=client,
+        references=scoped_references,
+        attachments=scoped_attachments,
+        semantic_relations=scoped_relations,
+        corpus_key_by_id=corpus_key_by_id,
+        corpus_id=corpus_id,
+        reference_ids=registered_reference_ids,
+        curation_status="pending",
+        apply=True,
+    )
+    process_result = run_reference_metadata_generation_from_extracted_text(
+        references=scoped_references,
+        attachments=scoped_attachments,
+        corpus_id=corpus_id,
+        reference_ids=registered_reference_ids,
+        curation_status="pending",
+        apply=True,
+    )
+    scoped_references, scoped_attachments, _scoped_relations = _load_registered_reference_processing_records(
+        client,
+        registered_reference_ids=registered_reference_ids,
+        import_run_id=import_run_id,
+    )
+    return scoped_references, scoped_attachments, source_find_result, find_result, process_result
 
 
 def _create_find_process_direct_citations(
@@ -525,7 +686,6 @@ def _create_find_process_direct_citations(
     from papyrus_content.catalog import assert_reference_catalog_plan_safety, build_reference_catalog_registration_records
     from papyrus_content.ids import knowledge_corpus_id
     from papyrus_content.newsroom_summary import update_newsroom_summary_after_reference_registration
-    from papyrus_content.reference_url_text import run_reference_metadata_generation_from_extracted_text, run_reference_url_text_extraction
     from papyrus_content.steering import resolve_classifier_for_corpus
 
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
@@ -539,57 +699,83 @@ def _create_find_process_direct_citations(
     }
     plan = build_reference_catalog_registration_records(catalog, plan_options)
     assert_reference_catalog_plan_safety(plan)
+    planned_reference_ids = {
+        str(record["expected"].get("id") or "")
+        for record in plan["records"]
+        if record.get("modelName") == "Reference"
+    }
+    planned_reference_ids.discard("")
     changes = build_record_changes(client, plan["records"])
-    registered_reference_ids: set[str] = set()
+    registered_reference_ids: set[str] = set(planned_reference_ids)
     if apply:
         apply_record_changes(client, changes)
         update_newsroom_summary_after_reference_registration(client, changes, plan)
-        registered_reference_ids = {
+        applied_reference_ids = {
             str(change["expected"].get("id") or "")
             for change in changes
             if change.get("modelName") == "Reference" and change.get("action") in {"create", "update"}
         }
-        refreshed_references = client.list_records("Reference")
-        refreshed_attachments = client.list_records("ReferenceAttachment")
-        refreshed_relations = client.list_records("SemanticRelation")
-        corpus_id = knowledge_corpus_id(corpus_config)
-        find_result = run_reference_url_text_extraction(
-            client=client,
-            references=refreshed_references,
-            attachments=refreshed_attachments,
-            semantic_relations=refreshed_relations,
-            corpus_key_by_id={corpus_id: str(corpus_config.get("key") or "")},
-            corpus_id=corpus_id,
-            reference_ids=registered_reference_ids,
-            curation_status="all",
-            apply=True,
-        )
-        process_result = run_reference_metadata_generation_from_extracted_text(
-            references=refreshed_references,
-            attachments=refreshed_attachments,
-            corpus_id=corpus_id,
-            reference_ids=registered_reference_ids,
-            curation_status="all",
-            apply=True,
+        applied_reference_ids.discard("")
+        if applied_reference_ids:
+            registered_reference_ids = applied_reference_ids
+        import_run_id = str(plan.get("importRunId") or "").strip() or None
+        (
+            scoped_references,
+            scoped_attachments,
+            source_find_result,
+            find_result,
+            process_result,
+        ) = run_registered_reference_enrichment(
+            client,
+            registered_reference_ids=registered_reference_ids,
+            import_run_id=import_run_id,
+            corpus_key=corpus_key,
+            steering_config_path=steering_config_path,
         )
     else:
-        find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": []}
-        process_result = {"attemptedCount": 0, "generatedCount": 0}
+        scoped_references = []
+        scoped_attachments = []
+        source_find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
+        find_result = {"eligibleCount": 0, "plannedCount": 0, "changeCount": 0, "failures": [], "items": []}
+        process_result = {"attemptedCount": 0, "generatedCount": 0, "items": []}
+
+    from papyrus_newsroom.email_submission_feedback import build_reference_feedback_entries
+
+    reference_feedback = build_reference_feedback_entries(
+        references=scoped_references,
+        attachments=scoped_attachments,
+        find_result=find_result,
+        process_result=process_result,
+    )
 
     return {
         "importRunId": plan.get("importRunId"),
         "registeredReferenceCount": len(registered_reference_ids),
+        "registeredReferenceIds": sorted(registered_reference_ids),
         "directCitationCount": len(citations),
         "find": {
+            "sourceDiscovery": {
+                "eligible": source_find_result.get("eligibleCount", 0),
+                "planned": source_find_result.get("plannedCount", 0),
+                "changes": source_find_result.get("changeCount", 0),
+                "failures": len(source_find_result.get("failures", [])),
+            },
+            "extractedText": {
+                "eligible": find_result.get("eligibleCount", 0),
+                "planned": find_result.get("plannedCount", 0),
+                "changes": find_result.get("changeCount", 0),
+                "failures": len(find_result.get("failures", [])),
+            },
             "eligible": find_result.get("eligibleCount", 0),
             "planned": find_result.get("plannedCount", 0),
-            "changes": find_result.get("changeCount", 0),
-            "failures": len(find_result.get("failures", [])),
+            "changes": int(source_find_result.get("changeCount", 0)) + int(find_result.get("changeCount", 0)),
+            "failures": len(source_find_result.get("failures", [])) + len(find_result.get("failures", [])),
         },
         "process": {
             "attempted": process_result.get("attemptedCount", 0),
             "generated": process_result.get("generatedCount", 0),
         },
+        "referenceFeedback": reference_feedback,
     }
 
 
@@ -616,6 +802,38 @@ def _message_response_index_fields(message: dict[str, Any]) -> dict[str, Any]:
     if response_target:
         fields["responseTarget"] = response_target
     return fields
+
+
+def _try_send_submission_feedback(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    message_id: str,
+    processing_result: dict[str, Any] | None = None,
+    processing_error: str | None = None,
+    reference_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    try:
+        from papyrus_newsroom.email_submission_feedback import maybe_send_submission_feedback_email
+
+        return maybe_send_submission_feedback_email(
+            client,
+            message_id=message_id,
+            processing_result=processing_result,
+            processing_error=processing_error,
+            reference_entries=reference_entries,
+        )
+    except Exception as error:
+        return {"sent": False, "error": str(error)}
+
+
+def send_submission_feedback_for_message(
+    client: PapyrusGraphQLAuthoringClient,
+    *,
+    message_id: str,
+) -> dict[str, Any]:
+    from papyrus_newsroom.email_submission_feedback import send_feedback_only_for_message
+
+    return send_feedback_only_for_message(client, message_id=message_id)
 
 
 def _mark_message_processing(client: PapyrusGraphQLAuthoringClient, *, message_id: str, started_at: str) -> None:

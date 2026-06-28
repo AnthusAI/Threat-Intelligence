@@ -53,6 +53,8 @@ def _map_research(command: str, flags: list[str]) -> None:
     mapped = {
         "create": "create-research",
         "run": "run-research",
+        "run-tavily-deep": "run-tavily-deep-research",
+        "poll-tavily-deep": "poll-tavily-deep-research",
         "apply": "apply-research-packet",
         "process": "process-research-now",
         "packets": "research-packets",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from papyrus_newsroom import email_submissions
 
@@ -61,6 +62,92 @@ class EmailSubmissionTests(unittest.TestCase):
         )
         self.assertEqual(fields["createdAt"], "2026-05-31T10:00:00.000Z")
         self.assertEqual(fields["responseTarget"], "email_submission_processor")
+
+    def test_archive_inbound_mime_object_copies_then_deletes(self):
+        from botocore.exceptions import ClientError
+
+        s3 = mock.Mock()
+        missing = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        s3.head_object.side_effect = [{}, missing]
+        key = "inbound-email/ses-object-id"
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key=key,
+            s3_client=s3,
+        )
+        self.assertTrue(result["archived"])
+        self.assertEqual(result["archiveKey"], "inbound-email-archived/ses-object-id")
+        s3.copy_object.assert_called_once_with(
+            Bucket="media-bucket",
+            Key="inbound-email-archived/ses-object-id",
+            CopySource={"Bucket": "media-bucket", "Key": key},
+        )
+        s3.delete_object.assert_called_once_with(Bucket="media-bucket", Key=key)
+
+    def test_archive_inbound_mime_object_treats_missing_source_as_already_archived(self):
+        from botocore.exceptions import ClientError
+
+        s3 = mock.Mock()
+        missing = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        s3.head_object.side_effect = [missing, {}]
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key="inbound-email/ses-object-id",
+            s3_client=s3,
+        )
+        self.assertTrue(result["archived"])
+        self.assertTrue(result.get("alreadyArchived"))
+        s3.copy_object.assert_not_called()
+
+    def test_archive_inbound_mime_object_skips_ineligible_keys(self):
+        s3 = mock.Mock()
+        result = email_submissions.archive_inbound_mime_object(
+            bucket="media-bucket",
+            key="inbound-email/AMAZON_SES_SETUP_NOTIFICATION",
+            s3_client=s3,
+        )
+        self.assertFalse(result["archived"])
+        s3.copy_object.assert_not_called()
+
+    def test_load_registered_reference_processing_records_uses_scoped_queries(self):
+        client = mock.Mock()
+        client.get_records_by_id.return_value = {
+            "ref-1": {"id": "ref-1", "lineageId": "lineage-1"},
+        }
+        client.list_reference_attachments_by_lineage.return_value = [
+            {"id": "att-1", "referenceLineageId": "lineage-1"},
+        ]
+        client.list_semantic_relations_by_import_run_and_imported_at.return_value = [
+            {"id": "rel-1", "importRunId": "import-1"},
+        ]
+        references, attachments, relations = email_submissions._load_registered_reference_processing_records(
+            client,
+            registered_reference_ids={"ref-1"},
+            import_run_id="import-1",
+        )
+        client.get_records_by_id.assert_called_once_with("Reference", ["ref-1"])
+        client.list_reference_attachments_by_lineage.assert_called_once_with("lineage-1")
+        client.list_semantic_relations_by_import_run_and_imported_at.assert_called_once_with("import-1")
+        client.list_records.assert_not_called()
+        self.assertEqual(len(references), 1)
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(len(relations), 1)
+
+    def test_load_registered_reference_processing_records_uses_lineage_id_field(self):
+        client = mock.Mock()
+        client.get_records_by_id.return_value = {
+            "ref-1": {"id": "ref-1", "lineageId": "lineage-1"},
+        }
+        client.list_reference_attachments_by_lineage.return_value = [{"id": "att-1"}]
+        _references, attachments, relations = email_submissions._load_registered_reference_processing_records(
+            client,
+            registered_reference_ids={"ref-1"},
+            import_run_id=None,
+        )
+        client.list_reference_attachments_by_lineage.assert_called_once_with("lineage-1")
+        self.assertEqual(len(attachments), 1)
+        client.list_semantic_relations_by_import_run_and_imported_at.assert_not_called()
+        self.assertEqual(relations, [])
 
 
 if __name__ == "__main__":

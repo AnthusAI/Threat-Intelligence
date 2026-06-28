@@ -10,6 +10,7 @@ import {
 } from "../lib/reference-source-preview";
 
 function PdfSourcePreview({ preview }: { preview: Extract<ReferenceSourcePreview, { kind: "pdf" }> }) {
+  const viewportTitleId = useId();
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {

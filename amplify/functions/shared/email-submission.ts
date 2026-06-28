@@ -5,6 +5,12 @@ export const MESSAGE_DOMAIN_REFERENCE_INTAKE = "reference_intake";
 export const MESSAGE_TYPE_INBOUND_EMAIL = "INBOUND_EMAIL";
 export const RESPONSE_TARGET_EMAIL_PROCESSOR = "email_submission_processor";
 
+/** Stored on rejected intake when the sender is not a registered Papyrus user. */
+export const REJECTION_KIND_UNREGISTERED_SENDER = "unregistered_sender";
+
+export const UNREGISTERED_SENDER_RESPONSE_ERROR =
+  "This submission was not accepted because only registered Papyrus users may send reference submissions by email.";
+
 const URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/gi;
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi;
 const RESEARCH_ASSIGNMENT_PHRASES = [
@@ -78,17 +84,151 @@ export function extractRecipientsFromSesMail(mail: Record<string, unknown>): str
   return recipients;
 }
 
+const SUBMISSION_MESSAGE_ID_PATTERN = /^(message-email-submission-[a-f0-9]{20})(?:@|$)/i;
+
+export function parseInboundMimeThreading(rawBytes: Uint8Array): { inReplyTo: string | null; references: string | null } {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  const inReplyTo = raw.match(/^In-Reply-To:\s*(.+)$/im)?.[1]?.trim() ?? null;
+  const references = raw.match(/^References:\s*(.+)$/im)?.[1]?.trim() ?? null;
+  return { inReplyTo, references };
+}
+
+export function parseSubmissionMessageIdFromRfcMessageId(value: string | null | undefined): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const tokens = raw.match(/<([^>]+)>/g)?.map((entry) => entry.slice(1, -1)) ?? [raw.replace(/^<|>$/g, "")];
+  for (const token of tokens) {
+    const match = SUBMISSION_MESSAGE_ID_PATTERN.exec(token.trim());
+    if (match) return match[1];
+    if (token.startsWith("message-email-submission-")) return token.split("@")[0];
+  }
+  return null;
+}
+
+export function resolveParentSubmissionMessageId(
+  inReplyTo: string | null,
+  references: string | null,
+): string | null {
+  for (const header of [inReplyTo, references]) {
+    const resolved = parseSubmissionMessageIdFromRfcMessageId(header);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+export function countInboundAttachments(rawBytes: Uint8Array): number {
+  const raw = Buffer.from(rawBytes).toString("utf8");
+  let count = 0;
+  const parts = raw.split(/\r?\n\r?\n/);
+  for (let index = 0; index < parts.length; index += 1) {
+    const headerBlock = parts[index];
+    if (!headerBlock || !/Content-Type:/i.test(headerBlock)) continue;
+    const disposition = headerBlock.match(/Content-Disposition:\s*([^\r\n;]+)/i)?.[1]?.trim().toLowerCase() ?? "";
+    const contentType = headerBlock.match(/Content-Type:\s*([^;\r\n]+)/i)?.[1]?.trim().toLowerCase() ?? "";
+    const filename = headerBlock.match(/(?:name|filename)=["']?([^"';\r\n]+)/i)?.[1]?.trim() ?? "";
+    const isPdf = contentType === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
+    if (disposition === "attachment" || (disposition !== "inline" && isPdf && filename)) {
+      count += 1;
+    }
+  }
+  if (count > 0) return count;
+  const legacyMatches = raw.match(/Content-Disposition:\s*attachment/gi);
+  return legacyMatches?.length ?? 0;
+}
+
+const MIN_COMPOSED_PROSE_CHARS_FOR_AGENT = 120;
+
+export function proseAfterStrippingCitations(
+  bodyText: string,
+  citations: Array<{ url?: string }>,
+): string {
+  let text = String(bodyText ?? "");
+  for (const citation of citations) {
+    const url = String(citation.url ?? "").trim();
+    if (url) text = text.split(url).join(" ");
+  }
+  text = text.replace(/https?:\/\/\S+/gi, " ");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export function hasSubstantialComposedProse(
+  bodyText: string,
+  citations: Array<{ url?: string }>,
+): boolean {
+  const prose = proseAfterStrippingCitations(bodyText, citations);
+  if (prose.length >= MIN_COMPOSED_PROSE_CHARS_FOR_AGENT) return true;
+  const clauses = prose.split(/[.!?\n]+/).map((entry) => entry.trim()).filter((entry) => entry.length >= 24);
+  return clauses.length >= 2;
+}
+
+export function classifyNewSubmissionIntake(
+  bodyText: string,
+  citations: Array<Record<string, unknown>>,
+  attachmentCount = 0,
+): string {
+  const hasPdfAttachments = attachmentCount > 0;
+  if (citations.length > 0 && hasPdfAttachments) return "agent_intake";
+  if (citations.length === 0 && hasPdfAttachments) {
+    if (attachmentCount > 1) return "agent_intake";
+    if (hasSubstantialComposedProse(bodyText, [])) return "agent_intake";
+    return "pdf_only_intake";
+  }
+  if (citations.length === 0) return "new_submission";
+  if (citations.length > 1) return "agent_intake";
+  if (hasSubstantialComposedProse(bodyText, citations as Array<{ url?: string }>)) return "agent_intake";
+  return "direct_citation_intake";
+}
+
+export function classifyInboundEmailIntake(input: {
+  bodyText: string;
+  citations: Array<Record<string, unknown>>;
+  parentSubmissionMessageId: string | null;
+  attachmentCount: number;
+  userComposedText: string;
+}): string {
+  if (input.parentSubmissionMessageId) {
+    if (input.attachmentCount > 0 && !input.userComposedText) return "attachment_only_reply";
+    if (input.userComposedText || input.attachmentCount > 0) return "conversational_reply";
+    return "empty_reply";
+  }
+  return classifyNewSubmissionIntake(input.bodyText, input.citations, input.attachmentCount);
+}
+
+export function extractUserComposedReplyText(bodyText: string): string {
+  let text = String(bodyText ?? "").replace(/\r\n/g, "\n");
+  const markers = [
+    /\nOn .+ wrote:\s*\n/i,
+    /\n-{2,}\s*Original Message\s*-{2,}\s*\n/i,
+    /\nFrom:\s*.+\n/i,
+  ];
+  let earliest: number | null = null;
+  for (const marker of markers) {
+    const match = marker.exec(text);
+    if (match && (earliest === null || match.index < earliest)) earliest = match.index;
+  }
+  if (earliest !== null && earliest > 0) text = text.slice(0, earliest);
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith(">")) break;
+    lines.push(line);
+  }
+  return lines.join("\n").trim();
+}
+
 export function parseInboundEmailBody(rawBytes: Uint8Array): { subject: string; text: string } {
   const raw = Buffer.from(rawBytes).toString("utf8");
   const subjectMatch = raw.match(/^Subject:\s*(.*)$/im);
   const subject = subjectMatch?.[1]?.trim() ?? "";
   const plainMatch = raw.match(/Content-Type:\s*text\/plain[\s\S]*?\r?\n\r?\n([\s\S]*?)(?:\r?\n--|$)/i);
   let text = plainMatch?.[1]?.trim() ?? "";
-  if (!text) {
-    const htmlMatch = raw.match(/Content-Type:\s*text\/html[\s\S]*?\r?\n\r?\n([\s\S]*?)(?:\r?\n--|$)/i);
-    text = htmlToText(htmlMatch?.[1] ?? "");
+  const htmlMatch = !plainMatch
+    ? raw.match(/Content-Type:\s*text\/html[\s\S]*?\r?\n\r?\n([\s\S]*?)(?:\r?\n--|$)/i)
+    : null;
+  if (!plainMatch && htmlMatch) {
+    text = htmlToText(htmlMatch[1] ?? "");
   }
-  if (!text) {
+  // For multipart MIME, do not fall back to the raw object (PDF parts may contain DOI-like tokens).
+  if (!plainMatch && !htmlMatch && !/Content-Type:\s*multipart\//i.test(raw)) {
     const bodyIndex = raw.indexOf("\r\n\r\n");
     text = bodyIndex >= 0 ? raw.slice(bodyIndex + 4).trim() : raw.trim();
   }
@@ -156,6 +296,7 @@ export async function lookupRegisteredUserProfileId(client: LambdaDataClient, se
       { limit: 10, authMode: LAMBDA_DATA_AUTH_MODE },
     );
     for (const identity of response.data ?? []) {
+      if (!identity) continue;
       const profileId = String(identity.userProfileId ?? "").trim();
       if (profileId) return profileId;
     }
@@ -202,6 +343,11 @@ export function buildEmailSubmissionMessageInput(input: {
   status: string;
   responseStatus: string;
   responseError: string | null;
+  parentSubmissionMessageId?: string | null;
+  intakeClassification?: string | null;
+  inboundInReplyTo?: string | null;
+  inboundReferences?: string | null;
+  inboundAttachmentCount?: number;
 }) {
   const record: Record<string, unknown> = {
     id: input.id,
@@ -230,8 +376,18 @@ export function buildEmailSubmissionMessageInput(input: {
       s3Bucket: input.s3Bucket,
       s3Key: input.s3Key,
       authorized: input.authorized,
+      ...(input.authorized
+        ? {}
+        : {
+            rejectionKind: REJECTION_KIND_UNREGISTERED_SENDER,
+          }),
       directCitationCount: input.citations.length,
       directCitations: input.citations,
+      parentSubmissionMessageId: input.parentSubmissionMessageId ?? null,
+      intakeClassification: input.intakeClassification ?? null,
+      inboundInReplyTo: input.inboundInReplyTo ?? null,
+      inboundReferences: input.inboundReferences ?? null,
+      inboundAttachmentCount: input.inboundAttachmentCount ?? 0,
     }),
     createdAt: input.now,
     updatedAt: input.now,
@@ -243,7 +399,7 @@ export function buildEmailSubmissionMessageInput(input: {
   return record;
 }
 
-function titleFromUrl(url: string): string {
+export function titleFromUrl(url: string): string {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./, "");
@@ -255,6 +411,6 @@ function titleFromUrl(url: string): string {
   }
 }
 
-function directCitationRationale(source: string): string {
+export function directCitationRationale(source: string): string {
   return `Direct citation submitted by email: ${source}. This is explicit source material for reference create/find/process intake, not a research assignment.`;
 }

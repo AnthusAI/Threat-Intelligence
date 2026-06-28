@@ -1295,6 +1295,7 @@ export const schema = a.schema({
     })
     .secondaryIndexes((index) => [
       index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listReferencesByNewsroomFeedAndCreatedAt"),
+      index("newsroomFeedKey").sortKeys(["importedAt"]).queryField("listReferencesByNewsroomFeedAndImportedAt"),
       index("lineageId").sortKeys(["versionNumber"]).queryField("listReferencesByLineageAndVersion"),
       index("corpusId").sortKeys(["externalItemId"]).queryField("listReferencesByCorpusAndExternalItem"),
       index("versionState").sortKeys(["updatedAt"]).queryField("listReferencesByVersionStateAndUpdatedAt"),

@@ -146,32 +146,51 @@ def upload_attachment_body(
     }
 
 
+def _message_body_attachment_for_expected(expected: dict[str, Any], *, now: Any) -> dict[str, Any] | None:
+    body = ""
+    if "body" in expected:
+        body = str(expected.pop("body"))
+    else:
+        body = str(expected.get("content") or "")
+    body = body.strip()
+    if not body:
+        return None
+    if body.startswith("{") or body.startswith("["):
+        filename = "message.json"
+        media_type = "application/json"
+    elif body.startswith("#") or "\n#" in body or "**" in body:
+        filename = "message.md"
+        media_type = "text/markdown"
+    else:
+        filename = "message.txt"
+        media_type = "text/plain"
+    return attachment_record(
+        build_text_model_payload_attachment(
+            {
+                "ownerKind": "message",
+                "ownerId": expected["id"],
+                "ownerLineageId": expected["id"],
+                "role": "message_body",
+                "sortKey": "message",
+                "filename": filename,
+                "mediaType": media_type,
+                "content": body,
+                "importRunId": expected.get("importRunId"),
+                "now": now,
+            }
+        )
+    )
+
+
 def expand_private_payload_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     expanded: list[dict[str, Any]] = []
     for record in records:
         expected = dict(record.get("expected") or {})
         now = expected.get("updatedAt") or expected.get("createdAt")
         if record["modelName"] == "Message":
-            if "body" in expected:
-                body = str(expected.pop("body"))
-                expanded.append(
-                    attachment_record(
-                        build_text_model_payload_attachment(
-                            {
-                                "ownerKind": "message",
-                                "ownerId": expected["id"],
-                                "ownerLineageId": expected["id"],
-                                "role": "message_body",
-                                "sortKey": "message",
-                                "filename": "message.json" if body.strip().startswith("{") else "message.txt",
-                                "mediaType": "application/json" if body.strip().startswith("{") else "text/plain",
-                                "content": body,
-                                "importRunId": expected.get("importRunId"),
-                                "now": now,
-                            }
-                        )
-                    )
-                )
+            message_body_attachment = _message_body_attachment_for_expected(expected, now=now)
+            if message_body_attachment:
+                expanded.append(message_body_attachment)
             if "metadata" in expected:
                 metadata = parse_jsonish(expected.pop("metadata"))
                 expanded.append(

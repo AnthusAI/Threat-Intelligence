@@ -28,3 +28,5 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 scripts/favicon/previews/*.png
+scripts/gitblock
+scripts/gitunblock

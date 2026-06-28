@@ -5,4 +5,5 @@ export const newsroomSummary = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 30,
   memoryMB: 512,
+  resourceGroupName: "data",
 });

@@ -23,7 +23,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import tiktoken
@@ -141,6 +141,15 @@ retrievedAt importRunId importedAt curationStatus curationStatusKey curationStat
 LIST_REFERENCES_BY_CORPUS_QUERY = f"""
 query ListReferencesByCorpus($corpusId: ID!, $limit: Int, $nextToken: String) {{
   listReferencesByCorpusAndExternalItem(corpusId: $corpusId, limit: $limit, nextToken: $nextToken) {{
+    items {{ {REFERENCE_FIELDS} }}
+    nextToken
+  }}
+}}
+"""
+
+LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY = f"""
+query ListReferencesByNewsroomFeedAndImportedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {{
+  listReferencesByNewsroomFeedAndImportedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {{
     items {{ {REFERENCE_FIELDS} }}
     nextToken
   }}
@@ -1745,18 +1754,24 @@ def reference_list(
     order: str = "newest",
     scan_limit: int = 1000,
 ) -> dict[str, Any]:
-    references = list_references_by_corpus(_knowledge_corpus_id(corpus_key), limit=max(scan_limit, limit))
+    corpus_id = _knowledge_corpus_id(corpus_key)
     normalized_status = str(status or "").strip().lower()
+    normalized_order = _normalize_reference_list_order(order)
+    reverse = normalized_order.endswith("-oldest") is False
+    if normalized_order.startswith("imported"):
+        references = list_references_by_newsroom_feed_imported(limit=max(scan_limit, limit), corpus_id=corpus_id)
+    else:
+        references = list_references_by_corpus(corpus_id, limit=max(scan_limit, limit))
     if normalized_status and normalized_status not in {"all", "*"}:
         references = [reference for reference in references if str(reference.get("curationStatus") or "").lower() == normalized_status]
-    reverse = order != "oldest"
-    references.sort(key=_reference_chrono_key, reverse=reverse)
+    sort_key = _reference_list_sort_key(normalized_order)
+    references.sort(key=sort_key, reverse=reverse)
     selected = references[:max(int(limit or 25), 1)]
     return {
         "kind": "reference.list",
         "corpusKey": corpus_key,
         "status": status or "all",
-        "order": "newest" if reverse else "oldest",
+        "order": normalized_order,
         "count": len(selected),
         "scanned": len(references),
         "items": [_reference_summary(reference) | {
@@ -1764,6 +1779,7 @@ def reference_list(
             "storagePath": reference.get("storagePath"),
             "importedAt": reference.get("importedAt"),
             "updatedAt": reference.get("updatedAt"),
+            "sourcePublishedAt": reference.get("sourcePublishedAt"),
         } for reference in selected],
     }
 
@@ -2700,6 +2716,47 @@ def list_references_by_corpus(corpus_id: str, limit: int = 1000) -> list[dict[st
     return [record for record in records if record.get("versionState") == "current"]
 
 
+def list_references_by_newsroom_feed_imported(
+    *,
+    limit: int = 1000,
+    corpus_id: str | None = None,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    next_token = None
+    filter_input: dict[str, Any] = {
+        "versionState": {"eq": "current"},
+        "newsroomFeedKey": {"eq": "references"},
+    }
+    if corpus_id:
+        filter_input["corpusId"] = {"eq": corpus_id}
+    try:
+        while True:
+            data = _graphql(
+                LIST_REFERENCES_BY_NEWSROOM_FEED_IMPORTED_QUERY,
+                {
+                    "newsroomFeedKey": "references",
+                    "sortDirection": "DESC",
+                    "limit": min(max(limit - len(records), 1), 100),
+                    "nextToken": next_token,
+                    "filter": filter_input,
+                },
+            )
+            connection = data.get("listReferencesByNewsroomFeedAndImportedAt") or {}
+            records.extend(connection.get("items") or [])
+            next_token = connection.get("nextToken")
+            if not next_token or len(records) >= limit:
+                break
+    except Exception as exc:
+        message = str(exc)
+        if "FieldUndefined" not in message or "listReferencesByNewsroomFeedAndImportedAt" not in message:
+            raise
+    if records:
+        return [record for record in records if record.get("versionState") == "current"]
+    if not corpus_id:
+        return []
+    return list_references_by_corpus(corpus_id, limit=limit)
+
+
 def load_publication_doctrine_context(*, graphql_func: Any | None = None) -> dict[str, Any]:
     graphql = graphql_func or _graphql
     records = []
@@ -3315,9 +3372,14 @@ def reference_generate_metadata_from_extracted_text(
     model: str = REFERENCE_METADATA_MODEL_DEFAULT,
     apply: bool = False,
     refresh: bool = True,
+    reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    semantic = _semantic_client()
-    reference = _resolve_reference(semantic, reference_id)
+    if isinstance(reference, dict) and str(reference.get("id") or "").strip():
+        resolved_reference = reference
+    else:
+        semantic = _semantic_client()
+        resolved_reference = _resolve_reference(semantic, reference_id)
+    reference = resolved_reference
     context = resolve_reference_text_generation_context(
         extracted_text=extracted_text,
         original_title=original_title or str(reference.get("title") or ""),
@@ -4222,34 +4284,9 @@ def _prepare_graphql_input(input_payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    endpoint = os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip()
-    token = os.environ.get("PAPYRUS_GRAPHQL_JWT", "").strip()
-    if not endpoint:
-        raise RuntimeError("PAPYRUS_GRAPHQL_ENDPOINT is required")
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-    }
-    if token:
-        headers["Authorization"] = _lambda_auth_token(token)
-    else:
-        headers.update(_iam_signed_graphql_headers(endpoint, body))
-    request = urllib.request.Request(
-        endpoint,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GraphQL request failed: {error.code} {body[:500]}") from error
-    if payload.get("errors"):
-        messages = "; ".join(str(entry.get("message") or entry) for entry in payload["errors"])
-        raise RuntimeError(f"GraphQL request failed: {messages}")
-    return payload.get("data") or {}
+    from papyrus_content.graphql_http import execute_graphql
+
+    return execute_graphql(query, variables, timeout=60)
 
 
 def _lambda_auth_token(token: str) -> str:
@@ -4311,6 +4348,46 @@ def _reference_summary(reference: dict[str, Any]) -> dict[str, Any]:
         "title": reference.get("title"),
         "curationStatus": reference.get("curationStatus"),
     }
+
+
+def _normalize_reference_list_order(order: str) -> str:
+    normalized = str(order or "").strip().lower().replace("_", "-")
+    if normalized in {"imported", "import", "import-date", "imported-newest"}:
+        return "imported"
+    if normalized in {"imported-oldest", "import-oldest"}:
+        return "imported-oldest"
+    if normalized in {"published", "publication", "publication-date", "published-newest"}:
+        return "published"
+    if normalized in {"published-oldest", "publication-oldest"}:
+        return "published-oldest"
+    if normalized == "oldest":
+        return "oldest"
+    return "newest"
+
+
+def _reference_list_sort_key(order: str) -> Callable[[dict[str, Any]], str]:
+    normalized = _normalize_reference_list_order(order)
+    if normalized.startswith("imported"):
+        return _reference_imported_key
+    if normalized.startswith("published"):
+        return _reference_publication_key
+    return _reference_chrono_key
+
+
+def _reference_imported_key(reference: dict[str, Any]) -> str:
+    return str(reference.get("importedAt") or reference.get("createdAt") or reference.get("id") or "")
+
+
+def _reference_publication_key(reference: dict[str, Any]) -> str:
+    return str(
+        reference.get("sourcePublishedAt")
+        or reference.get("sourceUpdatedAt")
+        or reference.get("retrievedAt")
+        or reference.get("importedAt")
+        or reference.get("updatedAt")
+        or reference.get("id")
+        or ""
+    )
 
 
 def _reference_chrono_key(reference: dict[str, Any]) -> str:
@@ -4818,25 +4895,19 @@ def _title_subtitle_from_local_html(source_text: str) -> dict[str, Any]:
     text = source_text or ""
     if "<html" not in text.lower():
         return {}
-    title = (
-        _html_meta_content_from_text(text, "citation_title")
-        or _html_meta_content_from_text(text, "og:title", property_name=True)
-        or _html_meta_content_from_text(text, "twitter:title")
-        or _clean_html_title(_html_title_from_text(text))
-    )
-    title = _normalize_reference_title_candidate(title)
-    subtitle = ""
-    if not title:
-        return {}
-    return {
-        "title": title,
-        "subtitle": subtitle,
-        "titleMode": "original_source_heading",
-        "subtitleMode": "original_source_heading" if subtitle else "unresolved",
-        "source": "local_html_metadata",
-        "sourceUrls": [],
-        "rationale": "Resolved from local imported HTML metadata.",
-    }
+    from papyrus_content.web_structured_metadata import resolve_web_title_subtitle
+
+    resolved = resolve_web_title_subtitle("", html_content=text)
+    if resolved.get("title"):
+        return {
+            **resolved,
+            "titleMode": "original_source_heading",
+            "subtitleMode": "original_source_heading" if resolved.get("subtitle") else "unresolved",
+            "source": "local_html_metadata",
+            "sourceUrls": [],
+            "rationale": "Resolved from local imported HTML via shared web heuristics.",
+        }
+    return {}
 
 
 def _title_subtitle_from_arxiv(source_uri: str, *, fetcher: Any) -> dict[str, Any]:
@@ -4896,6 +4967,14 @@ def _title_subtitle_from_crossref(source_uri: str, *, fetcher: Any) -> dict[str,
 def _title_subtitle_from_html(source_uri: str, *, fetcher: Any) -> dict[str, Any]:
     if not re.match(r"^https?://", source_uri, flags=re.IGNORECASE):
         return {}
+    from papyrus_content.web_structured_metadata import resolve_web_title_subtitle
+
+    def _fetch(url: str, timeout: int = 20) -> str:
+        return str(fetcher(url, timeout=timeout) or "")
+
+    resolved = resolve_web_title_subtitle(source_uri, fetcher=_fetch)
+    if resolved.get("title"):
+        return resolved
     try:
         body = fetcher(source_uri, timeout=20)
     except Exception:
@@ -4913,7 +4992,7 @@ def _title_subtitle_from_html(source_uri: str, *, fetcher: Any) -> dict[str, Any
         "subtitleMode": "original_web_metadata" if subtitle else "unresolved",
         "source": "html_metadata",
         "sourceUrls": [source_uri],
-        "rationale": "Resolved from HTML title/meta tags.",
+        "rationale": "Resolved from HTML title/meta tags (regex fallback).",
     } if title else {}
 
 

@@ -10,6 +10,8 @@ import { procedureAction } from "../functions/procedure-action/resource";
 import { readerSettings } from "../functions/reader-settings/resource";
 import { emailSubmissionProcessor } from "../functions/email-submission-processor/resource";
 import { sesInboundReceive } from "../functions/ses-inbound-receive/resource";
+import { slackDelivery } from "../functions/slack-delivery/resource";
+import { slackEvents } from "../functions/slack-events/resource";
 const authoringOperations: ("read" | "create" | "update" | "delete")[] = [
   "read",
   "create",
@@ -1418,6 +1420,7 @@ const schema = a.schema({
     })
     .secondaryIndexes((index) => [
       index("newsroomFeedKey").sortKeys(["createdAt"]).queryField("listReferencesByNewsroomFeedAndCreatedAt"),
+      index("newsroomFeedKey").sortKeys(["importedAt"]).queryField("listReferencesByNewsroomFeedAndImportedAt"),
       index("lineageId").sortKeys(["versionNumber"]).queryField("listReferencesByLineageAndVersion"),
       index("corpusId").sortKeys(["externalItemId"]).queryField("listReferencesByCorpusAndExternalItem"),
       index("versionState").sortKeys(["updatedAt"]).queryField("listReferencesByVersionStateAndUpdatedAt"),
@@ -2114,6 +2117,8 @@ const schema = a.schema({
   allow.resource(procedureAction),
   allow.resource(sesInboundReceive),
   allow.resource(emailSubmissionProcessor),
+  allow.resource(slackEvents),
+  allow.resource(slackDelivery),
 ]);
 
 export type Schema = ClientSchema<typeof schema>;

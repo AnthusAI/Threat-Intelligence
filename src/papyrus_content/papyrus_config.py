@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 import yaml
 
 from .env import PAPYRUS_ROOT
 
 DEFAULT_PAPYRUS_CONFIG = ".papyrus/config.yaml"
+DEFAULT_PUBLIC_SITE_BASE_URL = "https://p.apyr.us"
+DEFAULT_NEWSROOM_REFERENCE_WEB_PATH_PREFIX = "/newsroom/references"
 DEFAULT_STEERING_CONFIG_PATH = "corpora/papyrus-steering.yml"
 DEFAULT_LEXICAL_STEERING_PATH = "corpora/papyrus-lexical-steering.yml"
 DEFAULT_TOPIC_IGNORE_TERMS = (
@@ -63,6 +66,13 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
     if not isinstance(topics, dict):
         raise ValueError("Papyrus config topics must be an object.")
     ignore_terms = normalize_ignore_terms(topics.get("ignoreTerms"))
+    public_site = raw_config.get("publicSite") or {}
+    if public_site is not None and not isinstance(public_site, dict):
+        raise ValueError("Papyrus config publicSite must be an object.")
+    public_site = public_site if isinstance(public_site, dict) else {}
+    base_url = _optional_string(public_site.get("baseUrl"))
+    if base_url:
+        base_url = normalize_public_site_base_url(base_url)
     return {
         "configPath": config_path,
         "schemaVersion": 1,
@@ -70,6 +80,9 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
             "steeringConfigPath": _optional_string(topics.get("steeringConfigPath")) or DEFAULT_STEERING_CONFIG_PATH,
             "lexicalConfigPath": _optional_string(topics.get("lexicalConfigPath")) or DEFAULT_LEXICAL_STEERING_PATH,
             "ignoreTerms": ignore_terms or list(DEFAULT_TOPIC_IGNORE_TERMS),
+        },
+        "publicSite": {
+            "baseUrl": base_url,
         },
     }
 
@@ -93,6 +106,42 @@ def resolve_topics_ignore_terms() -> list[str]:
     if config:
         return list(config["topics"]["ignoreTerms"] or [])
     return list(DEFAULT_TOPIC_IGNORE_TERMS)
+
+
+def normalize_public_site_base_url(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        raise ValueError("Public site baseUrl must be a non-empty URL.")
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Public site baseUrl must be an absolute http(s) URL.")
+    path = (parsed.path or "").rstrip("/")
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+
+def resolve_public_site_base_url() -> str:
+    env_value = str(os.environ.get("PAPYRUS_PUBLIC_SITE_BASE_URL") or "").strip()
+    if env_value:
+        return normalize_public_site_base_url(env_value)
+    config = load_papyrus_config()
+    if config:
+        configured = str((config.get("publicSite") or {}).get("baseUrl") or "").strip()
+        if configured:
+            return configured
+    return DEFAULT_PUBLIC_SITE_BASE_URL
+
+
+def build_newsroom_reference_public_url(
+    lineage_id: str,
+    *,
+    base_url: str | None = None,
+) -> str | None:
+    lineage = str(lineage_id or "").strip()
+    if not lineage:
+        return None
+    base = str(base_url or resolve_public_site_base_url()).rstrip("/")
+    encoded = quote(unquote(lineage), safe="")
+    return f"{base}{DEFAULT_NEWSROOM_REFERENCE_WEB_PATH_PREFIX}/{encoded}"
 
 
 def normalize_ignore_terms(raw_value: Any) -> list[str]:

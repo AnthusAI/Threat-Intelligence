@@ -2,16 +2,23 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import {
   buildEmailSubmissionMessageInput,
+  classifyInboundEmailIntake,
+  countInboundAttachments,
   extractDirectCitations,
   extractRecipientsFromRawMime,
   extractRecipientsFromSesMail,
   extractSenderFromRawMime,
   extractSenderFromSesMail,
+  extractUserComposedReplyText,
   looksLikeResearchAssignmentRequest,
   lookupRegisteredUserProfileId,
   normalizeEmailAddress,
   parseInboundEmailBody,
+  parseInboundMimeThreading,
+  resolveParentSubmissionMessageId,
+  UNREGISTERED_SENDER_RESPONSE_ERROR,
 } from "../shared/email-submission";
+import { parseInboundMimeForIntake } from "../shared/email-mime-intake";
 import {
   inboundMessageIdFromS3,
   parseMessageMetadata,
@@ -32,9 +39,15 @@ type InboundPayload = {
   recipients: string[];
   subject: string;
   bodyText: string;
+  citations: Array<Record<string, unknown>>;
   s3Bucket: string | null;
   s3Key: string | null;
   sesMessageId: string | null;
+  inReplyTo: string | null;
+  references: string | null;
+  attachmentCount: number;
+  userComposedText: string;
+  parentSubmissionMessageId: string | null;
 };
 
 type ExistingMessage = {
@@ -110,19 +123,39 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
   const dataClient = await getLambdaDataClient();
   const profileId = await lookupRegisteredUserProfileId(dataClient, inbound.senderEmail);
   const authorized = Boolean(profileId);
-  const citations = authorized ? extractDirectCitations(inbound.bodyText) : [];
+  const citations = authorized
+    ? (inbound.citations.length > 0
+      ? inbound.citations
+      : extractDirectCitations(inbound.bodyText) as Array<Record<string, unknown>>)
+    : [];
+  const intakeClassification = classifyInboundEmailIntake({
+    bodyText: inbound.bodyText,
+    citations,
+    parentSubmissionMessageId: inbound.parentSubmissionMessageId,
+    attachmentCount: inbound.attachmentCount,
+    userComposedText: inbound.userComposedText,
+  });
+  const attachmentOnlyReply = intakeClassification === "attachment_only_reply";
+  const conversationalReply = intakeClassification === "conversational_reply";
+  const agentIntake = intakeClassification === "agent_intake";
+  const pdfOnlyIntake = intakeClassification === "pdf_only_intake";
 
   let status = authorized ? "received" : "rejected";
   let responseStatus = authorized ? "PENDING" : "REJECTED";
-  let responseError: string | null = authorized
-    ? null
-    : "Sender email is not registered to an active Papyrus user.";
+  let responseError: string | null = authorized ? null : UNREGISTERED_SENDER_RESPONSE_ERROR;
 
   if (authorized && looksLikeResearchAssignmentRequest(inbound.bodyText, citations.length)) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "Submission looks like a research assignment request. Send direct citations (URLs or DOIs), not open-ended research tasks.";
-  } else if (authorized && citations.length === 0) {
+  } else if (
+    authorized
+    && citations.length === 0
+    && !attachmentOnlyReply
+    && !conversationalReply
+    && !agentIntake
+    && !pdfOnlyIntake
+  ) {
     status = "rejected";
     responseStatus = "REJECTED";
     responseError = "No direct citations (URL or DOI) were found in the email body.";
@@ -145,6 +178,11 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
     status,
     responseStatus,
     responseError,
+    parentSubmissionMessageId: inbound.parentSubmissionMessageId,
+    intakeClassification,
+    inboundInReplyTo: inbound.inReplyTo,
+    inboundReferences: inbound.references,
+    inboundAttachmentCount: inbound.attachmentCount,
   });
 
   const createResponse = await dataClient.models.Message.create(
@@ -158,6 +196,8 @@ async function processInboundSubmission(inbound: InboundPayload): Promise<Record
 
   if (authorized && responseStatus === "PENDING" && PROCESSOR_FUNCTION_NAME) {
     await invokeEmailProcessor(resolvedMessageId);
+  } else if (responseStatus === "REJECTED" && PROCESSOR_FUNCTION_NAME) {
+    await invokeEmailProcessor(resolvedMessageId, { sendFeedbackOnly: true });
   }
 
   return {
@@ -183,6 +223,19 @@ async function resumeExistingInboundSubmission(
   const responseStatus = String(existing.responseStatus ?? metadata.responseStatus ?? "").toUpperCase();
 
   if (responseStatus === "COMPLETED") {
+    const feedbackDeferred = metadata.feedbackEmailDeferred === true && !metadata.feedbackEmailSentAt;
+    if (feedbackDeferred && PROCESSOR_FUNCTION_NAME) {
+      await invokeEmailProcessor(existing.id, { sendFeedbackOnly: true });
+      return {
+        ok: true,
+        messageId: existing.id,
+        idempotent: true,
+        alreadyProcessed: true,
+        reattemptedDeferredFeedback: true,
+        recipientEmail,
+        senderEmail: inbound.senderEmail,
+      };
+    }
     return {
       ok: true,
       messageId: existing.id,
@@ -202,6 +255,27 @@ async function resumeExistingInboundSubmission(
       messageId: existing.id,
       idempotent: true,
       reprocessed: true,
+      responseStatus,
+      recipientEmail,
+      senderEmail: inbound.senderEmail,
+    };
+  }
+
+  const responseError = String(metadata.responseError ?? "").toLowerCase();
+  const falseNoCitationRejection = responseStatus === "REJECTED"
+    && responseError.includes("no direct citations")
+    && inbound.citations.length > 0;
+  if (authorized && falseNoCitationRejection) {
+    if (PROCESSOR_FUNCTION_NAME) {
+      await invokeEmailProcessor(existing.id);
+    }
+    return {
+      ok: true,
+      messageId: existing.id,
+      idempotent: true,
+      reprocessed: true,
+      correctedCitations: true,
+      directCitationCount: inbound.citations.length,
       responseStatus,
       recipientEmail,
       senderEmail: inbound.senderEmail,
@@ -232,13 +306,17 @@ async function getExistingInboundMessage(messageId: string): Promise<ExistingMes
   return (response.data as ExistingMessage | null) ?? null;
 }
 
-async function invokeEmailProcessor(messageId: string): Promise<void> {
+async function invokeEmailProcessor(
+  messageId: string,
+  options: { sendFeedbackOnly?: boolean } = {},
+): Promise<void> {
   await lambdaClient.send(new InvokeCommand({
     FunctionName: PROCESSOR_FUNCTION_NAME,
     InvocationType: "Event",
     Payload: Buffer.from(JSON.stringify({
       messageId,
       corpusKey: process.env.PAPYRUS_INBOUND_EMAIL_CORPUS_KEY ?? "AI-ML-research",
+      ...(options.sendFeedbackOnly ? { sendFeedbackOnly: true } : {}),
     })),
   }));
 }
@@ -306,15 +384,21 @@ async function resolveFromSesMail(
     };
   }
 
-  return {
+  return enrichInboundPayload({
     senderEmail,
     recipients,
     subject,
     bodyText: "",
+    citations: [],
     s3Bucket,
     s3Key,
     sesMessageId,
-  };
+    inReplyTo: null,
+    references: null,
+    attachmentCount: 0,
+    userComposedText: "",
+    parentSubmissionMessageId: null,
+  });
 }
 
 async function loadInboundFromS3Object(
@@ -324,15 +408,32 @@ async function loadInboundFromS3Object(
 ): Promise<InboundPayload> {
   const rawObject = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const rawBytes = await streamToBuffer(rawObject.Body);
-  const parsed = parseInboundEmailBody(rawBytes);
-  return {
+  const intake = parseInboundMimeForIntake(rawBytes);
+  const threading = parseInboundMimeThreading(rawBytes);
+  return enrichInboundPayload({
     senderEmail: extractSenderFromRawMime(rawBytes),
     recipients: extractRecipientsFromRawMime(rawBytes),
-    subject: parsed.subject || "(no subject)",
-    bodyText: parsed.text,
+    subject: intake.subject || "(no subject)",
+    bodyText: intake.bodyText,
+    citations: intake.citations as Array<Record<string, unknown>>,
     s3Bucket: bucket,
     s3Key: key,
     sesMessageId,
+    inReplyTo: threading.inReplyTo,
+    references: threading.references,
+    attachmentCount: countInboundAttachments(rawBytes),
+    userComposedText: extractUserComposedReplyText(intake.bodyText),
+    parentSubmissionMessageId: null,
+  });
+}
+
+function enrichInboundPayload(payload: InboundPayload): InboundPayload {
+  const parentSubmissionMessageId = payload.parentSubmissionMessageId
+    ?? resolveParentSubmissionMessageId(payload.inReplyTo, payload.references);
+  return {
+    ...payload,
+    parentSubmissionMessageId,
+    userComposedText: payload.userComposedText || extractUserComposedReplyText(payload.bodyText),
   };
 }
 

@@ -24,6 +24,7 @@ from .assignments_workflow import (
     run_story_cycle,
     story_cycle_output,
 )
+from .tavily_deep_research import poll_tavily_deep_research_command, run_tavily_deep_research
 from .graphql_authoring import create_authoring_client
 from .options import parse_options, resolve_mutation_apply
 
@@ -73,6 +74,14 @@ def assignments_create_reporting(flags: list[str]) -> None:
 
 def assignments_run_research(flags: list[str]) -> None:
     run_research_assignment(flags)
+
+
+def assignments_run_tavily_deep_research(flags: list[str]) -> None:
+    run_tavily_deep_research(flags)
+
+
+def assignments_poll_tavily_deep_research(flags: list[str]) -> None:
+    poll_tavily_deep_research_command(flags)
 
 
 def assignments_run_reporting(flags: list[str]) -> None:

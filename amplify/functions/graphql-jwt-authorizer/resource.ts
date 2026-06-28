@@ -5,6 +5,7 @@ export const graphqlJwtAuthorizer = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 5,
   memoryMB: 256,
+  resourceGroupName: "data",
   environment: {
     PAPYRUS_JWT_SECRET: secret("PAPYRUS_JWT_SECRET"),
     PAPYRUS_JWT_ISSUER: "papyrus-cli",

@@ -603,6 +603,31 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(len(relation_records), 2)
         self.assertEqual({record["input"]["subjectId"] for record in relation_records}, {"assignment-1-v2", "item-ai-agents-enter-the-lab"})
 
+    def test_list_assignments_research_type_includes_all_research_prefix_keys(self):
+        assignments = [
+            {
+                "id": "assignment-curation-1",
+                "assignmentTypeKey": "curation.reference-intake",
+                "createdAt": "2026-06-03T19:18:00Z",
+            },
+            {
+                "id": "assignment-tavily-1",
+                "assignmentTypeKey": "research.tavily-deep",
+                "createdAt": "2026-06-03T19:14:00Z",
+                "title": "LLM webinar",
+            },
+            {
+                "id": "assignment-edition-1",
+                "assignmentTypeKey": "research.edition-candidate",
+                "createdAt": "2026-05-31T19:00:00Z",
+                "title": "World models",
+            },
+        ]
+        with mock.patch.object(papyrus_newsroom, "_list_assignments", return_value=assignments):
+            result = papyrus_newsroom.papyrus_list_assignments(limit=5, type="research")
+        ids = [entry["id"] for entry in result["assignments"]]
+        self.assertEqual(ids, ["assignment-tavily-1", "assignment-edition-1"])
+
     def test_research_plan_preserves_assignment_type(self):
         plan = papyrus_newsroom.build_research_update_plan(
             generated_at="2026-05-16T12:15:00Z",
@@ -2966,6 +2991,57 @@ return finish_research_from_search(search, { research_mode = "source_discovery" 
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["items"][0]["id"], "reference-a-v1")
+
+    def test_reference_list_imported_order_uses_import_timestamp(self):
+        references = [
+            {
+                "id": "reference-new-v1",
+                "lineageId": "reference-new",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "new",
+                "title": "Recently imported",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-30T00:00:00Z",
+                "sourcePublishedAt": "2020-01-01T00:00:00Z",
+            },
+            {
+                "id": "reference-old-import-v1",
+                "lineageId": "reference-old-import",
+                "versionNumber": 1,
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "old-import",
+                "title": "Older import, newer publication",
+                "curationStatus": "accepted",
+                "importedAt": "2026-05-01T00:00:00Z",
+                "sourcePublishedAt": "2026-05-29T00:00:00Z",
+            },
+        ]
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_newsroom_feed_imported",
+            return_value=references,
+        ):
+            imported_result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="all",
+                order="imported",
+                scan_limit=1000,
+            )
+        with mock.patch(
+            "papyrus_newsroom.reference_curation_signals.list_references_by_corpus",
+            return_value=references,
+        ):
+            published_result = reference_curation_signals.reference_list(
+                corpus_key="AI-ML-research",
+                limit=10,
+                status="all",
+                order="published",
+                scan_limit=1000,
+            )
+
+        self.assertEqual(imported_result["items"][0]["id"], "reference-new-v1")
+        self.assertEqual(published_result["items"][0]["id"], "reference-old-import-v1")
 
     def test_reference_curate_recent_all_includes_undated_and_old_references(self):
         references = [

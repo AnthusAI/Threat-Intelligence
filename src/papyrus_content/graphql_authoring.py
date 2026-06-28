@@ -6,7 +6,8 @@ import os
 import urllib.parse
 from typing import Any
 
-from .env import graphql_endpoint, graphql_jwt, graphql_timeout_seconds, lambda_auth_header
+from .env import graphql_endpoint, graphql_jwt, graphql_timeout_seconds
+from .graphql_http import graphql_request_headers, graphql_use_iam, running_in_aws_lambda
 
 VERSION_FIELDS = (
     "lineageId versionNumber previousVersionId versionState versionCreatedAt "
@@ -445,6 +446,12 @@ INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
         "fields": MODEL_ATTACHMENT_FIELDS,
         "partitionType": "ID",
     },
+    "referenceAttachmentsByReferenceLineageAndSortKey": {
+        "field": "listReferenceAttachmentsByReferenceLineageAndSortKey",
+        "partitionKey": "referenceLineageId",
+        "fields": REFERENCE_ATTACHMENT_FIELDS,
+        "partitionType": "ID",
+    },
 }
 
 
@@ -504,16 +511,6 @@ mutation Delete{model_name}($input: Delete{model_name}Input!) {{
 MUTATIONS = {model: _model_mutations(model) for model in LIST_DEFINITIONS}
 
 
-def running_in_aws_lambda() -> bool:
-    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
-
-
-def graphql_use_iam() -> bool:
-    if running_in_aws_lambda():
-        return True
-    return os.environ.get("PAPYRUS_GRAPHQL_USE_IAM", "").strip().lower() in {"1", "true", "yes"}
-
-
 class PapyrusGraphQLAuthoringClient:
     def __init__(self, endpoint: str | None = None, auth_token: str | None = None) -> None:
         self.endpoint = endpoint or graphql_endpoint()
@@ -535,17 +532,12 @@ class PapyrusGraphQLAuthoringClient:
 
     def _request_headers(self, payload: bytes) -> dict[str, str]:
         if self.use_iam:
-            from papyrus_newsroom.newsroom import _iam_signed_graphql_headers
+            from .graphql_http import iam_signed_graphql_headers
 
-            return _iam_signed_graphql_headers(self.endpoint, payload)
-        return {
-            "content-type": "application/json",
-            "Authorization": lambda_auth_header(self.auth_token),
-            # AppSync default mode is userPool; CLI JWT uses the Lambda authorizer lane.
-            "x-amz-appsync-authtype": os.environ.get("PAPYRUS_GRAPHQL_AUTH_TYPE", "AWS_LAMBDA").strip()
-            or "AWS_LAMBDA",
-            "Connection": "keep-alive",
-        }
+            return iam_signed_graphql_headers(self.endpoint, payload)
+        headers = graphql_request_headers(endpoint=self.endpoint, body=payload, token=self.auth_token)
+        headers["Connection"] = "keep-alive"
+        return headers
 
     def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
@@ -683,6 +675,14 @@ class PapyrusGraphQLAuthoringClient:
             return {}
         if model_name not in LIST_DEFINITIONS:
             raise ValueError(f"Unsupported model for get_records_by_id: {model_name}")
+        # Point lookups avoid scanning entire tables (e.g. thousands of References).
+        if len(unique_ids) <= 100 and model_name in GET_DEFINITIONS:
+            resolved: dict[str, dict[str, Any]] = {}
+            for record_id in unique_ids:
+                row = self.get_record(model_name, record_id)
+                if row:
+                    resolved[record_id] = row
+            return resolved
         rows = self.list_records(model_name)
         by_id = {row["id"]: row for row in rows if row.get("id")}
         return {record_id: by_id[record_id] for record_id in unique_ids if record_id in by_id}
@@ -745,6 +745,9 @@ class PapyrusGraphQLAuthoringClient:
 
     def list_semantic_relations_by_import_run_and_imported_at(self, import_run_id: str) -> list[dict[str, Any]]:
         return self.list_by_index("semanticRelationsByImportRunAndImportedAt", import_run_id)
+
+    def list_reference_attachments_by_lineage(self, reference_lineage_id: str) -> list[dict[str, Any]]:
+        return self.list_by_index("referenceAttachmentsByReferenceLineageAndSortKey", reference_lineage_id)
 
     def delete_record(self, model_name: str, record_id: str) -> None:
         if model_name not in MUTATIONS:

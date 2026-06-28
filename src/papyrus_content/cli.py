@@ -59,6 +59,8 @@ from .assignments_commands import (
     assignments_run_copywriting,
     assignments_run_reporting,
     assignments_run_research,
+    assignments_run_tavily_deep_research,
+    assignments_poll_tavily_deep_research,
     assignments_run_story_cycle,
     assignments_story_cycle_output,
 )
@@ -91,7 +93,12 @@ from .categories_commands import (
 )
 from .content_commands import content_inspect, content_list, content_schema_check
 from .dev_tests import run_category_mapper_tests, run_identifier_backfill_tests
-from .messages_commands import messages_export_legacy_comments, messages_import_legacy_comments
+from .messages_commands import (
+    messages_backfill_insight_message_body,
+    messages_export_legacy_comments,
+    messages_import_legacy_comments,
+    messages_repair_insight_titles,
+)
 from .model_defaults import (
     DEFAULT_REFERENCE_FILTER_MODEL,
     DEFAULT_REFERENCE_SUMMARY_MODEL,
@@ -235,6 +242,8 @@ PORTED_COMMANDS = frozenset(
         "assignments:create-research",
         "assignments:create-reporting",
         "assignments:run-research",
+        "assignments:run-tavily-deep-research",
+        "assignments:poll-tavily-deep-research",
         "assignments:run-reporting",
         "assignments:apply-research-packet",
         "assignments:apply-reporting-packet",
@@ -295,6 +304,8 @@ PORTED_COMMANDS = frozenset(
         "ontology:doctor",
         "messages:export-legacy-comments",
         "messages:import-legacy-comments",
+        "messages:backfill-insight-message-body",
+        "messages:repair-insight-titles",
         "categories:import-steering",
         "categories:import-config",
         "categories:sandbox-steering-config",
@@ -460,6 +471,10 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         assignments_create_reporting(flags)
     elif route == "assignments:run-research":
         assignments_run_research(flags)
+    elif route == "assignments:run-tavily-deep-research":
+        assignments_run_tavily_deep_research(flags)
+    elif route == "assignments:poll-tavily-deep-research":
+        assignments_poll_tavily_deep_research(flags)
     elif route == "assignments:run-reporting":
         assignments_run_reporting(flags)
     elif route == "assignments:apply-research-packet":
@@ -593,6 +608,10 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         messages_export_legacy_comments(flags)
     elif route == "messages:import-legacy-comments":
         messages_import_legacy_comments(flags)
+    elif route == "messages:backfill-insight-message-body":
+        messages_backfill_insight_message_body(flags)
+    elif route == "messages:repair-insight-titles":
+        messages_repair_insight_titles(flags)
     elif route == "categories:import-steering":
         categories_import_steering(flags)
     elif route == "categories:import-config":

@@ -702,26 +702,29 @@ def resolve_source_site_enrichment(
             enriched = plugin.enrich(reference=reference, source_uri=normalized_source, fetcher=active_fetcher)
             return _finalize_enrichment(enriched, source_uri=normalized_source)
 
-    return _finalize_enrichment(
-        {
-            "pluginKey": "default",
-            "canonicalSourceUri": normalized_source,
-            "sourceVariants": {"inputUrl": normalized_source},
-            "identifiers": {
-                "resolved": {},
-                "candidates": [],
-                "primary": None,
-                "warnings": [
-                    {
-                        "code": "no_site_plugin_match",
-                        "message": "No site plugin matched source URI; proceeding with generic extraction.",
-                    }
-                ],
-            },
-            "metadata": {},
-            "attachmentMetadata": {},
-            "warnings": [],
+    from .web_structured_metadata import merge_web_metadata_into_enrichment
+
+    default_enrichment = {
+        "pluginKey": "default",
+        "canonicalSourceUri": normalized_source,
+        "sourceVariants": {"inputUrl": normalized_source},
+        "identifiers": {
+            "resolved": {},
+            "candidates": [],
+            "primary": None,
+            "warnings": [
+                {
+                    "code": "no_site_plugin_match",
+                    "message": "No site plugin matched source URI; proceeding with generic extraction.",
+                }
+            ],
         },
+        "metadata": {},
+        "attachmentMetadata": {},
+        "warnings": [],
+    }
+    return _finalize_enrichment(
+        merge_web_metadata_into_enrichment(default_enrichment, source_uri=normalized_source, fetcher=active_fetcher),
         source_uri=normalized_source,
     )
 

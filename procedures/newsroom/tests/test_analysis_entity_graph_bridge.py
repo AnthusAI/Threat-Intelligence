@@ -27,7 +27,14 @@ from papyrus_content.analysis_graph import (  # noqa: E402
 )
 
 
-def _sample_graph_payload() -> dict:
+def _sample_graph_payload(*, use_legacy_item_anchor: bool = False) -> dict:
+    anchor_id = "item:doc-1" if use_legacy_item_anchor else "reference:doc-1"
+    anchor_type = "item" if use_legacy_item_anchor else "reference"
+    anchor_props = (
+        {"item_id": "doc-1"}
+        if use_legacy_item_anchor
+        else {"reference_id": "doc-1", "item_id": "doc-1"}
+    )
     return {
         "snapshot": {"extractor_id": "ner-entities", "snapshot_id": "snap-001"},
         "manifest": {
@@ -36,12 +43,12 @@ def _sample_graph_payload() -> dict:
             "configuration": {"extractor_id": "ner-entities"},
         },
         "nodes": [
-            {"node_id": "item:doc-1", "node_type": "item", "label": "Doc 1", "properties": {"item_id": "doc-1"}},
+            {"node_id": anchor_id, "node_type": anchor_type, "label": "Doc 1", "properties": anchor_props},
             {"node_id": "ent:ai", "node_type": "entity", "label": "AI", "properties": {"canonical": "Artificial Intelligence"}},
             {"node_id": "ent:ml", "node_type": "entity", "label": "ML", "properties": {"canonical": "Machine Learning"}},
         ],
         "edges": [
-            {"edge_id": "edge-1", "src": "item:doc-1", "dst": "ent:ai", "edge_type": "mentions", "item_id": "doc-1", "weight": 0.9},
+            {"edge_id": "edge-1", "src": anchor_id, "dst": "ent:ai", "edge_type": "mentions", "item_id": "doc-1", "weight": 0.9},
             {"edge_id": "edge-2", "src": "ent:ai", "dst": "ent:ml", "edge_type": "broader_than", "weight": 0.4},
             {"edge_id": "edge-3", "src": "ent:ml", "dst": "ent:ai", "edge_type": "edge_not_seeded", "weight": 0.3},
         ],
@@ -112,6 +119,31 @@ class AnalysisEntityGraphBridgeTests(unittest.TestCase):
         typed = [row for row in relation_rows if row.get("subjectKind") == "semanticNode" and row.get("objectKind") == "semanticNode"]
         self.assertTrue(any(row.get("predicate") == "broader_than" for row in typed))
         self.assertTrue(any(row.get("predicate") == "related_to" for row in typed))
+
+    def test_import_mapping_accepts_legacy_item_anchor_nodes(self) -> None:
+        payload = _sample_graph_payload(use_legacy_item_anchor=True)
+        plan = build_graph_export_import_records(
+            payload,
+            corpus_id="knowledge-corpus-demo",
+            classifier_id="classifier-demo",
+            imported_at="2026-01-01T00:00:00Z",
+            reference_by_external_item_id={
+                "doc-1": {
+                    "id": "reference-doc-1-v3",
+                    "lineageId": "reference-doc-1",
+                    "versionNumber": 3,
+                }
+            },
+        )
+        self.assertEqual(plan["skippedReferenceAnchors"], 1)
+        self.assertEqual(plan["skippedItemNodes"], 1)
+        mentions = [
+            record["expected"]
+            for record in plan["records"]
+            if record["modelName"] == "SemanticRelation" and record["expected"].get("predicate") == "mentions"
+        ]
+        self.assertEqual(len(mentions), 1)
+        self.assertEqual(mentions[0]["subjectKind"], "reference")
 
     def test_publish_command_creates_graph_export_attachment_metadata(self) -> None:
         payload = _sample_graph_payload()

@@ -64,8 +64,9 @@ export function formatConsoleWebContextMessage(
       agentLines.push(
         "",
         `The user is viewing reference detail (${referenceId}). For questions about "this reference", the open page, or what they are looking at, do not ask them to paste the reference.`,
-        `Call execute_tactus with Reference.get{ id = "${referenceId}" } (lineage ids from the URL resolve to the current version), then use listReferenceAttachments or knowledge tools as needed.`,
-        "If extracted text attachments exist, read them via storage paths or anchored knowledge query — catalog metadata alone is not enough to discuss paper contents.",
+        `First call execute_tactus with: return papyrus.Reference.get{ id = "${referenceId}" } (lineage ids from the URL resolve to the current version).`,
+        `Then call: return papyrus.knowledge.query{ semanticQuery = "Summarize the main claims, methods, and results.", anchors = { { uri = "papyrus://reference/${referenceId}" } } }`,
+        "Use double-quoted Lua strings only. Do not use JS parentheses, string.match, or multi-line Lua beyond simple return statements.",
       );
     }
   }

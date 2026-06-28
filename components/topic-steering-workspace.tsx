@@ -31,13 +31,17 @@ import {
   loadEditorProcedureData,
   loadEditorSemanticRelationsData,
   loadEditionForumThreads,
+  loadInsightForumThreadById,
+  loadInsightForumThreads,
   loadNewsroomAssignmentPage,
   loadNewsroomMessagePage,
   loadNewsroomReferencePage,
   loadNewsroomSemanticNodePage,
   appendForumThreadMessageRecord,
+  appendInsightThreadReplyRecord,
   createSectionForumThreadRecord,
   deleteForumThreadMessageRecord,
+  deleteInsightThreadMessageRecord,
   ensureEditionForumThreadRecord,
   publishProcedureVersionRecord,
   runNewsroomKnowledgeQuery,
@@ -55,11 +59,16 @@ import {
   effectiveAssignmentsIndexFilters,
   effectiveMessagesIndexFilters,
   effectiveReferencesIndexFilters,
+  normalizeReferenceIndexOrder,
   readAssignmentsIndexFilters,
+  readInsightsIndexFilters,
   readMessagesIndexFilters,
   readReferencesIndexFilters,
+  effectiveInsightsIndexFilters,
+  parseInsightThreadIdFromNewsroomPathname,
   referencesStatusFromUrl,
   referencesStatusToUrl,
+  type ReferenceIndexOrder,
   parseReferenceLineageIdFromNewsroomPathname,
   syncBrowserNewsroomIndexUrl,
 } from "../lib/newsroom-index-filters";
@@ -164,10 +173,12 @@ import {
 } from "../lib/reporting-story-budget";
 import {
   buildForumThreadUrl,
+  buildInsightThreadUrl,
   getForumMessageAnchorId,
   isForumThreadId,
   parseForumMessageAnchorFromHash,
   pushForumThreadUrl,
+  pushInsightThreadUrl,
   readCurrentForumRoute,
 } from "../lib/newsroom-forum-routes";
 
@@ -208,7 +219,7 @@ type ReportingPacketReviewDecision = "select" | "merge" | "brief" | "hold" | "ki
 type AssignmentDeskViewMode = "queue" | "budget";
 type UserRoleAction = "grant" | "revoke";
 type AdministrationPanel = "users" | "policies" | "sections" | "procedures";
-export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "messages" | "assignments" | "administration" | "search";
+export type NewsDeskTab = "overview" | "desks" | "topics" | "concepts" | "references" | "insights" | "messages" | "assignments" | "administration" | "search";
 type LexicalRuleScope = "publication" | "corpus" | "classifier" | "category";
 type AnalysisReindexMode = "online-update" | "classifier-retrain" | "scoped-topic-rebuild" | "entity-graph-rebuild" | "generated-analysis-rebuild";
 type ReferenceProcessingStatus = "created" | "processable" | "processed" | "blocked";
@@ -617,6 +628,7 @@ function inferNewsDeskTabFromPathname(pathname: string | null): NewsDeskTab | nu
   if (!pathname || !pathname.startsWith("/newsroom")) return null;
   if (pathname === "/newsroom" || pathname === "/newsroom/") return "overview";
   if (pathname.startsWith("/newsroom/messages")) return "messages";
+  if (pathname.startsWith("/newsroom/insights")) return "insights";
   if (pathname.startsWith("/newsroom/assignments")) return "assignments";
   if (pathname.startsWith("/newsroom/references")) return "references";
   if (pathname.startsWith("/newsroom/topics")) return "topics";
@@ -640,6 +652,7 @@ const TAILORED_TOPIC_PROPOSAL_KINDS = new Set([
 
 const NEWS_DESK_TABS: Array<{ id: NewsDeskTab; label: string; detail: string; href: string }> = [
   { id: "messages", label: "Messages", detail: "Commentary", href: "/newsroom/messages" },
+  { id: "insights", label: "Insights", detail: "Research threads", href: "/newsroom/insights" },
   { id: "assignments", label: "Assignments", detail: "Work Desk", href: "/newsroom/assignments" },
   { id: "references", label: "References", detail: "Knowledge Base", href: "/newsroom/references" },
   { id: "topics", label: "Topics", detail: "Taxonomy", href: "/newsroom/topics" },
@@ -1128,6 +1141,9 @@ function NewsDeskDashboard({
     overview: 0,
     desks: summaryCountFromRecord(summary, "categories"),
     messages: summaryCountFromRecord(summary, "messages"),
+    insights: summary?.facets?.messages?.byKind?.insight
+      ?? summary?.messageKindCounts?.insight
+      ?? null,
     assignments: summaryCountFromRecord(summary, "assignments"),
     references: summaryCountFromRecord(summary, "references"),
     topics: summaryCountFromRecord(summary, "categories"),
@@ -2081,6 +2097,8 @@ function NewsDeskDashboard({
       summary: cleanSummary,
       source: "newsroom",
       authorLabel: authState.label,
+      threadId: messageId,
+      sequenceNumber: 1,
       createdAt: now,
       updatedAt: now,
       newsroomFeedKey: "messages",
@@ -2143,6 +2161,9 @@ function NewsDeskDashboard({
       summary: message.summary,
       source: message.source,
       authorLabel: message.authorLabel,
+      threadId: message.id,
+      sequenceNumber: 1,
+      content: cleanBody,
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
       newsroomFeedKey: "messages",
@@ -3433,6 +3454,15 @@ function NewsDeskDashboard({
             onCreateInsight={createInsight}
             onReviewTopicLabel={runReferenceTopicLabelAction}
             onHydrateReference={hydrateReferenceFromRoute}
+          />
+        ) : null}
+        {!isSectionPage && activeTab === "insights" ? (
+          <InsightsDeskView
+            graph={graph}
+            initialThreadId={initialSelection.forumThread}
+            isDemo={Boolean(dashboard.isDemo)}
+            messages={messages}
+            summary={summary}
           />
         ) : null}
         {!isSectionPage && activeTab === "messages" ? (
@@ -7228,13 +7258,22 @@ function ReferencesDeskView({
     if (typeof window === "undefined") return "";
     return readReferencesIndexFilters(new URLSearchParams(window.location.search)).processing;
   });
+  const [orderFilter, setOrderFilter] = useState<ReferenceIndexOrder>(() => {
+    if (typeof window === "undefined") return "published";
+    return readReferencesIndexFilters(new URLSearchParams(window.location.search)).order;
+  });
   const [selectedReferenceLineageId, setSelectedReferenceLineageId] = useState(routeReferenceLineageId);
   const [isReferenceDetailOpen, setIsReferenceDetailOpen] = useState(Boolean(routeReferenceLineageId));
   const [deepLinkReferenceLoading, setDeepLinkReferenceLoading] = useState(false);
   const [deepLinkReferenceError, setDeepLinkReferenceError] = useState<string | null>(null);
   const categoryContext = useMemo(() => buildCategoryDrilldownContext(categories, initialCategoryLineageId), [categories, initialCategoryLineageId]);
   const statusFilterValue = statusFilter === "__exclude_pending" ? "" : statusFilter;
-  const syncReferencesIndexUrl = useCallback((nextStatus: string, nextProcessing: string, replace = true) => {
+  const syncReferencesIndexUrl = useCallback((
+    nextStatus: string,
+    nextProcessing: string,
+    nextOrder: ReferenceIndexOrder,
+    replace = true,
+  ) => {
     if (categoryContext.primary || isDemo) return;
     if (parseReferenceLineageIdFromNewsroomPathname(typeof window !== "undefined" ? window.location.pathname : null)) {
       return;
@@ -7244,6 +7283,7 @@ function ReferencesDeskView({
       effectiveReferencesIndexFilters({
         status: referencesStatusToUrl(nextStatus),
         processing: nextProcessing,
+        order: nextOrder,
       }),
       { replace },
     );
@@ -7256,15 +7296,16 @@ function ReferencesDeskView({
 
   useEffect(() => {
     if (categoryContext.primary || isDemo || isReferenceDetailOpen || pathnameReferenceLineageId) return;
-    syncReferencesIndexUrl(statusFilter, processingFilter, true);
-  }, [categoryContext.primary, isDemo, isReferenceDetailOpen, pathnameReferenceLineageId, processingFilter, statusFilter, syncReferencesIndexUrl]);
+    syncReferencesIndexUrl(statusFilter, processingFilter, orderFilter, true);
+  }, [categoryContext.primary, isDemo, isReferenceDetailOpen, orderFilter, pathnameReferenceLineageId, processingFilter, statusFilter, syncReferencesIndexUrl]);
   const feed = useNewsroomPagedRows({
     initialItems: references,
     enabled: !isDemo && !categoryContext.primary,
-    resetKey: `references:${statusFilter}:${processingFilter}`,
+    resetKey: `references:${statusFilter}:${processingFilter}:${orderFilter}`,
     loadPage: (nextToken) => loadNewsroomReferencePage({
       status: statusFilterValue,
       excludePending: statusFilter === "__exclude_pending",
+      order: orderFilter,
       nextToken,
     }),
   });
@@ -7500,7 +7541,37 @@ function ReferencesDeskView({
         actions={[]}
         utilityActions={referenceNavigationActions}
         lede={(
-          <NewsroomDeskSectionLede headingId="reference-management-title" section="references" />
+          <NewsroomDeskSectionLede
+            headingId="reference-management-title"
+            section="references"
+            controls={(
+              <div className="news-desk-reference-sort-controls" role="group" aria-label="Reference sort order">
+                <span className="news-desk-reference-sort-controls__label">Sort</span>
+                <button
+                  type="button"
+                  data-active={orderFilter === "published" || undefined}
+                  onClick={() => {
+                    setOrderFilter("published");
+                    syncReferencesIndexUrl(statusFilter, processingFilter, "published", true);
+                  }}
+                >
+                  Publication date
+                </button>
+                <button
+                  type="button"
+                  data-active={orderFilter === "imported" || undefined}
+                  onClick={() => {
+                    const nextStatus = statusFilter === "__exclude_pending" ? "" : statusFilter;
+                    setOrderFilter("imported");
+                    if (nextStatus !== statusFilter) setStatusFilter(nextStatus);
+                    syncReferencesIndexUrl(nextStatus, processingFilter, "imported", true);
+                  }}
+                >
+                  Date imported
+                </button>
+              </div>
+            )}
+          />
         )}
         list={(
           <section className="category-steering-section category-steering-section--lead" aria-label={detail}>
@@ -7522,12 +7593,27 @@ function ReferencesDeskView({
               isLoadingMore={feed.isLoadingMore}
               onFilterChange={(value) => {
                 setStatusFilter(value);
-                syncReferencesIndexUrl(value, processingFilter, true);
+                syncReferencesIndexUrl(value, processingFilter, orderFilter, true);
               }}
               onLoadMore={feed.loadMore}
               onMetricChange={(value) => {
                 setProcessingFilter(value);
-                syncReferencesIndexUrl(statusFilter, value, true);
+                syncReferencesIndexUrl(statusFilter, value, orderFilter, true);
+              }}
+              sortLabel="Sort"
+              sortOptions={[
+                { key: "published", label: "Publication date" },
+                { key: "imported", label: "Date imported" },
+              ]}
+              sortValue={orderFilter}
+              onSortChange={(value) => {
+                const nextOrder = normalizeReferenceIndexOrder(value);
+                const nextStatus = nextOrder === "imported" && statusFilter === "__exclude_pending"
+                  ? ""
+                  : statusFilter;
+                setOrderFilter(nextOrder);
+                if (nextStatus !== statusFilter) setStatusFilter(nextStatus);
+                syncReferencesIndexUrl(nextStatus, processingFilter, nextOrder, true);
               }}
               onSelect={selectReference}
               selectedId={selectedLineageId}
@@ -7537,7 +7623,7 @@ function ReferencesDeskView({
         onCloseDetail={() => {
           setIsReferenceDetailOpen(false);
           setSelectedReferenceLineageId("");
-          syncReferencesIndexUrl(statusFilter, processingFilter, true);
+          syncReferencesIndexUrl(statusFilter, processingFilter, orderFilter, true);
         }}
         detail={selectedReference ? (
           <ReferenceDetailPanel
@@ -7596,6 +7682,365 @@ function NewsroomDeskSectionLede({
       {controls ?? null}
     </section>
   );
+}
+
+function InsightsDeskView({
+  graph,
+  initialThreadId = null,
+  isDemo = false,
+  messages,
+  summary,
+}: {
+  graph: SemanticGraph;
+  initialThreadId?: string | null;
+  isDemo?: boolean;
+  messages: MessageRecord[];
+  summary?: NewsroomSummaryRecord | null;
+}) {
+  const pathname = usePathname();
+  const pathnameThreadId = useMemo(
+    () => parseInsightThreadIdFromNewsroomPathname(pathname),
+    [pathname],
+  );
+  const resolvedInitialThreadId = initialThreadId ?? pathnameThreadId ?? "";
+  const forumMessageAnchorId = useForumMessageAnchorId();
+  const [domainFilter, setDomainFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readInsightsIndexFilters(new URLSearchParams(window.location.search)).domain;
+  });
+  const [threads, setThreads] = useState<ForumThreadWithMessages[]>([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [threadsError, setThreadsError] = useState<string | null>(null);
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState(resolvedInitialThreadId);
+  const [forumView, setForumView] = useState<ForumViewState>(
+    resolvedInitialThreadId ? { mode: "thread", threadId: resolvedInitialThreadId } : { mode: "index" },
+  );
+  const [replyParentId, setReplyParentId] = useState("");
+  const [composeSummary, setComposeSummary] = useState("");
+  const [composeContent, setComposeContent] = useState("");
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState("");
+
+  const syncInsightsIndexUrl = useCallback((nextDomain: string, replace = true) => {
+    if (isDemo || forumView.mode === "thread") return;
+    syncBrowserNewsroomIndexUrl("insights", effectiveInsightsIndexFilters({ domain: nextDomain }), { replace });
+  }, [forumView.mode, isDemo]);
+
+  useEffect(() => {
+    if (isDemo || forumView.mode === "thread") return;
+    syncInsightsIndexUrl(domainFilter, true);
+  }, [domainFilter, forumView.mode, isDemo, syncInsightsIndexUrl]);
+
+  const refreshThreads = useCallback(async (options?: { append?: boolean; token?: string | null }) => {
+    if (isDemo) {
+      const demoThreads = messages
+        .filter((message) => message.messageKind === "insight")
+        .filter((message) => !domainFilter || message.messageDomain === domainFilter)
+        .map((message) => buildDemoInsightForumThread(message, messages));
+      setThreads(demoThreads);
+      setThreadsError(null);
+      setNextToken(null);
+      return;
+    }
+    setThreadsLoading(true);
+    try {
+      const result = await loadInsightForumThreads({
+        domain: domainFilter,
+        nextToken: options?.token ?? null,
+        includeMessages: true,
+      });
+      setThreads((current) => (options?.append ? [...current, ...result.threads] : result.threads));
+      setNextToken(result.nextToken);
+      setThreadsError(null);
+      setSelectedThreadId((current) => (current && result.threads.some((thread) => thread.id === current) ? current : current));
+    } catch (error) {
+      setThreads([]);
+      setThreadsError(error instanceof Error ? error.message : "Could not load insight threads.");
+      setNextToken(null);
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [domainFilter, isDemo, messages]);
+
+  useEffect(() => {
+    void refreshThreads();
+  }, [refreshThreads]);
+
+  useEffect(() => {
+    if (!resolvedInitialThreadId || threadsLoading) return;
+    if (!threads.some((thread) => thread.id === resolvedInitialThreadId)) return;
+    if (selectedThreadId === resolvedInitialThreadId && forumView.mode === "thread") return;
+    setSelectedThreadId(resolvedInitialThreadId);
+    setForumView({ mode: "thread", threadId: resolvedInitialThreadId });
+  }, [forumView.mode, resolvedInitialThreadId, selectedThreadId, threads, threadsLoading]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = readCurrentForumRoute();
+      if (route.surface === "insight_forum" && route.threadId) {
+        setSelectedThreadId(route.threadId);
+        setForumView({ mode: "thread", threadId: route.threadId });
+        return;
+      }
+      setSelectedThreadId("");
+      setForumView({ mode: "index" });
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? null;
+  const domainOptions = useMemo(() => {
+    const domains = new Set<string>();
+    for (const message of messages) {
+      if (message.messageKind === "insight" && message.messageDomain) domains.add(message.messageDomain);
+    }
+    for (const thread of threads) {
+      if (thread.sectionKey) domains.add(thread.sectionKey);
+    }
+    return sortedCountOptions(
+      Object.fromEntries([...domains].map((domain) => [domain, threads.filter((thread) => thread.sectionKey === domain).length])),
+    );
+  }, [messages, threads]);
+
+  const openThread = useCallback((threadId: string, options?: { messageId?: string | null; replace?: boolean }) => {
+    setSelectedThreadId(threadId);
+    setForumView({ mode: "thread", threadId });
+    pushInsightThreadUrl(threadId, {
+      demo: isDemo,
+      messageId: options?.messageId,
+      replace: options?.replace,
+    });
+  }, [isDemo]);
+
+  const closeThread = useCallback(() => {
+    setSelectedThreadId("");
+    setForumView({ mode: "index" });
+    pushInsightThreadUrl(null, { demo: isDemo, replace: true });
+  }, [isDemo]);
+
+  const postThreadMessage = useCallback(async () => {
+    if (!selectedThread) return;
+    const content = composeContent.trim();
+    if (!content) {
+      setComposeError("Message content is required.");
+      return;
+    }
+    const summary = composeSummary.trim() || content.slice(0, 120);
+    setComposeError(null);
+    try {
+      await appendInsightThreadReplyRecord({
+        threadId: selectedThread.id,
+        summary,
+        content,
+        role: "human",
+        authorLabel: "human-editor",
+        parentMessageId: replyParentId || undefined,
+      });
+      setComposeSummary("");
+      setComposeContent("");
+      setReplyParentId("");
+      await refreshThreads();
+      const reloaded = await loadInsightForumThreadById(selectedThread.id, { includeMessages: true });
+      if (reloaded) {
+        setThreads((current) => current.map((thread) => (thread.id === reloaded.id ? reloaded : thread)));
+      }
+      setForumView({ mode: "thread", threadId: selectedThread.id });
+    } catch (error) {
+      setComposeError(error instanceof Error ? error.message : "Could not post thread message.");
+    }
+  }, [composeContent, composeSummary, refreshThreads, replyParentId, selectedThread]);
+
+  const deleteThreadMessage = useCallback(async (threadId: string, messageId: string) => {
+    setDeletingMessageId(messageId);
+    try {
+      await deleteInsightThreadMessageRecord({ threadId, messageId });
+      if (replyParentId === messageId) setReplyParentId("");
+      await refreshThreads();
+      const reloaded = await loadInsightForumThreadById(threadId, { includeMessages: true });
+      if (reloaded) {
+        setThreads((current) => current.map((thread) => (thread.id === reloaded.id ? reloaded : thread)));
+      }
+      setComposeError(null);
+    } catch (error) {
+      setComposeError(error instanceof Error ? error.message : "Could not delete message.");
+    } finally {
+      setDeletingMessageId("");
+    }
+  }, [refreshThreads, replyParentId]);
+
+  const insightKnowledgeQuery = useNewsroomKnowledgeContext(selectedThread ? {
+    anchor: { kind: "message", id: selectedThread.id, lineageId: selectedThread.id },
+    title: selectedThread.title ?? "Insight thread",
+    subtitle: selectedThread.sectionKey ?? "insight",
+  } : null);
+
+  return (
+    <>
+      <NewsroomListDetailShell
+        sectionKey="insights"
+        canExpandDetail={forumView.mode === "thread" && Boolean(forumView.threadId)}
+        detailOpen={forumView.mode === "thread" && Boolean(forumView.threadId)}
+        selectionScrollKey={forumView.mode === "thread" ? forumView.threadId : null}
+        utilityActions={[insightKnowledgeQuery.action]}
+        lede={(
+          <NewsroomDeskSectionLede
+            headingId="insights-forum-title"
+            section="insights"
+            headline="Insights"
+            lede="Recent research insights in reverse chronological order. Each insight opens a forum thread for discussion and refinement."
+            controls={(
+              <div className="news-desk-reference-sort-controls" role="group" aria-label="Insight domain filter">
+                <span className="news-desk-reference-sort-controls__label">Domain</span>
+                <button
+                  type="button"
+                  data-active={!domainFilter || undefined}
+                  onClick={() => {
+                    setDomainFilter("");
+                    syncInsightsIndexUrl("", true);
+                  }}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  data-active={domainFilter === "knowledge" || undefined}
+                  onClick={() => {
+                    setDomainFilter("knowledge");
+                    syncInsightsIndexUrl("knowledge", true);
+                  }}
+                >
+                  Knowledge
+                </button>
+                <button
+                  type="button"
+                  data-active={domainFilter === "assignment_work" || undefined}
+                  onClick={() => {
+                    setDomainFilter("assignment_work");
+                    syncInsightsIndexUrl("assignment_work", true);
+                  }}
+                >
+                  Assignment work
+                </button>
+              </div>
+            )}
+          />
+        )}
+        list={(
+          <section className="category-steering-section category-steering-section--lead" aria-label="Insight forum threads">
+            <ForumThreadIndex
+              threads={threads}
+              sections={[]}
+              isLoading={threadsLoading}
+              error={threadsError}
+              emptyLabel="No insight threads match this filter."
+              variant="insight"
+              toolbar={domainOptions.length > 2 ? (
+                <div className="news-desk-forum-toolbar">
+                  <select
+                    aria-label="Insight domain"
+                    value={domainFilter}
+                    onChange={(event) => {
+                      setDomainFilter(event.target.value);
+                      syncInsightsIndexUrl(event.target.value, true);
+                    }}
+                  >
+                    <option value="">All domains ({threads.length})</option>
+                    {domainOptions.map((option) => (
+                      <option key={option.key} value={option.key}>{option.key} ({option.count})</option>
+                    ))}
+                  </select>
+                  {nextToken ? (
+                    <button type="button" disabled={threadsLoading} onClick={() => void refreshThreads({ append: true, token: nextToken })}>
+                      Load more
+                    </button>
+                  ) : null}
+                </div>
+              ) : nextToken ? (
+                <div className="news-desk-forum-toolbar">
+                  <button type="button" disabled={threadsLoading} onClick={() => void refreshThreads({ append: true, token: nextToken })}>
+                    Load more
+                  </button>
+                </div>
+              ) : null}
+              onOpenThread={(threadId) => openThread(threadId)}
+            />
+          </section>
+        )}
+        detail={forumView.mode === "thread" && selectedThread ? (
+          <ForumThreadView
+            thread={selectedThread}
+            sections={[]}
+            replyParentId={replyParentId}
+            composeSummary={composeSummary}
+            composeContent={composeContent}
+            composeError={composeError}
+            focusMessageId={forumMessageAnchorId}
+            isDemo={isDemo}
+            variant="insight"
+            onBack={closeThread}
+            onReplyTarget={(messageId) => {
+              setReplyParentId(messageId);
+              pushInsightThreadUrl(selectedThread.id, { demo: isDemo, messageId, replace: true });
+            }}
+            onClearReplyTarget={() => {
+              setReplyParentId("");
+              pushInsightThreadUrl(selectedThread.id, { demo: isDemo, replace: true });
+            }}
+            onSummaryChange={setComposeSummary}
+            onContentChange={setComposeContent}
+            onSubmit={() => void postThreadMessage()}
+            onDeleteMessage={(messageId) => {
+              if (!selectedThread || deletingMessageId === messageId) return;
+              void deleteThreadMessage(selectedThread.id, messageId);
+            }}
+            deletingMessageId={deletingMessageId}
+          />
+        ) : forumView.mode === "thread" ? (
+          <section className="category-steering-section">
+            <SectionHeader title="Thread Unavailable" detail="Insights" />
+            <EmptyRow label="That insight thread is not available. Return to the index or adjust filters." />
+          </section>
+        ) : null}
+      />
+      {insightKnowledgeQuery.dialog}
+    </>
+  );
+}
+
+function buildDemoInsightForumThread(root: MessageRecord, allMessages: MessageRecord[]): ForumThreadWithMessages {
+  const replies = allMessages.filter((message) => (
+    message.threadId === root.id
+    && message.id !== root.id
+    && String(message.status || "active") === "active"
+  ));
+  const messages = [root, ...replies].sort(
+    (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
+  );
+  const lastMessage = messages.at(-1) ?? root;
+  return {
+    id: root.id,
+    threadKind: "insight_forum",
+    status: "active",
+    title: root.summary ?? "Insight",
+    summary: root.messageDomain ?? null,
+    primaryAnchorKind: "message",
+    primaryAnchorId: root.id,
+    primaryAnchorLineageId: root.id,
+    primaryAnchorKey: `message#${root.id}`,
+    createdByLabel: root.authorLabel ?? null,
+    messageCount: messages.length,
+    lastMessageId: lastMessage.id,
+    lastMessageAt: lastMessage.updatedAt ?? lastMessage.createdAt,
+    metadata: metadataRecord(root.metadata),
+    createdAt: root.createdAt,
+    updatedAt: lastMessage.updatedAt ?? lastMessage.createdAt,
+    newsroomFeedKey: "messages",
+    messages,
+    scope: "insight",
+    sectionKey: root.messageDomain ?? null,
+  };
 }
 
 function MessagesDeskView({
@@ -8204,6 +8649,7 @@ function ForumThreadIndex({
   emptyLabel,
   toolbar,
   composer,
+  variant = "edition",
   onOpenThread,
 }: {
   threads: ForumThreadWithMessages[];
@@ -8213,6 +8659,7 @@ function ForumThreadIndex({
   emptyLabel: string;
   toolbar?: ReactNode;
   composer?: ReactNode;
+  variant?: "edition" | "insight";
   onOpenThread: (threadId: string) => void;
 }) {
   return (
@@ -8224,7 +8671,7 @@ function ForumThreadIndex({
           <thead>
             <tr>
               <th>Topic</th>
-              <th>Scope</th>
+              <th>{variant === "insight" ? "Domain" : "Scope"}</th>
               <th>Replies</th>
               <th>Last Post</th>
             </tr>
@@ -8237,9 +8684,11 @@ function ForumThreadIndex({
               );
               const lastMessage = sortedMessages.at(-1) ?? null;
               const replies = Math.max(activeMessages.length - 1, 0);
-              const scopeLabel = thread.scope === "edition"
-                ? "Edition"
-                : `Section: ${normalizeForumThreadSectionLabel(thread, sections)}`;
+              const scopeLabel = thread.scope === "insight"
+                ? (thread.sectionKey ?? thread.summary ?? "Insight")
+                : thread.scope === "edition"
+                  ? "Edition"
+                  : `Section: ${normalizeForumThreadSectionLabel(thread, sections)}`;
               return (
                 <tr key={thread.id}>
                   <td>
@@ -8353,6 +8802,7 @@ function ForumThreadView({
   deletingMessageId,
   focusMessageId = null,
   isDemo = false,
+  variant = "edition",
   onBack,
   onReplyTarget,
   onDeleteMessage,
@@ -8370,6 +8820,7 @@ function ForumThreadView({
   deletingMessageId?: string;
   focusMessageId?: string | null;
   isDemo?: boolean;
+  variant?: "edition" | "insight";
   onBack: () => void;
   onReplyTarget: (messageId: string) => void;
   onDeleteMessage: (messageId: string) => void;
@@ -8382,7 +8833,9 @@ function ForumThreadView({
     (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
   );
   const visibleCount = messages.length;
-  const threadShareUrl = buildForumThreadUrl(thread.id, { demo: isDemo });
+  const threadShareUrl = variant === "insight"
+    ? buildInsightThreadUrl(thread.id, { demo: isDemo })
+    : buildForumThreadUrl(thread.id, { demo: isDemo });
 
   useEffect(() => {
     if (!focusMessageId || typeof window === "undefined") return;
@@ -8411,7 +8864,11 @@ function ForumThreadView({
             Back to Threads
           </button>
           <p className="story-label">
-            {thread.scope === "edition" ? "Edition Thread" : `Section Thread: ${normalizeForumThreadSectionLabel(thread, sections)}`}
+            {thread.scope === "insight"
+              ? `Insight · ${thread.sectionKey ?? "discussion"}`
+              : thread.scope === "edition"
+                ? "Edition Thread"
+                : `Section Thread: ${normalizeForumThreadSectionLabel(thread, sections)}`}
           </p>
           <h3>{thread.title}</h3>
         </div>
@@ -8451,7 +8908,10 @@ function ForumThreadView({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() => {
-                      void copyShareLink(buildForumThreadUrl(thread.id, { messageId: message.id, demo: isDemo }));
+                      const url = variant === "insight"
+                        ? buildInsightThreadUrl(thread.id, { messageId: message.id, demo: isDemo })
+                        : buildForumThreadUrl(thread.id, { messageId: message.id, demo: isDemo });
+                      void copyShareLink(url);
                     }}
                   >
                     Copy message link
@@ -8753,7 +9213,7 @@ function NewsroomListDetailShell({
   list: ReactNode;
   onCloseDetail?: () => void;
   selectionScrollKey?: string | null;
-  sectionKey: "assignments" | "concepts" | "messages" | "references" | "topics";
+  sectionKey: "assignments" | "concepts" | "insights" | "messages" | "references" | "topics";
   utilityActions?: NewsroomDetailAction[];
 }) {
   const [detailMode, setDetailMode] = useState<"split" | "full">("split");
@@ -9417,9 +9877,13 @@ function NewsroomCardGrid({
   filterValue,
   metrics,
   metricValue,
+  sortLabel,
+  sortOptions,
+  sortValue,
   isLoading = false,
   onFilterChange,
   onMetricChange,
+  onSortChange,
   onSelect,
   selectedId,
   footerLabel,
@@ -9434,9 +9898,13 @@ function NewsroomCardGrid({
   filterValue: string;
   metrics: NewsroomDataGridMetric[];
   metricValue: string;
+  sortLabel?: string;
+  sortOptions?: Array<{ key: string; label: string }>;
+  sortValue?: string;
   isLoading?: boolean;
   onFilterChange: (value: string) => void;
   onMetricChange: (value: string) => void;
+  onSortChange?: (value: string) => void;
   onSelect: (id: string) => void;
   selectedId?: string | null;
   footerLabel?: string | null;
@@ -9449,6 +9917,7 @@ function NewsroomCardGrid({
     cards,
     filterValue,
     metricValue,
+    sortValue,
     selectedId,
   });
   useEffect(() => {
@@ -9467,7 +9936,12 @@ function NewsroomCardGrid({
   return (
     <div className="newsroom-card-grid-shell" data-newsroom-card-grid-shell>
       <div
-        className={`news-desk-data-grid-filter newsroom-card-grid-filter${filterOptions.length ? "" : " news-desk-data-grid-filter--metrics-only"}`}
+        className={[
+          "news-desk-data-grid-filter",
+          "newsroom-card-grid-filter",
+          filterOptions.length ? "" : "news-desk-data-grid-filter--metrics-only",
+          sortOptions?.length && onSortChange ? "news-desk-data-grid-filter--with-sort" : "",
+        ].filter(Boolean).join(" ")}
         data-news-desk-data-grid-filter
       >
         {filterOptions.length ? (
@@ -9480,6 +9954,21 @@ function NewsroomCardGrid({
               {filterOptions.map((option) => (
                 <option key={option.key || "all"} value={option.key}>
                   {option.count === undefined ? option.label : `${option.label} (${option.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {sortOptions?.length && onSortChange ? (
+          <label>
+            <span>{sortLabel ?? "Sort"}</span>
+            <select value={sortValue ?? ""} onChange={(event) => {
+              captureLayout();
+              onSortChange(event.target.value);
+            }}>
+              {sortOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -9572,11 +10061,13 @@ function useNewsroomCardGridFlip({
   cards,
   filterValue,
   metricValue,
+  sortValue,
   selectedId,
 }: {
   cards: NewsroomCardRecord[];
   filterValue: string;
   metricValue: string;
+  sortValue?: string;
   selectedId?: string | null;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -9589,10 +10080,11 @@ function useNewsroomCardGridFlip({
       selectedId ?? "",
       filterValue,
       metricValue,
+      sortValue ?? "",
       cards.length,
       ...cards.map((card) => `${card.id}:${card.span ?? "1x1"}`),
     ].join("|")
-  ), [cards, filterValue, metricValue, selectedId]);
+  ), [cards, filterValue, metricValue, selectedId, sortValue]);
 
   const captureLayout = useCallback(() => {
     if (prefersReducedMotion) return;
@@ -14316,6 +14808,7 @@ function formatDeskSectionHeadline(section: NewsDeskTab): string {
   if (section === "topics") return "Topics";
   if (section === "concepts") return "Concepts";
   if (section === "references") return "References";
+  if (section === "insights") return "Insights";
   if (section === "messages") return "Messages";
   if (section === "assignments") return "Assignments";
   if (section === "administration") return "Administration";
@@ -14327,6 +14820,7 @@ function formatDeskSectionLede(section: NewsDeskTab): string {
   if (section === "topics") return "Review and shape the subject areas the newsroom covers.";
   if (section === "concepts") return "Browse people, organizations, places, and ideas found in the source material.";
   if (section === "references") return "Review source materials before they become usable evidence.";
+  if (section === "insights") return "Browse recent research insights and discuss each one in a forum thread to refine the synthesis.";
   if (section === "messages") return "Read notes, rationales, forum threads, curation decisions, and other work products from people and agents.";
   if (section === "assignments") return "Create, filter, claim, and complete newsroom work.";
   if (section === "administration") return "Manage users, roles, doctrine, configurable newspaper sections, and newsroom procedures.";

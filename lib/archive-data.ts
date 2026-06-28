@@ -1,4 +1,4 @@
-import { contentRepository } from "./content-repository";
+import { listCachedPublishedEditions, loadCachedEditionContent } from "./cached-content-repository";
 import { getEditionDatePath } from "./edition-routes";
 import { ARCHIVE_BATCH_SIZE, type ArchiveEditionsResponse } from "./archive-types";
 
@@ -9,14 +9,14 @@ type ArchiveBatchOptions = {
 
 export async function loadArchiveEditionPreviews({ limit = ARCHIVE_BATCH_SIZE, nextToken }: ArchiveBatchOptions = {}): Promise<ArchiveEditionsResponse> {
   const safeLimit = clampArchiveLimit(limit);
-  const { editions, nextToken: nextCursor } = await contentRepository.listPublishedEditions({
+  const { editions, nextToken: nextCursor } = await listCachedPublishedEditions({
     limit: safeLimit,
     nextToken,
   });
   const previews = await Promise.all(
     editions.map(async (edition) => ({
       edition,
-      content: await contentRepository.loadEditionContent({
+      content: await loadCachedEditionContent({
         editionDate: edition.editionDate,
         editionSlug: edition.slug,
       }),

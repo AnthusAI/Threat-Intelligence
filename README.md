@@ -532,6 +532,8 @@ Use Poetry as the canonical Python entrypoint:
 
 ```bash
 poetry install
+# Editable sibling ../Biblicus (entity extraction, HTML heuristics, graph NER dev):
+./scripts/install-biblicus-local.sh
 poetry run papyrus --help
 poetry run papyrus assignments build-context --assignment <assignment-id>
 poetry run papyrus procedures execute-tactus 'return api_list{}'

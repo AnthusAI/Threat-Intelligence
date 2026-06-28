@@ -484,10 +484,16 @@ def _reference_list_resource(args: dict[str, Any]) -> Any:
             reference_id = str(item.get("id") or "").strip()
             corpus_id = str(item.get("corpusId") or "").strip()
             status = str(item.get("curationStatus") or "").strip()
+            imported_at = str(item.get("importedAt") or "").strip()
             updated_at = str(item.get("updatedAt") or item.get("createdAt") or "").strip()
+            published_at = str(item.get("sourcePublishedAt") or "").strip()
             lines.append(f"{index}. **{title}**")
             if reference_id:
                 lines.append(f"   - id: `{reference_id}`")
+            if imported_at:
+                lines.append(f"   - imported: `{imported_at}`")
+            if published_at:
+                lines.append(f"   - published: `{published_at}`")
             if updated_at:
                 lines.append(f"   - updated: `{updated_at}`")
             if corpus_id:
@@ -931,6 +937,7 @@ class PapyrusRuntimeModule:
                 {
                     "status": str(args.get("status") or ""),
                     "processing": str(args.get("processing") or ""),
+                    "order": str(args.get("order") or ""),
                     "kind": str(args.get("kind") or ""),
                     "domain": str(args.get("domain") or ""),
                     "type": str(args.get("type") or ""),
@@ -1434,6 +1441,10 @@ local function normalize_search_result(search, query)
         if type(path) == "string" and path ~= "" then
             normalized_metadata.web_search_path = path
         end
+        local provider = select(1, safe_lookup(metadata, "web_search_provider"))
+        if type(provider) == "string" and provider ~= "" then
+            normalized_metadata.web_search_provider = provider
+        end
         local count = select(1, safe_lookup(metadata, "search_result_count"))
         if type(count) == "number" then
             normalized_metadata.search_result_count = count
@@ -1461,6 +1472,9 @@ local function normalize_search_result(search, query)
         if type(metadata.web_search_path) == "string" and metadata.web_search_path ~= "" then
             normalized_metadata.web_search_path = metadata.web_search_path
         end
+        if type(metadata.web_search_provider) == "string" and metadata.web_search_provider ~= "" then
+            normalized_metadata.web_search_provider = metadata.web_search_provider
+        end
         if type(metadata.search_result_count) == "number" then
             normalized_metadata.search_result_count = metadata.search_result_count
         end
@@ -1482,6 +1496,9 @@ local function normalize_search_result(search, query)
     normalized.query = normalized_query
     normalized.results = trim_results(normalized_results)
     normalized.metadata = normalized_metadata
+    if type(normalized_metadata.web_search_provider) == "string" and normalized_metadata.web_search_provider ~= "" then
+        normalized.provider = normalized_metadata.web_search_provider
+    end
     return normalized
 end
 
@@ -1576,6 +1593,12 @@ end
     end
 
     selected.metadata.web_search_path = "papyrus.reference.web_search"
+    if type(selected.metadata.web_search_provider) ~= "string" or selected.metadata.web_search_provider == "" then
+        selected.metadata.web_search_provider = "tavily"
+    end
+    if type(selected.provider) ~= "string" or selected.provider == "" then
+        selected.provider = selected.metadata.web_search_provider
+    end
     selected.metadata.search_result_count = result_count(selected.results)
     selected.metadata.search_metadata_shape_ok = shape_ok
     selected.metadata.discovery_attempts_total = #queries_tried
@@ -2033,6 +2056,9 @@ def execute_tactus(tactus: str, *, web_ui_context: dict[str, Any] | None = None)
     ``docs_list``, ``assignment_context``, ``assignment_agent_context``,
     ``biblicus_query``, ``plan_research_update``, and ``plan_draft_update``.
     """
+    from papyrus_content.env import load_dotenv
+
+    load_dotenv()
 
     started = time.monotonic()
     trace_id = str(uuid.uuid4())

@@ -121,6 +121,7 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
     research_mode = normalize_research_mode(options.get("research-mode") or options.get("researchMode"))
     now = _utc_now()
     assignment_type_key = normalize_string(options.get("type")) or "research.edition-candidate"
+    tavily_deep = assignment_type_key == "research.tavily-deep"
     status = normalize_string(options.get("status")) or "open"
     priority = normalize_non_negative_integer(options.get("priority"), "--priority") or 50
     queue_key = normalize_string(options.get("queue")) or f"research:{section_key or 'unsectioned'}:exploratory"
@@ -163,6 +164,14 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
                 "primaryFocusCategoryKey": primary_focus,
                 "contextProfile": "researcher",
                 "createdBy": "assignments create-research",
+                **(
+                    {
+                        "researchBackend": "tavily_deep",
+                        "tavilyModel": normalize_string(options.get("tavily-model")) or "auto",
+                    }
+                    if tavily_deep
+                    else {}
+                ),
             }
         ),
         "corpusId": normalize_string(options.get("corpus-id")) or knowledge_corpus_id({"key": corpus_key}),
@@ -206,10 +215,16 @@ def create_research_assignment(client: PapyrusGraphQLAuthoringClient, options: d
         "researchMode": research_mode,
         "changes": _count_delta(changes, "action"),
         "next": (
-            f"poetry run papyrus assignments run-research --assignment {assignment_id} "
-            f"--corpus-key {corpus_key} --research-mode {research_mode}"
+            (
+                f"poetry run papyrus assignments run-tavily-deep-research --assignment {assignment_id} "
+                f"--corpus-key {corpus_key} --wait"
+                if tavily_deep
+                else f"poetry run papyrus assignments run-research --assignment {assignment_id} "
+                f"--corpus-key {corpus_key} --research-mode {research_mode}"
+            )
             if apply
             else f"poetry run papyrus assignments create-research --title {json.dumps(title)} "
+            f"--type {assignment_type_key} "
             f"--section {section_key or '<section-key>'} --corpus-key {corpus_key} "
             f"--research-mode {research_mode}"
         ),
@@ -1103,6 +1118,16 @@ def apply_reporting_packet(client: PapyrusGraphQLAuthoringClient, options: dict[
     return result
 
 
+def _references_for_changed_ids(
+    client: PapyrusGraphQLAuthoringClient,
+    reference_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not reference_ids:
+        return []
+    by_id = client.get_records_by_id("Reference", sorted(reference_ids))
+    return list(by_id.values())
+
+
 def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, options: dict[str, Any]) -> dict[str, Any]:
     from .catalog import assert_reference_catalog_plan_safety, build_reference_catalog_registration_records
     from .ids import knowledge_corpus_id
@@ -1195,9 +1220,10 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         }
         if parse_boolean_option(options.get("url-text"), True, "--url-text"):
             if changed_reference_ids:
-                refreshed_references = client.list_records("Reference")
-                refreshed_attachments = client.list_records("ReferenceAttachment")
-                refreshed_semantic_relations = client.list_records("SemanticRelation")
+                refreshed_references = _references_for_changed_ids(client, changed_reference_ids)
+                # Fresh research-proposal references have no attachments or citation graph yet.
+                refreshed_attachments: list[dict[str, Any]] = []
+                refreshed_semantic_relations: list[dict[str, Any]] = []
                 max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
                 force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
                 corpus_id = knowledge_corpus_id(corpus_config)
@@ -1223,8 +1249,8 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
                 )
         if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text"):
             if changed_reference_ids:
-                refreshed_references = client.list_records("Reference")
-                refreshed_attachments = client.list_records("ReferenceAttachment")
+                refreshed_references = _references_for_changed_ids(client, changed_reference_ids)
+                refreshed_attachments: list[dict[str, Any]] = []
                 corpus_id = knowledge_corpus_id(corpus_config)
                 metadata_generation_result = run_reference_metadata_generation_from_extracted_text(
                     references=refreshed_references,

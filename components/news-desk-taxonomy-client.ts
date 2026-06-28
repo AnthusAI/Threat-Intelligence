@@ -102,6 +102,23 @@ const LIST_MESSAGES_BY_THREAD_AND_SEQUENCE_QUERY = `
   }
 `;
 
+const LIST_MESSAGES_BY_KIND_AND_CREATED_AT_QUERY = `
+  query ListMessagesByKindAndCreatedAt($messageKind: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String) {
+    listMessagesByKindAndCreatedAt(messageKind: $messageKind, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken) {
+      items { id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata createdAt updatedAt newsroomFeedKey }
+      nextToken
+    }
+  }
+`;
+
+const GET_MESSAGE_QUERY = `
+  query GetMessage($id: ID!) {
+    getMessage(id: $id) {
+      id messageKind messageDomain status summary source importRunId authorSub authorUserProfileId authorLabel threadId parentMessageId sequenceNumber role messageType content semanticLayer searchVisibility responseTarget responseStatus responseOwner responseStartedAt responseCompletedAt responseError metadata createdAt updatedAt newsroomFeedKey
+    }
+  }
+`;
+
 const CREATE_MESSAGE_THREAD_MUTATION = `
   mutation CreateMessageThread($input: CreateMessageThreadInput!) {
     createMessageThread(input: $input) {
@@ -244,6 +261,15 @@ const NEWSROOM_ASSIGNMENT_FEED_QUERY = `
 const NEWSROOM_REFERENCE_FEED_QUERY = `
   query ListReferencesByNewsroomFeedAndCreatedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
     listReferencesByNewsroomFeedAndCreatedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
+      items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
+      nextToken
+    }
+  }
+`;
+
+const NEWSROOM_REFERENCE_IMPORTED_FEED_QUERY = `
+  query ListReferencesByNewsroomFeedAndImportedAt($newsroomFeedKey: String!, $sortDirection: ModelSortDirection, $limit: Int, $nextToken: String, $filter: ModelReferenceFilterInput) {
+    listReferencesByNewsroomFeedAndImportedAt(newsroomFeedKey: $newsroomFeedKey, sortDirection: $sortDirection, limit: $limit, nextToken: $nextToken, filter: $filter) {
       items { id lineageId versionNumber previousVersionId versionState versionCreatedAt versionCreatedBy changeReason contentHash corpusId externalItemId title authors sourceUri storagePath mediaType byteSize sha256 sourcePublishedAt sourceUpdatedAt retrievedAt inboundCitationCount outboundCitationCount importRunId importedAt createdAt curationStatus curationStatusKey curationStatusUpdatedAt curationStatusUpdatedBy curationStatusReason newsroomFeedKey reviewedFeedKey updatedAt }
       nextToken
     }
@@ -638,10 +664,13 @@ type NewsroomAssignmentPageOptions = NewsroomPageOptions & {
   status?: string;
 };
 
+export type NewsroomReferencePageOrder = "published" | "imported";
+
 type NewsroomReferencePageOptions = NewsroomPageOptions & {
   status?: string;
   excludePending?: boolean;
   corpusId?: string;
+  order?: NewsroomReferencePageOrder | string;
 };
 
 type NewsroomSemanticNodePageOptions = NewsroomPageOptions & {
@@ -656,9 +685,14 @@ type NewsroomSemanticRelationPageOptions = NewsroomPageOptions & {
 
 export type ForumThreadWithMessages = MessageThreadRecord & {
   messages: MessageRecord[];
-  scope: "edition" | "section";
+  scope: "edition" | "section" | "insight";
   sectionKey?: string | null;
   sectionTitle?: string | null;
+};
+
+export type InsightForumThreadsPage = {
+  threads: ForumThreadWithMessages[];
+  nextToken: string | null;
 };
 
 export type EditionForumThreadsResult = {
@@ -1228,6 +1262,148 @@ export async function loadEditionForumThreads(options: {
   };
 }
 
+export async function loadInsightForumThreads(options: {
+  domain?: string;
+  limit?: number;
+  nextToken?: string | null;
+  includeMessages?: boolean;
+} = {}): Promise<InsightForumThreadsPage> {
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.insightForumThreads) {
+    const domain = String(options.domain || "").trim();
+    let threads = testMock.insightForumThreads;
+    if (domain) threads = threads.filter((thread) => thread.sectionKey === domain);
+    return { threads, nextToken: null };
+  }
+
+  const limit = Math.max(1, Math.min(options.limit ?? NEWSROOM_PAGE_LIMIT, 100));
+  const domain = String(options.domain || "").trim();
+  const includeMessages = options.includeMessages !== false;
+  type KindConnectionResponse = {
+    listMessagesByKindAndCreatedAt?: {
+      items?: Array<MessageRecord | null> | null;
+      nextToken?: string | null;
+    } | null;
+  };
+  const response: KindConnectionResponse = await runGraphql<KindConnectionResponse>(
+    LIST_MESSAGES_BY_KIND_AND_CREATED_AT_QUERY,
+    {
+      messageKind: "insight",
+      sortDirection: "DESC",
+      limit,
+      nextToken: options.nextToken ?? null,
+    },
+  );
+  const connection = response.listMessagesByKindAndCreatedAt;
+  const roots = (connection?.items ?? [])
+    .filter(Boolean)
+    .map((item) => normalizeMessageRecord(item as MessageRecord))
+    .filter(isInsightThreadRootMessage)
+    .filter((message) => !domain || message.messageDomain === domain);
+
+  const threads = await Promise.all(roots.map(async (root) => {
+    const messages = includeMessages
+      ? await loadInsightThreadMessages(root.id, root)
+      : [root];
+    return buildInsightForumThread(root, messages);
+  }));
+
+  return {
+    threads,
+    nextToken: connection?.nextToken ?? null,
+  };
+}
+
+export async function loadInsightForumThreadById(
+  threadId: string,
+  options: { includeMessages?: boolean } = {},
+): Promise<ForumThreadWithMessages | null> {
+  const normalized = String(threadId || "").trim();
+  if (!normalized) return null;
+  const testMock = getTestEditorNewsroomMock();
+  if (testMock?.insightForumThreads) {
+    return testMock.insightForumThreads.find((thread) => thread.id === normalized) ?? null;
+  }
+  const root = await getMessageRecordById(normalized);
+  if (!root || !isInsightThreadRootMessage(root)) return null;
+  const includeMessages = options.includeMessages !== false;
+  const messages = includeMessages
+    ? await loadInsightThreadMessages(normalized, root)
+    : [root];
+  return buildInsightForumThread(root, messages);
+}
+
+export async function appendInsightThreadReplyRecord(input: {
+  threadId: string;
+  summary: string;
+  content: string;
+  role?: string;
+  authorLabel?: string;
+  parentMessageId?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<MessageRecord> {
+  const threadId = String(input.threadId || "").trim();
+  const summary = String(input.summary || "").trim();
+  const content = String(input.content || "").trim();
+  if (!threadId) throw new Error("threadId is required");
+  if (!summary) throw new Error("summary is required");
+  if (!content) throw new Error("content is required");
+  const root = await getMessageRecordById(threadId);
+  if (!root || !isInsightThreadRootMessage(root)) throw new Error(`Insight thread not found: ${threadId}`);
+  const existing = await listMessagesByThreadId(threadId, 1000);
+  const nextSequence = Math.max(1, ...existing.map((message) => Number(message.sequenceNumber || 0))) + 1;
+  const now = new Date().toISOString();
+  const message: MessageRecord = {
+    id: `message-insight-reply-${safeForumId(threadId)}-${String(nextSequence).padStart(4, "0")}`,
+    messageKind: "insight_reply",
+    messageDomain: root.messageDomain ?? "knowledge",
+    status: "active",
+    summary,
+    source: "newsroom.insights",
+    authorLabel: input.authorLabel?.trim() || "editor",
+    threadId,
+    parentMessageId: input.parentMessageId?.trim() || null,
+    sequenceNumber: nextSequence,
+    role: input.role || "human",
+    messageType: "insight_forum_reply",
+    content,
+    metadata: input.metadata ?? {},
+    createdAt: now,
+    updatedAt: now,
+    newsroomFeedKey: "messages",
+  };
+  const created = await runGraphql<{ createMessage?: MessageRecord | null }>(
+    CREATE_MESSAGE_MUTATION,
+    { input: message },
+  );
+  return normalizeMessageRecord(created.createMessage ?? message);
+}
+
+export async function deleteInsightThreadMessageRecord(input: {
+  threadId: string;
+  messageId: string;
+}): Promise<MessageRecord> {
+  const threadId = String(input.threadId || "").trim();
+  const messageId = String(input.messageId || "").trim();
+  if (!threadId) throw new Error("threadId is required");
+  if (!messageId) throw new Error("messageId is required");
+  const existing = await listMessagesByThreadId(threadId, 1000);
+  const target = existing.find((message) => message.id === messageId);
+  if (!target) throw new Error(`Message not found in thread: ${messageId}`);
+  const now = new Date().toISOString();
+  const updatedMessage = await runGraphql<{ updateMessage?: MessageRecord | null }>(
+    UPDATE_MESSAGE_MUTATION,
+    {
+      input: {
+        id: target.id,
+        status: "deleted",
+        updatedAt: now,
+      },
+    },
+  );
+  return normalizeMessageRecord(updatedMessage.updateMessage ?? { ...target, status: "deleted", updatedAt: now });
+}
+
 export async function ensureEditionForumThreadRecord(input: {
   editionId: string;
   title?: string;
@@ -1491,6 +1667,102 @@ async function listMessagesByThreadId(threadId: string, limit = 400): Promise<Me
   return records;
 }
 
+function isInsightThreadRootMessage(message: MessageRecord): boolean {
+  if (String(message.messageKind || "") !== "insight") return false;
+  const threadId = String(message.threadId || "").trim();
+  const sequenceNumber = Number(message.sequenceNumber || 0);
+  if (threadId && threadId !== message.id && sequenceNumber > 1) return false;
+  return true;
+}
+
+async function getMessageRecordById(messageId: string): Promise<MessageRecord | null> {
+  const normalized = String(messageId || "").trim();
+  if (!normalized) return null;
+  const response = await runGraphql<{ getMessage?: MessageRecord | null }>(
+    GET_MESSAGE_QUERY,
+    { id: normalized },
+  );
+  const message = response.getMessage;
+  return message ? normalizeMessageRecord(message) : null;
+}
+
+async function loadInsightThreadMessages(threadId: string, root: MessageRecord): Promise<MessageRecord[]> {
+  const threadMessages = await listMessagesByThreadId(threadId, 500);
+  const byId = new Map<string, MessageRecord>();
+  byId.set(root.id, root);
+  for (const message of threadMessages) byId.set(message.id, message);
+  const merged = [...byId.values()].sort(
+    (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
+  );
+  return hydrateMessageRecordsContent(merged);
+}
+
+function insightForumThreadTitle(root: MessageRecord): string {
+  const metadata = normalizeJsonValue(root.metadata);
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const explicit = String((metadata as Record<string, unknown>).insightTitle || "").trim();
+    if (explicit) return explicit;
+  }
+  const summary = String(root.summary || "").trim();
+  return summary || "Insight";
+}
+
+function buildInsightForumThread(root: MessageRecord, messages: MessageRecord[]): ForumThreadWithMessages {
+  const activeMessages = messages.filter((message) => String(message.status || "active") === "active");
+  const sorted = [...activeMessages].sort(
+    (left, right) => Number(left.sequenceNumber ?? 0) - Number(right.sequenceNumber ?? 0),
+  );
+  const lastMessage = sorted.at(-1) ?? root;
+  const activityAt = lastMessage.updatedAt ?? lastMessage.createdAt ?? root.updatedAt ?? root.createdAt;
+  return {
+    id: root.id,
+    threadKind: "insight_forum",
+    status: "active",
+    title: insightForumThreadTitle(root),
+    summary: formatInsightForumDomainLabel(root.messageDomain),
+    primaryAnchorKind: "message",
+    primaryAnchorId: root.id,
+    primaryAnchorLineageId: root.id,
+    primaryAnchorKey: `message#${root.id}`,
+    createdByLabel: root.authorLabel ?? null,
+    messageCount: sorted.length,
+    lastMessageId: lastMessage.id,
+    lastMessageAt: activityAt,
+    metadata: normalizeJsonValue(root.metadata) as Record<string, unknown>,
+    createdAt: root.createdAt,
+    updatedAt: activityAt,
+    newsroomFeedKey: "messages",
+    messages: sorted.length ? sorted : [root],
+    scope: "insight",
+    sectionKey: root.messageDomain ?? null,
+  };
+}
+
+function formatInsightForumDomainLabel(domain: string | null | undefined): string {
+  const value = String(domain || "").trim();
+  if (value === "assignment_work") return "Assignment research";
+  if (value === "knowledge") return "Reference knowledge";
+  if (!value) return "Insight";
+  return value.replace(/_/g, " ");
+}
+
+async function hydrateMessageRecordsContent(messages: MessageRecord[]): Promise<MessageRecord[]> {
+  return Promise.all(messages.map(async (message) => {
+    if (String(message.content || "").trim()) return message;
+    try {
+      const payloads = await loadModelPayloadsForOwner("message", message.id, ["message_body"]);
+      const body = payloads
+        .find((payload) => payload.attachment.role === "message_body")
+        ?.text
+        ?.trim();
+      if (body) return { ...message, content: body };
+    } catch {
+      return message;
+    }
+    return message;
+  }));
+}
+
 function normalizeMessageRecord(message: MessageRecord): MessageRecord {
   return {
     ...message,
@@ -1573,7 +1845,29 @@ export async function loadEditorReferencesData(): Promise<{
   };
 }
 
+export function normalizeNewsroomReferencePageOrder(value?: string | null): NewsroomReferencePageOrder {
+  return value?.trim() === "imported" ? "imported" : "published";
+}
+
 export async function loadNewsroomReferencePage(options: NewsroomReferencePageOptions = {}): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const order = normalizeNewsroomReferencePageOrder(options.order);
+  if (order === "imported") {
+    try {
+      const importedPage = await loadReferencePageByImportedFeed(options);
+      if (importedPage.items.length > 0 || options.nextToken) return importedPage;
+    } catch (error) {
+      if (!isMissingGraphQLQueryFieldError(error, "listReferencesByNewsroomFeedAndImportedAt")) {
+        throw error;
+      }
+      console.warn(
+        "listReferencesByNewsroomFeedAndImportedAt is not deployed in this environment; "
+        + "falling back to legacy reference queries with client-side import-date sort.",
+      );
+    }
+    const fallbackPage = await loadReferencePageByFallbackList(options);
+    if (fallbackPage.items.length > 0 || options.nextToken) return fallbackPage;
+    // Continue into status-index loaders below when the table scan is empty.
+  }
   const normalizedStatus = normalizeReferenceStatusKey(options.status);
   if (normalizedStatus) {
     const indexedPage = await loadReferencePageByStatus({
@@ -1582,28 +1876,25 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
       nextToken: options.nextToken,
       corpusId: options.corpusId,
     });
-    if (indexedPage.items.length > 0 || options.nextToken) return indexedPage;
+    if (indexedPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(indexedPage, order);
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
     return loadReferencePageByFallbackList(options);
   }
   if (options.excludePending) {
-    const reviewedPage = await loadReferencePageByReviewedFeed({
-      limit: options.limit,
-      nextToken: options.nextToken,
-      corpusId: options.corpusId,
-    });
-    if (reviewedPage.items.length > 0 || options.nextToken) return reviewedPage;
-    // Backfill may still be pending in an environment; fall back to status-index merge.
+    // Use the curation-status merge, not reviewedFeedKey. The reviewed-feed GSI is only
+    // populated for references that went through backfill; treating it as authoritative
+    // capped production at ~100 rows while thousands exist in the status indexes.
     const mergedReviewedPage = await loadMergedReferenceStatusPage({
       statuses: ["accepted", "rejected", "archived"],
       limit: options.limit,
       nextToken: options.nextToken,
       corpusId: options.corpusId,
+      order,
     });
     if (mergedReviewedPage.items.length > 0 || options.nextToken) return mergedReviewedPage;
     const legacyPage = await loadReferencePageByLegacyFeed(options);
-    if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+    if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
     return loadReferencePageByFallbackList(options);
   }
   const mergedPage = await loadMergedReferenceStatusPage({
@@ -1611,11 +1902,25 @@ export async function loadNewsroomReferencePage(options: NewsroomReferencePageOp
     limit: options.limit,
     nextToken: options.nextToken,
     corpusId: options.corpusId,
+    order,
   });
   if (mergedPage.items.length > 0 || options.nextToken) return mergedPage;
   const legacyPage = await loadReferencePageByLegacyFeed(options);
-  if (legacyPage.items.length > 0 || options.nextToken) return legacyPage;
+  if (legacyPage.items.length > 0 || options.nextToken) return sortReferencePageByOrder(legacyPage, order);
   return loadReferencePageByFallbackList(options);
+}
+
+function referencePageMatchesFilters(
+  reference: ReferenceRecord,
+  options: NewsroomReferencePageOptions,
+  normalizedStatus: ReferenceStatus | null,
+): boolean {
+  if (reference.versionState && reference.versionState !== "current") return false;
+  if (options.corpusId && reference.corpusId !== options.corpusId) return false;
+  const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
+  if (normalizedStatus) return status === normalizedStatus;
+  if (options.excludePending) return status !== "pending";
+  return true;
 }
 
 async function loadReferencePageByLegacyFeed(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
@@ -1626,14 +1931,19 @@ async function loadReferencePageByLegacyFeed(options: NewsroomReferencePageOptio
     newsroomFeedKey: "references",
     limit: options.limit,
     nextToken: options.nextToken,
-    matches: (reference) => {
-      if (reference.versionState && reference.versionState !== "current") return false;
-      if (options.corpusId && reference.corpusId !== options.corpusId) return false;
-      const status = normalizeReferenceStatusKey(reference.curationStatus) ?? "pending";
-      if (normalizedStatus) return status === normalizedStatus;
-      if (options.excludePending) return status !== "pending";
-      return true;
-    },
+    matches: (reference) => referencePageMatchesFilters(reference, options, normalizedStatus),
+  });
+}
+
+async function loadReferencePageByImportedFeed(options: NewsroomReferencePageOptions): Promise<NewsroomRecordPage<ReferenceRecord>> {
+  const normalizedStatus = normalizeReferenceStatusKey(options.status);
+  return loadNewsroomFeedPage<ReferenceRecord>({
+    query: NEWSROOM_REFERENCE_IMPORTED_FEED_QUERY,
+    field: "listReferencesByNewsroomFeedAndImportedAt",
+    newsroomFeedKey: "references",
+    limit: options.limit,
+    nextToken: options.nextToken,
+    matches: (reference) => referencePageMatchesFilters(reference, options, normalizedStatus),
   });
 }
 
@@ -1687,12 +1997,15 @@ async function loadReferencePageByFallbackList(options: NewsroomReferencePageOpt
     cursor = connectionNextToken;
   } while (items.length < limit && cursor && pageCount < 40);
 
-  return {
-    items: items
-      .sort(compareReferencesByRecency)
-      .slice(0, limit),
+  const order = normalizeNewsroomReferencePageOrder(options.order);
+  const sorted = sortReferencePageByOrder({
+    items,
     nextToken: connectionNextToken,
     hasMore: Boolean(connectionNextToken),
+  }, order);
+  return {
+    ...sorted,
+    items: sorted.items.slice(0, limit),
   };
 }
 
@@ -2253,6 +2566,7 @@ export function hasTestEditorOverride(): boolean {
 
 type TestEditorNewsroomMock = {
   forumThreadsByEdition?: Record<string, ForumThreadWithMessages[]>;
+  insightForumThreads?: ForumThreadWithMessages[];
   messages?: MessageRecord[];
   payloads?: Record<string, HydratedModelPayload[]>;
   referenceAttachments?: ReferenceAttachmentRecord[];
@@ -2544,11 +2858,13 @@ async function loadMergedReferenceStatusPage({
   limit = NEWSROOM_PAGE_LIMIT,
   nextToken,
   corpusId,
+  order = "published",
 }: {
   statuses: readonly ReferenceStatus[];
   limit?: number;
   nextToken?: string | null;
   corpusId?: string;
+  order?: NewsroomReferencePageOrder;
 }): Promise<NewsroomRecordPage<ReferenceRecord>> {
   const cursor = decodeMergedReferenceStatusCursor(nextToken, statuses);
   const output: ReferenceRecord[] = [];
@@ -2573,7 +2889,7 @@ async function loadMergedReferenceStatusPage({
       cursor.cursors[status] = page.nextToken ?? null;
     }
 
-    const nextStatus = selectNextReferenceStatus(cursor.pendingByStatus, statuses);
+    const nextStatus = selectNextReferenceStatus(cursor.pendingByStatus, statuses, order);
     if (!nextStatus) break;
     const nextReference = cursor.pendingByStatus[nextStatus].shift();
     if (!nextReference?.id || emitted.has(nextReference.id)) continue;
@@ -2654,6 +2970,7 @@ async function runReferenceIndexedQuery({
 function selectNextReferenceStatus(
   pendingByStatus: Record<ReferenceStatus, ReferenceRecord[]>,
   statuses: readonly ReferenceStatus[],
+  order: NewsroomReferencePageOrder = "published",
 ): ReferenceStatus | null {
   let selected: ReferenceStatus | null = null;
   for (const status of statuses) {
@@ -2665,9 +2982,18 @@ function selectNextReferenceStatus(
       continue;
     }
     const current = pendingByStatus[selected][0];
-    if (!current || compareReferencesByRecency(candidate, current) < 0) selected = status;
+    if (!current || compareReferencesForPageOrder(candidate, current, order) < 0) selected = status;
   }
   return selected;
+}
+
+function compareReferencesForPageOrder(
+  left: ReferenceRecord,
+  right: ReferenceRecord,
+  order: NewsroomReferencePageOrder,
+): number {
+  if (order === "imported") return compareReferencesByImportedAt(left, right);
+  return compareReferencesByPublicationDate(left, right);
 }
 
 function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecord): number {
@@ -2679,11 +3005,55 @@ function compareReferencesByRecency(left: ReferenceRecord, right: ReferenceRecor
   return String(right.id).localeCompare(String(left.id));
 }
 
+function compareReferencesByImportedAt(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftTs = Date.parse(referenceImportedTimestamp(left));
+  const rightTs = Date.parse(referenceImportedTimestamp(right));
+  const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+  const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+  if (leftRank !== rightRank) return rightRank - leftRank;
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function compareReferencesByPublicationDate(left: ReferenceRecord, right: ReferenceRecord): number {
+  const leftTs = Date.parse(referencePublicationTimestamp(left));
+  const rightTs = Date.parse(referencePublicationTimestamp(right));
+  const leftRank = Number.isFinite(leftTs) ? leftTs : 0;
+  const rightRank = Number.isFinite(rightTs) ? rightTs : 0;
+  if (leftRank !== rightRank) return rightRank - leftRank;
+  return String(right.id).localeCompare(String(left.id));
+}
+
+function sortReferencePageByOrder(
+  page: NewsroomRecordPage<ReferenceRecord>,
+  order: NewsroomReferencePageOrder,
+): NewsroomRecordPage<ReferenceRecord> {
+  const compare = order === "imported" ? compareReferencesByImportedAt : compareReferencesByPublicationDate;
+  return {
+    ...page,
+    items: [...page.items].sort(compare),
+  };
+}
+
 function referenceRecencyTimestamp(reference: ReferenceRecord): string {
   return reference.updatedAt
     || reference.curationStatusUpdatedAt
     || reference.importedAt
     || reference.createdAt
+    || "";
+}
+
+function referenceImportedTimestamp(reference: ReferenceRecord): string {
+  return reference.importedAt
+    || reference.createdAt
+    || "";
+}
+
+function referencePublicationTimestamp(reference: ReferenceRecord): string {
+  return reference.sourcePublishedAt
+    || reference.sourceUpdatedAt
+    || reference.retrievedAt
+    || reference.importedAt
+    || reference.updatedAt
     || "";
 }
 
@@ -2774,6 +3144,11 @@ async function loadNewsroomFeedPage<T>({
     }
     const connection = response.data?.[field];
     if (!connection) {
+      if (isMissingGraphQLQueryFieldError(response.errors, field)) {
+        throw new Error(
+          `Validation error of type FieldUndefined: Field '${field}' in type 'Query' is undefined @ '${field}'`,
+        );
+      }
       assertNoGraphQLErrors(response.errors);
       throw new Error(`Missing GraphQL connection payload for ${field}.`);
     }
@@ -3263,6 +3638,14 @@ function assertNoGraphQLErrors(errors?: unknown[] | null) {
     })
     .join("; ");
   throw new Error(details);
+}
+
+function isMissingGraphQLQueryFieldError(error: unknown, fieldName: string): boolean {
+  if (Array.isArray(error)) {
+    return error.some((entry) => isMissingGraphQLQueryFieldError(entry, fieldName));
+  }
+  const message = normalizeUnknownErrorMessage(error, "");
+  return message.includes("FieldUndefined") && message.includes(fieldName);
 }
 
 function normalizeUnknownErrorMessage(error: unknown, fallback: string): string {

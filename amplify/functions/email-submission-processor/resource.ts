@@ -26,10 +26,10 @@ function bundleEmailSubmissionProcessor(outputDir: string): void {
   fs.cpSync(path.join(projectRoot, "src/papyrus_newsroom"), packageDir, { recursive: true });
   fs.cpSync(path.join(projectRoot, "src/papyrus_content"), contentDir, { recursive: true });
   fs.cpSync(path.join(projectRoot, "src/papyrus_knowledge_query"), knowledgeDir, { recursive: true });
-  fs.copyFileSync(
-    path.join(projectRoot, "corpora/papyrus-steering.yml"),
-    path.join(corporaDir, "papyrus-steering.yml"),
-  );
+  for (const entry of fs.readdirSync(path.join(projectRoot, "corpora"))) {
+    if (!entry.endsWith(".yml")) continue;
+    fs.copyFileSync(path.join(projectRoot, "corpora", entry), path.join(corporaDir, entry));
+  }
   installPythonRequirements(outputDir);
 }
 
@@ -71,7 +71,7 @@ export const emailSubmissionProcessor = defineFunction(
               "cp -R src/papyrus_newsroom/. /asset-output/papyrus_newsroom/",
               "cp -R src/papyrus_content/. /asset-output/papyrus_content/",
               "cp -R src/papyrus_knowledge_query/. /asset-output/papyrus_knowledge_query/",
-              "cp corpora/papyrus-steering.yml /asset-output/corpora/papyrus-steering.yml",
+              "cp corpora/*.yml /asset-output/corpora/",
               "python3 -m pip install -r amplify/functions/email-submission-processor/requirements.txt -t /asset-output --no-cache-dir",
             ].join(" && "),
           ],

@@ -5,4 +5,5 @@ export const modelAttachmentUpload = defineFunction({
   entry: "./handler.ts",
   timeoutSeconds: 15,
   memoryMB: 256,
+  resourceGroupName: "data",
 });
