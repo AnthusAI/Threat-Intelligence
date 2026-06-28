@@ -1,23 +1,22 @@
 import { notFound } from "next/navigation";
 import { ArticlePageView } from "../../../components/article-page";
-import { contentRepository, isGraphQLContentSource } from "../../../lib/content-repository";
+import { getCachedArticle } from "../../../lib/cached-content-repository";
+import { generateArticleStaticParams } from "../../../lib/reader-static-params";
 
-export const dynamic = "force-dynamic";
+// Keep in sync with READER_REVALIDATE_SECONDS in lib/reader-route-config.ts
+export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  return generateArticleStaticParams();
+}
 
 type ArticlePageProps = {
   params: Promise<{ slug: string }>;
 };
 
-export async function generateStaticParams() {
-  if (isGraphQLContentSource()) return [];
-
-  const slugs = await contentRepository.listArticleSlugs();
-  return slugs.map((slug) => ({ slug }));
-}
-
 export async function generateMetadata({ params }: ArticlePageProps) {
   const { slug } = await params;
-  const article = await contentRepository.getArticle(slug);
+  const article = await getCachedArticle(slug);
   if (!article) return {};
   return {
     title: `${article.headline} | Papyrus`,
@@ -27,7 +26,7 @@ export async function generateMetadata({ params }: ArticlePageProps) {
 
 export default async function ArticlePage({ params }: ArticlePageProps) {
   const { slug } = await params;
-  const article = await contentRepository.getArticle(slug);
+  const article = await getCachedArticle(slug);
   if (!article) notFound();
 
   return <ArticlePageView article={article} backHref="/" />;

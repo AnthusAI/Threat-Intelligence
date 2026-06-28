@@ -13,6 +13,7 @@ from typing import Any
 from .env import PAPYRUS_ROOT, storage_bucket_from_amplify_outputs
 from .graphql_authoring import PapyrusGraphQLAuthoringClient, create_authoring_client
 from .options import normalize_string, parse_boolean_option, parse_options, resolve_mutation_apply
+from .reader_revalidation import trigger_reader_cache_revalidation
 from .records import apply_record_changes, build_record_changes_targeted_by_id
 
 SEED_CONTENT_PATH = PAPYRUS_ROOT / "amplify" / "seed" / "seed-edition-content.json"
@@ -49,6 +50,15 @@ def seed_edition_content(flags: list[str]) -> None:
             upload_seed_media(payload, bucket=str(bucket))
         apply_record_changes(client, changes)
         result["applied"] = True
+        article_slugs = [str(article.get("slug", "")).strip() for article in payload.get("articles", [])]
+        article_slugs = [slug for slug in article_slugs if slug]
+        revalidation = trigger_reader_cache_revalidation(
+            edition_date=str(payload["publishDate"]),
+            article_slugs=article_slugs,
+            item_slugs=article_slugs,
+        )
+        if revalidation is not None:
+            result["readerRevalidation"] = revalidation
     if options.get("json"):
         print(json.dumps(result, indent=2))
     else:
@@ -169,6 +179,11 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
     section_slug = slugify(article.get("section") or "")
     tag_id = f"tag-{section_slug}"
     sort_key = f"{index + 1:03d}#{article['slug']}"
+    editorial_payload: dict[str, Any] = {}
+    excerpt = normalize_string(article.get("excerpt"))
+    if excerpt:
+        editorial_payload["customExcerpt"] = excerpt
+
     item_record = with_version_fields(
         {
             "id": item_id,
@@ -190,7 +205,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
             "sortTitle": article.get("headline"),
             "pullQuotes": article.get("pullQuotes") or [],
             "layout": to_aws_json({"source": "fixture"}),
-            "editorial": to_aws_json({}),
+            "editorial": to_aws_json(editorial_payload),
         },
         lineage_id=item_id,
         version_created_at=edition_config["publishedAt"],
@@ -224,7 +239,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
                 "sortTitle": article.get("headline"),
                 "pullQuotes": article.get("pullQuotes") or [],
                 "layout": to_aws_json({"source": "fixture"}),
-                "editorial": to_aws_json({}),
+                "editorial": to_aws_json(editorial_payload),
             },
         ),
         record("Tag", {"id": tag_id, "slug": section_slug, "label": article.get("section"), "type": "section"}),

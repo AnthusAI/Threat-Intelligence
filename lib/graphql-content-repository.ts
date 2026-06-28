@@ -1,8 +1,9 @@
 import { generateClient } from "aws-amplify/data";
-import { getUrl } from "aws-amplify/storage/server";
 import type { Schema } from "../amplify/data/resource";
 import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout, ArticleImageThemeVariants } from "./articles";
+import { withContentLoadTiming } from "./content-load-timing";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
+import { resolveReaderStorageUrl, signStorageUrl } from "./reader-storage-url";
 import type { ContentRepository, EditionContent, EditionRouteSummary, ListPublishedEditionsOptions, LoadEditionContentOptions } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
 import { normalizeEditionLayoutPlan, validateEditionLayoutPlanForItems, type EditionLayoutPlan } from "./layout-plan";
@@ -17,7 +18,6 @@ import {
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
 const PUBLISHED_STATUS = "published";
-const STORAGE_URL_EXPIRES_IN_SECONDS = 60 * 60;
 const ARTICLE_TYPE_STATUS = "article#published";
 
 type DataClient = ReturnType<typeof generateClient<Schema>>;
@@ -77,6 +77,7 @@ type GraphQLItem = {
   dateline?: string | null;
   publishedAt?: string | null;
   pullQuotes?: Array<string | null> | null;
+  editorial?: unknown;
 };
 
 type GraphQLMediaAsset = {
@@ -105,6 +106,17 @@ type GraphQLMediaAsset = {
   metadata?: unknown;
 };
 
+type ContentAttachmentPointer = {
+  storagePath?: string | null;
+  mediaType?: string | null;
+  role?: string | null;
+};
+
+type ResolvedItemContent = {
+  body: string[] | null;
+  excerpt: string | null;
+};
+
 const IMAGE_ROLES: NonNullable<ArticleImageAsset["roles"]> = [
   "lead",
   "continuation",
@@ -117,10 +129,12 @@ let cachedClient: DataClient | null = null;
 
 export const graphqlContentRepository: ContentRepository = {
   async loadEditionContent(options?: LoadEditionContentOptions) {
-    const edition = options?.editionDate
-      ? await loadPublishedEditionForDate(options.editionDate, options.editionSlug)
-      : await loadActiveEdition();
-    return loadEditionContentFromEdition(edition);
+    return withContentLoadTiming("loadEditionContent", { editionDate: options?.editionDate ?? null }, async () => {
+      const edition = options?.editionDate
+        ? await loadPublishedEditionForDate(options.editionDate, options.editionSlug)
+        : await loadActiveEdition();
+      return loadEditionContentFromEdition(edition);
+    });
   },
 
   async getLatestPublishedEdition() {
@@ -537,6 +551,7 @@ function readGetResponse<T>(response: GraphQLGetResponse<T>): T | null {
 }
 
 async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsset[]): Promise<Article> {
+  const resolvedContent = await resolveItemContentFromAttachments(item.editorial);
   const assets = (
     await Promise.all(mediaAssets.filter((asset) => asset.type === "image").map((asset) => normalizeImageAsset(item, asset)))
   ).filter((asset): asset is ArticleImageAsset => asset !== null);
@@ -553,11 +568,12 @@ async function normalizeArticle(item: GraphQLItem, mediaAssets: GraphQLMediaAsse
     image: primaryImage,
     assets,
     pullQuotes: compactStrings(item.pullQuotes),
-    body: compactStrings(item.body),
+    body: resolvedContent.body ?? compactStrings(item.body),
   };
 }
 
 async function normalizePublicationItem(item: GraphQLItem, mediaAssets: GraphQLMediaAsset[]): Promise<PublicationItem | null> {
+  const resolvedContent = await resolveItemContentFromAttachments(item.editorial);
   if (item.type === "article") return articleToPublicationItem(await normalizeArticle(item, mediaAssets));
   const type = normalizePublicationItemType(item.type);
   if (!type) return null;
@@ -571,11 +587,89 @@ async function normalizePublicationItem(item: GraphQLItem, mediaAssets: GraphQLM
     section: item.section ?? "News",
     title: item.headline ?? item.title ?? item.slug,
     deck: item.deck ?? undefined,
-    body: compactStrings(item.body),
+    body: resolvedContent.body ?? compactStrings(item.body),
     image,
     assets,
   };
   return publicationItem;
+}
+
+async function resolveItemContentFromAttachments(editorial: unknown): Promise<ResolvedItemContent> {
+  const pointers = parseContentAttachmentPointers(editorial);
+  const bodyText = await readAttachmentPointerText(pointers.body);
+  const excerptText = await readAttachmentPointerText(pointers.excerpt);
+  return {
+    body: bodyText ? textToParagraphs(bodyText) : null,
+    excerpt: excerptText?.trim() || readInlineExcerpt(editorial) || null,
+  };
+}
+
+async function readAttachmentPointerText(pointer: ContentAttachmentPointer | null): Promise<string | null> {
+  const storagePath = typeof pointer?.storagePath === "string" ? pointer.storagePath.trim() : "";
+  if (!storagePath) return null;
+  try {
+    const signedUrl = await signStorageUrl(storagePath);
+    const response = await fetch(signedUrl);
+    if (!response.ok) return null;
+    const text = await response.text();
+    return text.trim() ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseContentAttachmentPointers(editorial: unknown): { body: ContentAttachmentPointer | null; excerpt: ContentAttachmentPointer | null } {
+  const parsed = parseObjectMetadata(editorial);
+  const attachments = readContentAttachmentObject(parsed);
+  return {
+    body: parseAttachmentPointer(attachments?.body),
+    excerpt: parseAttachmentPointer(attachments?.excerpt),
+  };
+}
+
+function readContentAttachmentObject(
+  editorial: Record<string, unknown> | undefined,
+): Record<string, unknown> | null {
+  if (!editorial) return null;
+  if (editorial.contentAttachments && typeof editorial.contentAttachments === "object" && !Array.isArray(editorial.contentAttachments)) {
+    return editorial.contentAttachments as Record<string, unknown>;
+  }
+  const newsroom = editorial.newsroom;
+  if (!newsroom || typeof newsroom !== "object" || Array.isArray(newsroom)) return null;
+  const nested = (newsroom as Record<string, unknown>).contentAttachments;
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
+  return nested as Record<string, unknown>;
+}
+
+function parseAttachmentPointer(value: unknown): ContentAttachmentPointer | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const storagePath = typeof record.storagePath === "string" ? record.storagePath.trim() : "";
+  if (!storagePath) return null;
+  return {
+    storagePath,
+    mediaType: typeof record.mediaType === "string" ? record.mediaType : null,
+    role: typeof record.role === "string" ? record.role : null,
+  };
+}
+
+function textToParagraphs(value: string): string[] {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function readInlineExcerpt(editorial: unknown): string | null {
+  const parsed = parseObjectMetadata(editorial);
+  if (!parsed) return null;
+  const direct = parsed.excerpt;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const newsroom = parsed.newsroom;
+  if (!newsroom || typeof newsroom !== "object" || Array.isArray(newsroom)) return null;
+  const nestedExcerpt = (newsroom as Record<string, unknown>).excerpt;
+  return typeof nestedExcerpt === "string" && nestedExcerpt.trim() ? nestedExcerpt.trim() : null;
 }
 
 function normalizePublicationItemType(value: string): Exclude<PublicationItemType, "article"> | null {
@@ -603,23 +697,8 @@ async function normalizeImageAsset(item: GraphQLItem, asset: GraphQLMediaAsset):
 }
 
 async function getMediaUrl(asset: GraphQLMediaAsset): Promise<string | null> {
-  if (asset.storagePath) return getSignedStorageUrl(asset.storagePath);
+  if (asset.storagePath) return resolveReaderStorageUrl(asset.storagePath);
   return asset.externalUrl ?? null;
-}
-
-async function getSignedStorageUrl(storagePath: string): Promise<string> {
-  const { runWithAmplifyServerContext } = getAmplifyServerRuntime();
-  const result = await runWithAmplifyServerContext({
-    nextServerContext: null,
-    operation: (contextSpec) =>
-      getUrl(contextSpec, {
-        path: storagePath,
-        options: {
-          expiresIn: STORAGE_URL_EXPIRES_IN_SECONDS,
-        },
-      }),
-  });
-  return result.url.toString();
 }
 
 function getImageLayout(asset: GraphQLMediaAsset, metadata?: Record<string, unknown>): ArticleImageLayout | undefined {
@@ -656,7 +735,7 @@ async function resolveThemeVariantSource(value: unknown): Promise<string | undef
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const entry = value as Record<string, unknown>;
   const storagePath = typeof entry.storagePath === "string" && entry.storagePath.trim() ? entry.storagePath.trim() : null;
-  if (storagePath) return getSignedStorageUrl(storagePath);
+  if (storagePath) return resolveReaderStorageUrl(storagePath);
   const sourceUrl = typeof entry.sourceUrl === "string" && entry.sourceUrl.trim() ? entry.sourceUrl.trim() : null;
   if (sourceUrl) return sourceUrl;
   const src = typeof entry.src === "string" && entry.src.trim() ? entry.src.trim() : null;
