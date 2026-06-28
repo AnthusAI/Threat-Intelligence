@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { loadArchiveEditionPreviews, clampArchiveLimit } from "../../../../lib/archive-data";
 import { ARCHIVE_BATCH_SIZE } from "../../../../lib/archive-types";
 
-export const dynamic = "force-dynamic";
+// Keep in sync with READER_REVALIDATE_SECONDS in lib/reader-route-config.ts
+export const revalidate = 3600;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
