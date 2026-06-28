@@ -79,21 +79,6 @@ export function PresentationShell({
     return unsubscribe;
   }, [lockedPresentation]);
 
-  useEffect(() => {
-    if (activePresentation === "newspaper") return;
-    const papyrusWindow = window as Window & { __PAPYRUS_SCENARIO__?: string };
-    if (content.scenarioId) {
-      papyrusWindow.__PAPYRUS_SCENARIO__ = content.scenarioId;
-    } else {
-      delete papyrusWindow.__PAPYRUS_SCENARIO__;
-    }
-    return () => {
-      if (papyrusWindow.__PAPYRUS_SCENARIO__ === content.scenarioId) {
-        delete papyrusWindow.__PAPYRUS_SCENARIO__;
-      }
-    };
-  }, [activePresentation, content.scenarioId]);
-
   if (activePresentation === "newspaper") {
     return (
       <PresentationFrame>
@@ -139,7 +124,7 @@ function BlogPresentation({
   editionBasePath?: string;
   targetSection?: EditionSection;
 }) {
-  const sections = targetSection ? [targetSection] : content.sections;
+  const sections = content.sections;
   const footerEntries = useMemo(() => buildPresentationFooterEntries(content), [content]);
   const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -168,15 +153,14 @@ function BlogPresentation({
           </section>
         ))}
       </div>
-      {!targetSection ? (
-        <PresentationFooter
-          editionBasePath={editionBasePath}
-          entries={footerEntries}
-          onSectionClick={handleBlogFooterSectionClick}
-          resolveSectionHref={(entry) => getBlogFooterSectionHref(entry, editionBasePath)}
-          subtitle={footerSubtitle}
-        />
-      ) : null}
+      <PresentationFooter
+        editionBasePath={editionBasePath}
+        entries={footerEntries}
+        onSectionClick={handleBlogFooterSectionClick}
+        resolveSectionHref={(entry) => getBlogFooterSectionHref(entry, editionBasePath)}
+        subtitle={footerSubtitle}
+        title={SITE_BRAND.id === "threat-intelligence" ? SITE_BRAND.mastheadTitle : undefined}
+      />
     </main>
   );
 }
@@ -226,17 +210,24 @@ function MagazinePresentation({
 function PresentationHeader({ content }: { content: EditionContent }) {
   const title = SITE_BRAND.id === "papyrus" ? content.title : SITE_BRAND.mastheadTitle;
   const subtitle = SITE_BRAND.id === "papyrus" ? content.description : SITE_BRAND.mastheadSubtitle;
+  const tagline = SITE_BRAND.id === "papyrus" ? null : SITE_BRAND.mastheadTagline;
+  const displayDate = SITE_BRAND.id === "threat-intelligence"
+    ? formatMastheadDate(content.editionDate)
+    : content.editionDate;
 
   return (
     <header className="presentation-header">
-      <h1>
-        {SITE_BRAND.id === "threat-intelligence"
-          ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
-          : title}
-      </h1>
-      <div className="presentation-header__meta">
-        {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
-        <p className="presentation-header__date">{content.editionDate}</p>
+      <div className="presentation-header__copy-stack">
+        <h1>
+          {SITE_BRAND.id === "threat-intelligence"
+            ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
+            : title}
+        </h1>
+        <div className="presentation-header__meta">
+          {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
+          <p className="presentation-header__date">{displayDate}</p>
+        </div>
+        {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
       </div>
     </header>
   );
@@ -372,6 +363,10 @@ function usePresentationTargetScroll(targetSection: EditionSection | undefined) 
 }
 
 function getSectionHref(content: EditionContent, section: EditionSection, editionBasePath?: string): string {
+  if (SITE_BRAND.id === "threat-intelligence") {
+    const anchor = `#${getSectionAnchorId(section.key)}`;
+    return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
+  }
   if (editionBasePath) return `${editionBasePath}/section/${encodeURIComponent(section.key)}`;
   const datedPath = getEditionSectionPath(content.editionDate, section.key);
   return datedPath.startsWith("//") ? `#${getSectionAnchorId(section.key)}` : datedPath;
@@ -408,8 +403,20 @@ function parseItemAnchorHash(hash: string): string | null {
   }
 }
 
+function formatMastheadDate(value: string): string {
+  const normalized = value?.trim();
+  if (!normalized) return value;
+  const date = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
 function getBlogFooterSectionHref(entry: PresentationFooterEntry, editionBasePath?: string): string {
-  const anchor = `#${encodeURIComponent(entry.articleSlug)}`;
+  const anchor = `#${getSectionAnchorId(entry.sectionKey)}`;
   return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
 }
 
@@ -420,5 +427,5 @@ function handleBlogFooterSectionClick(
 ) {
   event.preventDefault();
   window.history.pushState(null, "", href);
-  document.getElementById(entry.articleSlug)?.scrollIntoView({ block: "start" });
+  document.getElementById(getSectionAnchorId(entry.sectionKey))?.scrollIntoView({ block: "start" });
 }
