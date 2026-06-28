@@ -22,6 +22,8 @@ type EditionDateStaticParam = {
 };
 
 export async function generateEditionDateStaticParams(): Promise<EditionDateStaticParam[]> {
+  if (process.env.NODE_ENV === "development") return [];
+
   const { editions } = await graphqlContentRepository.listPublishedEditions({ limit: 100 });
   const params: EditionDateStaticParam[] = [];
   for (const edition of editions) {
@@ -32,6 +34,8 @@ export async function generateEditionDateStaticParams(): Promise<EditionDateStat
 }
 
 export async function generateArticleStaticParams(): Promise<Array<{ slug: string }>> {
+  if (process.env.NODE_ENV === "development") return [];
+
   const slugs = await graphqlContentRepository.listArticleSlugs();
   return slugs.map((slug) => ({ slug }));
 }
