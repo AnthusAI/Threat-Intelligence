@@ -3,6 +3,8 @@ import type { EditionContent, NewsDeskAppendix } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
+import { SITE_BRAND } from "./site-brand";
+import threatIntelligenceSeedContent from "../amplify/seed/profiles/threat-intelligence/seed-edition-content.json";
 
 export type LayoutScenario = EditionContent & {
   source: "scenario";
@@ -15,17 +17,20 @@ type RawLayoutScenario = Omit<LayoutScenario, "sections"> & {
   sections?: LayoutScenario["sections"];
 };
 
+const defaultScenarioSeed = getDefaultScenarioSeed();
+
 const rawLayoutScenarios: RawLayoutScenario[] = [
   {
     id: DEFAULT_LAYOUT_SCENARIO_ID,
     source: "scenario",
-    title: "Current Edition",
-    editionDate,
+    title: defaultScenarioSeed.title,
+    editionDate: defaultScenarioSeed.editionDate,
     scenarioId: DEFAULT_LAYOUT_SCENARIO_ID,
-    description: "The default Papyrus fixture edition.",
-    layoutPlan: createDefaultEditionLayoutPlan(articles.map((article) => article.slug)),
-    items: cloneArticles(articles).map(articleToPublicationItem),
-    newsDeskAppendix: createDemoNewsDeskAppendix(),
+    description: defaultScenarioSeed.description,
+    layoutPlan: createDefaultEditionLayoutPlan(defaultScenarioSeed.articles.map((article) => article.slug)),
+    items: cloneArticles(defaultScenarioSeed.articles).map(articleToPublicationItem),
+    suppressNewsDeskAppendix: defaultScenarioSeed.suppressNewsDeskAppendix,
+    newsDeskAppendix: defaultScenarioSeed.newsDeskAppendix,
   },
   {
     id: "blank-edition-title",
@@ -166,6 +171,34 @@ export const layoutScenarios: LayoutScenario[] = rawLayoutScenarios.map((scenari
 
 export function getLayoutScenario(id: string | null | undefined): LayoutScenario {
   return layoutScenarios.find((scenario) => scenario.id === id) ?? layoutScenarios[0];
+}
+
+function getDefaultScenarioSeed(): {
+  title: string;
+  editionDate: string;
+  description: string;
+  articles: Article[];
+  suppressNewsDeskAppendix?: boolean;
+  newsDeskAppendix?: NewsDeskAppendix | null;
+} {
+  if (SITE_BRAND.id !== "threat-intelligence") {
+    return {
+      title: "Current Edition",
+      editionDate,
+      description: "The default Papyrus fixture edition.",
+      articles,
+      newsDeskAppendix: createDemoNewsDeskAppendix(),
+    };
+  }
+
+  return {
+    title: threatIntelligenceSeedContent.title,
+    editionDate: threatIntelligenceSeedContent.publishDate,
+    description: threatIntelligenceSeedContent.description,
+    articles: threatIntelligenceSeedContent.articles as Article[],
+    suppressNewsDeskAppendix: threatIntelligenceSeedContent.suppressNewsDeskAppendix === true,
+    newsDeskAppendix: null,
+  };
 }
 
 function createSharedBlankColumnPressureArticles(): Article[] {

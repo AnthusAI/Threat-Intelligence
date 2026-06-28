@@ -19,6 +19,7 @@ import {
   type PresentationFooterEntry,
 } from "../lib/presentation-footer";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
+import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
 import { PresentationFooter } from "./presentation-footer";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
@@ -141,21 +142,24 @@ function BlogPresentation({
   const sections = targetSection ? [targetSection] : content.sections;
   const footerEntries = useMemo(() => buildPresentationFooterEntries(content), [content]);
   const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
+  const contentRef = useRef<HTMLDivElement | null>(null);
   usePresentationTargetScroll(targetSection);
   return (
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog">
+      <BlogPageBackground />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
-      <div className="blog-sections">
+      <div className="blog-sections" ref={contentRef}>
         {sections.map((section) => (
           <section className="blog-section" data-edition-section={section.key} id={getSectionAnchorId(section.key)} key={section.key}>
             <header className="presentation-section-header">
               <p>{section.label}</p>
               {section.description ? <span>{section.description}</span> : null}
             </header>
-            {getEditionSectionItems(section, content.items).map((item) => (
+            {getEditionSectionItems(section, content.items).map((item, index) => (
               <PresentationItem
                 editionBasePath={editionBasePath}
+                index={index}
                 item={item}
                 key={item.slug}
                 mode="blog"
@@ -225,9 +229,15 @@ function PresentationHeader({ content }: { content: EditionContent }) {
 
   return (
     <header className="presentation-header">
-      <p>{content.editionDate}</p>
-      <h1>{title}</h1>
-      {subtitle ? <span>{subtitle}</span> : null}
+      <h1>
+        {SITE_BRAND.id === "threat-intelligence"
+          ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
+          : title}
+      </h1>
+      <div className="presentation-header__meta">
+        {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
+        <p className="presentation-header__date">{content.editionDate}</p>
+      </div>
     </header>
   );
 }
@@ -246,10 +256,12 @@ function SectionNavigation({ content, editionBasePath }: { content: EditionConte
 
 function PresentationItem({
   editionBasePath,
+  index,
   item,
   mode,
 }: {
   editionBasePath?: string;
+  index?: number;
   item: PublicationItem;
   mode: "blog" | "magazine" | "magazine-feature";
 }) {
@@ -273,6 +285,7 @@ function PresentationItem({
     <article
       className={`presentation-item presentation-item--${mode}`}
       data-item-id={item.slug}
+      data-item-index={index}
       data-item-type={item.type}
       id={item.slug}
     >

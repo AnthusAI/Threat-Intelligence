@@ -79,6 +79,48 @@
         "What to check now: separate confidence from urgency. Some threats are real but poorly understood. Some are mundane but already active. A practical program needs room for both: investigation where evidence is thin, and immediate control work where the failure mode is already clear.",
         "Over time, Anthus Threat Intelligence should become more than a stream of articles. It should become a curated map of AI/ML security lessons, defensive practices, and recurring checks. The first obligation is modest and strict: every article should help readers defend something they are responsible for."
       ]
+    },
+    {
+      "slug": "aws-identity-graphs-beat-policy-sprawl",
+      "shortSlug": "AWS",
+      "section": "AWS",
+      "headline": "Identity Graphs Beat Policy Sprawl in AWS",
+      "deck": "Effective AWS defense depends less on adding policies and more on proving who can really reach which resources through role chaining.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AWS",
+      "pullQuotes": [
+        "Permission boundaries look strong until role assumption paths are graphed.",
+        "The shortest attack path is often hidden in legitimate automation."
+      ],
+      "body": [
+        "Most AWS breaches do not begin with a dramatic zero-day. They start with identity assumptions defenders treat as harmless: a utility role that can assume a deployment role, a deployment role that can pass a data role, and a data role that can read material no one intended to expose broadly.",
+        "Teams often respond by adding more policy documents. That can help, but only if it is paired with path analysis. The practical question is not whether each role policy appears reasonable in isolation. The question is whether a low-trust principal can traverse role trust relationships and land on high-value permissions.",
+        "What to check now: build an account-level identity graph that includes users, roles, trust policies, permission boundaries, session policies, and `iam:PassRole` relationships. Map graph paths to concrete data actions, especially S3 read, KMS decrypt, and Secrets Manager retrieval.",
+        "What to check now: flag roles that are both widely assumable and operationally privileged. Automation roles frequently become escalation pivots because they are trusted by many services and people while retaining broad write or read authority.",
+        "What to check now: review long-lived cross-account trust that no longer matches delivery reality. A stale trust relationship can survive years of architecture changes and still provide a clean lateral path for an attacker who reaches any allowed principal.",
+        "AWS defense is strongest when identity paths are continuously measured, not inferred from naming conventions. If your team cannot explain the shortest path from internet-facing execution to crown-jewel data, an attacker eventually will."
+      ]
+    },
+    {
+      "slug": "gaming-studios-need-liveops-attack-drills",
+      "shortSlug": "GAME",
+      "section": "Gaming",
+      "headline": "Gaming Studios Need LiveOps Attack Drills",
+      "deck": "Game security fails when incident plans stop at infrastructure and ignore player economy, anti-cheat telemetry, and live content controls.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "GAMING",
+      "pullQuotes": [
+        "A game outage is visible. A silent economy integrity failure is more expensive.",
+        "LiveOps privileges are production privileges, even when they look like tooling."
+      ],
+      "body": [
+        "Studios usually rehearse cloud outages. Fewer rehearse compromise of LiveOps tooling that can alter drop rates, pricing, matchmaking flags, or event rewards. Those controls are effectively production write access to player trust.",
+        "Attackers targeting games increasingly look for soft operational surfaces: vendor dashboards, support workflows, community moderation tooling, and automation keys used to patch content quickly. These are attractive because they can shape player behavior before defenders detect a technical intrusion.",
+        "What to check now: classify LiveOps controls by blast radius. Separate read-only analytics, reversible toggles, and irreversible economy actions. Require stronger auth, approval, and logging for the controls that move real player value.",
+        "What to check now: rehearse integrity incidents, not only downtime incidents. Simulate manipulated reward tables, fraudulent item grants, and anti-cheat bypass telemetry suppression. Measure detection time and player-facing recovery time.",
+        "What to check now: verify vendor and contractor access around release windows. Temporary elevated access during launches and seasonal events often becomes persistent by accident.",
+        "Gaming security is not only about keeping servers online. It is about preserving fairness and economy trust under adversarial pressure. That means security drills must reflect how games are actually operated, not just how infrastructure diagrams are drawn."
+      ]
     }
   ]
 }
