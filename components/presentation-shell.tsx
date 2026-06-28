@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import type { CSSProperties, ReactNode, RefObject } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
 import { getEditionSectionPath } from "../lib/edition-routes";
@@ -14,9 +14,14 @@ import {
   type PublicationItem,
 } from "../lib/publication-items";
 import type { EditionContent, EditionPresentationFormat, EditionSection } from "../lib/content-types";
+import {
+  buildPresentationFooterEntries,
+  type PresentationFooterEntry,
+} from "../lib/presentation-footer";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
+import { PresentationFooter } from "./presentation-footer";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
 
 type PresentationShellProps = {
@@ -119,14 +124,17 @@ function BlogPresentation({
   editionBasePath?: string;
   targetSection?: EditionSection;
 }) {
-  const sections = targetSection ? [targetSection] : content.sections;
+  const sections = content.sections;
+  const footerEntries = useMemo(() => buildPresentationFooterEntries(content), [content]);
+  const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
+  const contentRef = useRef<HTMLDivElement | null>(null);
   usePresentationTargetScroll(targetSection);
   return (
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog">
       <BlogPageBackground />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
-      <div className="blog-sections">
+      <div className="blog-sections" ref={contentRef}>
         {sections.map((section) => (
           <section className="blog-section" data-edition-section={section.key} id={getSectionAnchorId(section.key)} key={section.key}>
             <header className="presentation-section-header">
@@ -145,6 +153,14 @@ function BlogPresentation({
           </section>
         ))}
       </div>
+      <PresentationFooter
+        editionBasePath={editionBasePath}
+        entries={footerEntries}
+        onSectionClick={handleBlogFooterSectionClick}
+        resolveSectionHref={(entry) => getBlogFooterSectionHref(entry, editionBasePath)}
+        subtitle={footerSubtitle}
+        title={SITE_BRAND.id === "threat-intelligence" ? SITE_BRAND.mastheadTitle : undefined}
+      />
     </main>
   );
 }
@@ -194,17 +210,24 @@ function MagazinePresentation({
 function PresentationHeader({ content }: { content: EditionContent }) {
   const title = SITE_BRAND.id === "papyrus" ? content.title : SITE_BRAND.mastheadTitle;
   const subtitle = SITE_BRAND.id === "papyrus" ? content.description : SITE_BRAND.mastheadSubtitle;
+  const tagline = SITE_BRAND.id === "papyrus" ? null : SITE_BRAND.mastheadTagline;
+  const displayDate = SITE_BRAND.id === "threat-intelligence"
+    ? formatMastheadDate(content.editionDate)
+    : content.editionDate;
 
   return (
     <header className="presentation-header">
-      <h1>
-        {SITE_BRAND.id === "threat-intelligence"
-          ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
-          : title}
-      </h1>
-      <div className="presentation-header__meta">
-        {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
-        <p className="presentation-header__date">{content.editionDate}</p>
+      <div className="presentation-header__copy-stack">
+        <h1>
+          {SITE_BRAND.id === "threat-intelligence"
+            ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
+            : title}
+        </h1>
+        <div className="presentation-header__meta">
+          {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
+          <p className="presentation-header__date">{displayDate}</p>
+        </div>
+        {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
       </div>
     </header>
   );
@@ -340,6 +363,10 @@ function usePresentationTargetScroll(targetSection: EditionSection | undefined) 
 }
 
 function getSectionHref(content: EditionContent, section: EditionSection, editionBasePath?: string): string {
+  if (SITE_BRAND.id === "threat-intelligence") {
+    const anchor = `#${getSectionAnchorId(section.key)}`;
+    return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
+  }
   if (editionBasePath) return `${editionBasePath}/section/${encodeURIComponent(section.key)}`;
   const datedPath = getEditionSectionPath(content.editionDate, section.key);
   return datedPath.startsWith("//") ? `#${getSectionAnchorId(section.key)}` : datedPath;
@@ -374,4 +401,31 @@ function parseItemAnchorHash(hash: string): string | null {
   } catch {
     return null;
   }
+}
+
+function formatMastheadDate(value: string): string {
+  const normalized = value?.trim();
+  if (!normalized) return value;
+  const date = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function getBlogFooterSectionHref(entry: PresentationFooterEntry, editionBasePath?: string): string {
+  const anchor = `#${getSectionAnchorId(entry.sectionKey)}`;
+  return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
+}
+
+function handleBlogFooterSectionClick(
+  event: ReactMouseEvent<HTMLAnchorElement>,
+  entry: PresentationFooterEntry,
+  href: string,
+) {
+  event.preventDefault();
+  window.history.pushState(null, "", href);
+  document.getElementById(getSectionAnchorId(entry.sectionKey))?.scrollIntoView({ block: "start" });
 }
