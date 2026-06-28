@@ -15,6 +15,7 @@ import {
 } from "../lib/publication-items";
 import type { EditionContent, EditionPresentationFormat, EditionSection } from "../lib/content-types";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
+import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
 
@@ -122,6 +123,7 @@ function BlogPresentation({
   usePresentationTargetScroll(targetSection);
   return (
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog">
+      <BlogPageBackground />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
       <div className="blog-sections">
@@ -131,9 +133,10 @@ function BlogPresentation({
               <p>{section.label}</p>
               {section.description ? <span>{section.description}</span> : null}
             </header>
-            {getEditionSectionItems(section, content.items).map((item) => (
+            {getEditionSectionItems(section, content.items).map((item, index) => (
               <PresentationItem
                 editionBasePath={editionBasePath}
+                index={index}
                 item={item}
                 key={item.slug}
                 mode="blog"
@@ -194,9 +197,15 @@ function PresentationHeader({ content }: { content: EditionContent }) {
 
   return (
     <header className="presentation-header">
-      <p>{content.editionDate}</p>
-      <h1>{title}</h1>
-      {subtitle ? <span>{subtitle}</span> : null}
+      <h1>
+        {SITE_BRAND.id === "threat-intelligence"
+          ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
+          : title}
+      </h1>
+      <div className="presentation-header__meta">
+        {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
+        <p className="presentation-header__date">{content.editionDate}</p>
+      </div>
     </header>
   );
 }
@@ -215,10 +224,12 @@ function SectionNavigation({ content, editionBasePath }: { content: EditionConte
 
 function PresentationItem({
   editionBasePath,
+  index,
   item,
   mode,
 }: {
   editionBasePath?: string;
+  index?: number;
   item: PublicationItem;
   mode: "blog" | "magazine" | "magazine-feature";
 }) {
@@ -242,6 +253,7 @@ function PresentationItem({
     <article
       className={`presentation-item presentation-item--${mode}`}
       data-item-id={item.slug}
+      data-item-index={index}
       data-item-type={item.type}
       id={item.slug}
     >
