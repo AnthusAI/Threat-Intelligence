@@ -423,6 +423,7 @@ function PresentationItem({
       data-item-id={item.slug}
       data-item-index={index}
       data-item-type={item.type}
+      data-has-image={image ? "true" : "false"}
       id={item.slug}
     >
       <header className="presentation-item__header">
@@ -431,6 +432,11 @@ function PresentationItem({
           <Link href={directHref}>{getPresentationTitle(item)}</Link>
         </h2>
         {item.deck ? <span>{item.deck}</span> : null}
+        {mode === "blog" ? (
+          <Link className="presentation-item__cta" href={directHref}>
+            Read Article
+          </Link>
+        ) : null}
       </header>
       {image ? (
         <figure className="presentation-item__image">
