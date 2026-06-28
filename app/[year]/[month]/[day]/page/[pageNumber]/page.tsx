@@ -2,7 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { EditionRoutePage } from "../../edition-route-page";
 import { parseEditionPageRoute } from "../../../../../../lib/edition-routes";
 
-export const dynamic = "force-dynamic";
+// Keep in sync with READER_REVALIDATE_SECONDS in lib/reader-route-config.ts
+export const revalidate = 3600;
 
 type EditionPageRouteProps = {
   params: Promise<{

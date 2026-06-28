@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { ItemPageView } from "../../../../../components/article-page";
-import { contentRepository } from "../../../../../lib/content-repository";
+import { getCachedEditionItem } from "../../../../../lib/cached-content-repository";
 import { getEditionDatePath, parseEditionArticleRoute } from "../../../../../lib/edition-routes";
 
-export const dynamic = "force-dynamic";
+// Keep in sync with READER_REVALIDATE_SECONDS in lib/reader-route-config.ts
+export const revalidate = 3600;
 
 type DateScopedArticlePageProps = {
   params: Promise<{
@@ -19,7 +20,7 @@ export async function generateMetadata({ params }: DateScopedArticlePageProps) {
   const route = parseEditionArticleRoute({ year, month, day, articleSlug });
   if (!route) return {};
 
-  const item = await contentRepository.getEditionItem({
+  const item = await getCachedEditionItem({
     editionDate: route.editionDate,
     itemSlug: route.articleSlug,
   });
@@ -37,7 +38,7 @@ export default async function DateScopedArticlePage({ params }: DateScopedArticl
   if (!route) notFound();
   if (!route.isCanonical) redirect(route.canonicalPath);
 
-  const item = await contentRepository.getEditionItem({
+  const item = await getCachedEditionItem({
     editionDate: route.editionDate,
     itemSlug: route.articleSlug,
   });

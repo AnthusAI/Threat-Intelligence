@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { PresentationShell, type PresentationTarget } from "../../../../components/presentation-shell";
-import { contentRepository } from "../../../../lib/content-repository";
+import { loadCachedEditionContent } from "../../../../lib/cached-content-repository";
 import { parseEditionDateRoute } from "../../../../lib/edition-routes";
 import type { EditionPresentationFormat } from "../../../../lib/content-types";
 
@@ -26,7 +26,7 @@ export async function EditionRoutePage({
   if (!route.isCanonical) redirect(route.canonicalPath);
 
   try {
-    const content = await contentRepository.loadEditionContent({
+    const content = await loadCachedEditionContent({
       editionDate: route.editionDate,
     });
     if (initialPageNumber < 1 || initialPageNumber > content.layoutPlan.pages.length) notFound();

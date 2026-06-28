@@ -3,7 +3,8 @@ import { ArchiveGrid } from "../../components/archive-grid";
 import { loadArchiveEditionPreviews } from "../../lib/archive-data";
 import { ARCHIVE_BATCH_SIZE } from "../../lib/archive-types";
 
-export const dynamic = "force-dynamic";
+// Keep in sync with READER_REVALIDATE_SECONDS in lib/reader-route-config.ts
+export const revalidate = 3600;
 
 export default async function ArchivePage() {
   const initialBatch = await loadArchiveEditionPreviews({ limit: ARCHIVE_BATCH_SIZE });
