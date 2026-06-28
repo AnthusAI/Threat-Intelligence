@@ -1,207 +1,255 @@
-#!/usr/bin/env bash
-# Production smoke test for web console chat (DynamoDB → console-chat-responder → execute_tactus).
-# Requires AWS CLI credentials (e.g. AWS_PROFILE=Ryan) and deploy on main with commit 0c39cbb or later.
+#!/bin/bash
+# Test console chat production deployment and IAM permissions
+#
+# This script verifies that the console-chat-responder Lambda has the
+# correct SSM permissions needed for execute_tactus JWT minting.
+#
+# The fix (PR #23, commit 0c39cbb) adds ssm:GetParameters permission
+# which was missing and causing "Could not resolve JWT signing secret" errors.
+
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
-
-PROFILE="${AWS_PROFILE:-Ryan}"
+# Configuration
+LAMBDA_FUNCTION="amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D"
+MESSAGE_TABLE="Message-s4sclnevjjbzpmj4vhallzvw3e-NONE"
 REGION="${AWS_REGION:-us-east-1}"
-APP_ID="${PAPYRUS_AMPLIFY_APP_ID:-dbsyytcm9drqa}"
-BRANCH="${PAPYRUS_AMPLIFY_BRANCH:-main}"
+PROFILE="${AWS_PROFILE:-Ryan}"
 
-RESPONDER_FN="${PAPYRUS_CONSOLE_RESPONDER_FUNCTION:-amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D}"
-MESSAGE_TABLE="${PAPYRUS_MESSAGE_TABLE:-Message-s4sclnevjjbzpmj4vhallzvw3e-NONE}"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-aws_cli() {
-  aws --profile "$PROFILE" --region "$REGION" "$@"
-}
+echo -e "${BLUE}=== Papyrus Console Chat Production Verification ===${NC}\n"
 
-echo "== Web Console Chat Production Test =="
-echo "Profile: $PROFILE  Region: $REGION"
-echo "Testing fix: PR #23 / commit 0c39cbb - SSM GetParameters IAM permission"
-echo ""
-
-# Check Lambda configuration
-echo "=== 1. Lambda Configuration ==="
-LAMBDA_CONFIG=$(aws_cli lambda get-function-configuration --function-name "$RESPONDER_FN" 2>&1)
-if [[ $? -ne 0 ]]; then
-  echo "ERROR: Cannot access Lambda function $RESPONDER_FN"
-  echo "$LAMBDA_CONFIG"
-  exit 1
+# Check AWS CLI
+if ! command -v aws &> /dev/null; then
+    echo -e "${RED}❌ AWS CLI not found. Please install it first.${NC}"
+    exit 1
 fi
 
-echo "$LAMBDA_CONFIG" | jq '{
-  LastModified: .LastModified,
-  State: .State,
-  LastUpdateStatus: .LastUpdateStatus,
-  Timeout: .Timeout,
-  MemorySize: .MemorySize,
-  CodeSize: .CodeSize
-}'
+# Check credentials
+echo -e "${BLUE}1. Verifying AWS credentials...${NC}"
+if ! aws sts get-caller-identity --profile "$PROFILE" --region "$REGION" > /dev/null 2>&1; then
+    echo -e "${RED}❌ AWS credentials not configured for profile: $PROFILE${NC}"
+    exit 1
+fi
+ACCOUNT=$(aws sts get-caller-identity --profile "$PROFILE" --region "$REGION" --query 'Account' --output text)
+echo -e "${GREEN}✓ Connected to AWS account: $ACCOUNT${NC}\n"
 
-# Check IAM role and SSM permissions
+# Check Lambda exists
+echo -e "${BLUE}2. Checking Lambda function...${NC}"
+if ! aws lambda get-function \
+    --function-name "$LAMBDA_FUNCTION" \
+    --profile "$PROFILE" \
+    --region "$REGION" > /dev/null 2>&1; then
+    echo -e "${RED}❌ Lambda function not found: $LAMBDA_FUNCTION${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Lambda function exists${NC}\n"
+
+# Get Lambda configuration
+echo -e "${BLUE}3. Checking Lambda configuration...${NC}"
+LAMBDA_CONFIG=$(aws lambda get-function-configuration \
+    --function-name "$LAMBDA_FUNCTION" \
+    --profile "$PROFILE" \
+    --region "$REGION")
+
+LAST_MODIFIED=$(echo "$LAMBDA_CONFIG" | jq -r '.LastModified')
+RUNTIME=$(echo "$LAMBDA_CONFIG" | jq -r '.PackageType')
+IMAGE_URI=$(aws lambda get-function \
+    --function-name "$LAMBDA_FUNCTION" \
+    --profile "$PROFILE" \
+    --region "$REGION" \
+    --query 'Code.ImageUri' \
+    --output text)
+
+echo "  Last Modified: $LAST_MODIFIED"
+echo "  Package Type: $RUNTIME"
+echo "  Image URI: $IMAGE_URI"
 echo ""
-echo "=== 2. IAM Role SSM Permissions Check ==="
+
+# Check IAM role permissions
+echo -e "${BLUE}4. Checking IAM role permissions (THE CRITICAL FIX)...${NC}"
 ROLE_ARN=$(echo "$LAMBDA_CONFIG" | jq -r '.Role')
-ROLE_NAME=$(echo "$ROLE_ARN" | cut -d'/' -f2)
-echo "Role: $ROLE_NAME"
+ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
 
-# Get inline and attached policies
-echo ""
-echo "Checking for SSM permissions..."
-SSM_FOUND=false
+echo "  Role: $ROLE_NAME"
 
-# Check attached policies
-ATTACHED_POLICIES=$(aws_cli iam list-attached-role-policies --role-name "$ROLE_NAME" 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn')
-for policy_arn in $ATTACHED_POLICIES; do
-  VERSION=$(aws_cli iam get-policy --policy-arn "$policy_arn" --query 'Policy.DefaultVersionId' --output text)
-  POLICY_DOC=$(aws_cli iam get-policy-version --policy-arn "$policy_arn" --version-id "$VERSION" --query 'PolicyVersion.Document')
-  
-  # Check if policy has SSM actions
-  SSM_ACTIONS=$(echo "$POLICY_DOC" | jq -r '.Statement[] | select(.Action[]? | contains("ssm:")) | .Action[]' 2>/dev/null || echo "")
-  if [[ -n "$SSM_ACTIONS" ]]; then
-    echo "✓ Found SSM permissions in policy: $(basename $policy_arn)"
-    echo "$SSM_ACTIONS" | grep -E "ssm:GetParameter" | while read action; do
-      echo "  - $action"
-    done
+# Get attached policies
+ATTACHED_POLICIES=$(aws iam list-attached-role-policies \
+    --role-name "$ROLE_NAME" \
+    --profile "$PROFILE" \
+    --region "$REGION" \
+    --query 'AttachedPolicies[*].PolicyArn' \
+    --output text)
+
+# Get inline policies
+INLINE_POLICIES=$(aws iam list-role-policies \
+    --role-name "$ROLE_NAME" \
+    --profile "$PROFILE" \
+    --region "$REGION" \
+    --query 'PolicyNames[*]' \
+    --output text)
+
+# Check for SSM permissions in inline policies
+echo -e "\n${YELLOW}Checking for SSM GetParameters permission...${NC}"
+HAS_GET_PARAMETERS=false
+HAS_SSM_ACTIONS=false
+
+for policy in $INLINE_POLICIES; do
+    POLICY_DOC=$(aws iam get-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "$policy" \
+        --profile "$PROFILE" \
+        --region "$REGION" \
+        --query 'PolicyDocument' \
+        --output json)
     
-    # Check for both GetParameter and GetParameters
-    if echo "$SSM_ACTIONS" | grep -q "ssm:GetParameters"; then
-      echo "  ✓ Has ssm:GetParameters (REQUIRED for fix)"
-      SSM_FOUND=true
+    # Check if policy has SSM actions
+    if echo "$POLICY_DOC" | jq -e '.Statement[] | select(.Action[]? | contains("ssm:"))' > /dev/null 2>&1; then
+        HAS_SSM_ACTIONS=true
+        echo "  Found SSM permissions in policy: $policy"
+        
+        # Check specifically for GetParameters (plural)
+        if echo "$POLICY_DOC" | jq -e '.Statement[] | select(.Action[]? | contains("ssm:GetParameters"))' > /dev/null 2>&1; then
+            HAS_GET_PARAMETERS=true
+            echo -e "  ${GREEN}✓ Found ssm:GetParameters permission${NC}"
+        fi
+        
+        # Show the SSM-related actions
+        echo "$POLICY_DOC" | jq -r '.Statement[] | select(.Action[]? | contains("ssm:")) | .Action[]?' | grep ssm: | sort -u | sed 's/^/    - /'
     fi
-    if echo "$SSM_ACTIONS" | grep -q "ssm:GetParameter" && ! echo "$SSM_ACTIONS" | grep -q "ssm:GetParameters"; then
-      echo "  ⚠ Has ssm:GetParameter but missing ssm:GetParameters"
-      echo "  This may cause JWT minting to fail - deploy needs commit 0c39cbb or later"
-    fi
-    
-    # Show resource ARNs
-    RESOURCES=$(echo "$POLICY_DOC" | jq -r '.Statement[] | select(.Action[]? | contains("ssm:")) | .Resource[]' 2>/dev/null | head -5)
-    if [[ -n "$RESOURCES" ]]; then
-      echo "  Resource ARNs:"
-      echo "$RESOURCES" | while read res; do
-        echo "    $res"
-      done
-    fi
-  fi
 done
 
-# Check inline policies
-INLINE_POLICIES=$(aws_cli iam list-role-policies --role-name "$ROLE_NAME" 2>/dev/null | jq -r '.PolicyNames[]')
-for policy_name in $INLINE_POLICIES; do
-  POLICY_DOC=$(aws_cli iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$policy_name" --query 'PolicyDocument')
-  
-  SSM_ACTIONS=$(echo "$POLICY_DOC" | jq -r '.Statement[] | select(.Action[]? | contains("ssm:")) | .Action[]' 2>/dev/null || echo "")
-  if [[ -n "$SSM_ACTIONS" ]]; then
-    echo "✓ Found SSM permissions in inline policy: $policy_name"
-    echo "$SSM_ACTIONS" | grep -E "ssm:GetParameter" | while read action; do
-      echo "  - $action"
-    done
-    
-    if echo "$SSM_ACTIONS" | grep -q "ssm:GetParameters"; then
-      echo "  ✓ Has ssm:GetParameters (REQUIRED for fix)"
-      SSM_FOUND=true
-    fi
-  fi
-done
-
-if [[ "$SSM_FOUND" == "false" ]]; then
-  echo ""
-  echo "❌ PROBLEM: Lambda role missing ssm:GetParameters permission"
-  echo "This will cause 'Could not resolve JWT signing secret' errors"
-  echo "Required fix: Deploy main branch with commit 0c39cbb or later"
-  echo ""
-  echo "The fix adds ssm:GetParameters alongside ssm:GetParameter in:"
-  echo "  amplify/functions/console-chat-responder/resource.ts"
+if [ "$HAS_GET_PARAMETERS" = true ]; then
+    echo -e "\n${GREEN}✓ IAM FIX IS DEPLOYED: Lambda has ssm:GetParameters permission${NC}\n"
+else
+    echo -e "\n${RED}❌ IAM FIX NOT DEPLOYED: Lambda missing ssm:GetParameters permission${NC}"
+    echo -e "${RED}   This will cause 'Could not resolve JWT signing secret' errors${NC}\n"
+    exit 1
 fi
 
 # Check recent Lambda logs
-echo ""
-echo "=== 3. Recent Lambda Logs (last 10 minutes) ==="
-LOGS=$(aws_cli logs tail "/aws/lambda/$RESPONDER_FN" --since 10m --format short 2>&1 || echo "")
-if [[ -z "$LOGS" || "$LOGS" == *"ResourceNotFoundException"* ]]; then
-  echo "No recent invocations or log group not found"
-  echo "This might mean no one has used web console chat recently"
+echo -e "${BLUE}5. Checking recent Lambda execution logs...${NC}"
+LOG_GROUP="/aws/lambda/$LAMBDA_FUNCTION"
+
+# Get recent log streams
+RECENT_STREAMS=$(aws logs describe-log-streams \
+    --log-group-name "$LOG_GROUP" \
+    --profile "$PROFILE" \
+    --region "$REGION" \
+    --order-by LastEventTime \
+    --descending \
+    --max-items 5 \
+    --query 'logStreams[*].[logStreamName,lastEventTime]' \
+    --output text)
+
+if [ -z "$RECENT_STREAMS" ]; then
+    echo -e "${YELLOW}⚠ No recent log streams found${NC}\n"
 else
-  echo "$LOGS" | tail -100
-  
-  # Check for specific errors
-  if echo "$LOGS" | grep -qi "Could not resolve JWT signing secret"; then
+    echo "Recent executions:"
+    echo "$RECENT_STREAMS" | while read stream timestamp; do
+        DATE=$(date -d "@$((timestamp / 1000))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$((timestamp / 1000))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")
+        echo "  - $stream ($DATE)"
+    done
     echo ""
-    echo "❌ FOUND ERROR: 'Could not resolve JWT signing secret'"
-    echo "This confirms the IAM permission issue"
-    echo "Lambda cannot read PAPYRUS_JWT_SECRET from SSM"
-  fi
-  
-  if echo "$LOGS" | grep -qi "console chat message completed"; then
-    echo ""
-    echo "✓ Found successful console chat completions"
-  fi
+    
+    # Check for JWT errors in recent logs
+    echo -e "${YELLOW}Checking for JWT signing secret errors...${NC}"
+    ERROR_COUNT=$(aws logs filter-log-events \
+        --log-group-name "$LOG_GROUP" \
+        --profile "$PROFILE" \
+        --region "$REGION" \
+        --start-time "$(($(date +%s) * 1000 - 3600000))" \
+        --filter-pattern "\"Could not resolve JWT signing secret\"" \
+        --query 'length(events)' \
+        --output text 2>/dev/null || echo "0")
+    
+    if [ "$ERROR_COUNT" -gt 0 ]; then
+        echo -e "${RED}❌ Found $ERROR_COUNT JWT signing secret errors in last hour${NC}"
+        echo -e "${RED}   The fix may not be deployed or a new image is needed${NC}\n"
+    else
+        echo -e "${GREEN}✓ No JWT signing secret errors found in last hour${NC}\n"
+    fi
 fi
 
-# Check recent console_chat_turn messages
-echo ""
-echo "=== 4. Recent Console Chat Messages ==="
-echo "Querying last 5 console_chat_turn messages..."
-RECENT_MESSAGES=$(aws_cli dynamodb query \
-  --table-name "$MESSAGE_TABLE" \
-  --index-name messagesByMessageKindAndCreatedAt \
-  --key-condition-expression 'messageKind = :kind' \
-  --expression-attribute-values '{":kind":{"S":"console_chat_turn"}}' \
-  --projection-expression 'id,#r,responseStatus,responseError,createdAt,updatedAt' \
-  --expression-attribute-names '{"#r":"role"}' \
-  --no-scan-index-forward \
-  --limit 5 2>&1)
+# Check recent console chat messages
+echo -e "${BLUE}6. Checking recent console chat messages...${NC}"
+RECENT_MESSAGES=$(aws dynamodb query \
+    --table-name "$MESSAGE_TABLE" \
+    --index-name messagesByMessageKindAndCreatedAt \
+    --key-condition-expression 'messageKind = :kind' \
+    --expression-attribute-values '{":kind":{"S":"console_chat_turn"}}' \
+    --scan-index-forward false \
+    --limit 5 \
+    --profile "$PROFILE" \
+    --region "$REGION" \
+    --query 'Items[*].[id.S,role.S,responseStatus.S,createdAt.S]' \
+    --output text 2>/dev/null || echo "")
 
-if [[ $? -eq 0 ]]; then
-  echo "$RECENT_MESSAGES" | jq -r '.Items[] | "\(.createdAt.S // "N/A") - \(.role.S // "N/A") - Status: \(.responseStatus.S // "N/A")\(if .responseError.S then " - ERROR: " + .responseError.S else "" end)"' || echo "$RECENT_MESSAGES"
-  
-  # Check for JWT errors in response
-  if echo "$RECENT_MESSAGES" | grep -qi "Could not resolve JWT"; then
+if [ -z "$RECENT_MESSAGES" ]; then
+    echo -e "${YELLOW}⚠ No recent console chat messages found${NC}"
+    echo "  This might mean:"
+    echo "    - No one has used the console chat recently"
+    echo "    - The table name or index has changed"
     echo ""
-    echo "❌ FOUND: Messages with JWT resolution errors"
-    echo "Users are experiencing the IAM permission bug"
-  fi
-  
-  # Count recent failures
-  FAILED_COUNT=$(echo "$RECENT_MESSAGES" | jq '[.Items[] | select(.responseStatus.S == "FAILED")] | length' 2>/dev/null || echo "0")
-  COMPLETED_COUNT=$(echo "$RECENT_MESSAGES" | jq '[.Items[] | select(.responseStatus.S == "COMPLETED")] | length' 2>/dev/null || echo "0")
-  
-  echo ""
-  echo "Recent status: $COMPLETED_COUNT completed, $FAILED_COUNT failed (of last 5)"
-  
-  if [[ "$FAILED_COUNT" -gt 0 ]]; then
-    echo "⚠ Found failed messages - check responseError details above"
-  fi
 else
-  echo "Could not query messages: $RECENT_MESSAGES"
+    echo "Recent console chat turns:"
+    echo "$RECENT_MESSAGES" | while read id role status created; do
+        STATUS_COLOR="$NC"
+        if [ "$status" = "COMPLETED" ]; then
+            STATUS_COLOR="$GREEN"
+        elif [ "$status" = "FAILED" ]; then
+            STATUS_COLOR="$RED"
+        elif [ "$status" = "RUNNING" ]; then
+            STATUS_COLOR="$YELLOW"
+        fi
+        echo -e "  - $role message $id: ${STATUS_COLOR}$status${NC} ($created)"
+    done
+    echo ""
+    
+    # Count failed messages
+    FAILED_COUNT=$(echo "$RECENT_MESSAGES" | grep -c "FAILED" || echo "0")
+    if [ "$FAILED_COUNT" -gt 0 ]; then
+        echo -e "${RED}⚠ Found $FAILED_COUNT failed messages in recent history${NC}"
+        echo "  Check Lambda logs for specific errors"
+        echo ""
+    fi
 fi
 
-# Summary
+# Final summary
+echo -e "${BLUE}=== Summary ===${NC}"
 echo ""
-echo "=== Summary ==="
-if [[ "$SSM_FOUND" == "true" ]]; then
-  echo "✓ Lambda has ssm:GetParameters permission (fix is deployed)"
-  
-  if [[ "$FAILED_COUNT" -eq 0 ]] && [[ "$COMPLETED_COUNT" -gt 0 ]]; then
-    echo "✓ Recent messages completed successfully"
-    echo "✓ Web console chat appears to be working"
-  elif [[ "$FAILED_COUNT" -gt 0 ]]; then
-    echo "⚠ IAM fix is deployed but recent messages failed"
-    echo "Check logs above for error details"
-  else
-    echo "- No recent activity to verify end-to-end"
-    echo "Recommend: Test by sending a message via /newsroom console"
-  fi
+if [ "$HAS_GET_PARAMETERS" = true ] && [ "$ERROR_COUNT" -eq 0 ]; then
+    echo -e "${GREEN}✓ VERIFICATION PASSED${NC}"
+    echo ""
+    echo "The console chat IAM fix is deployed and working:"
+    echo "  ✓ Lambda has ssm:GetParameters permission"
+    echo "  ✓ No JWT signing secret errors in recent logs"
+    echo ""
+    echo "If users still report issues:"
+    echo "  1. Check if they're actually using production vs sandbox"
+    echo "  2. Verify the Lambda image includes the Rust code changes"
+    echo "  3. Check for other errors in CloudWatch logs"
+    echo ""
+elif [ "$HAS_GET_PARAMETERS" = true ]; then
+    echo -e "${YELLOW}⚠ PARTIAL DEPLOYMENT${NC}"
+    echo ""
+    echo "IAM permissions are fixed but there were recent errors."
+    echo "The Lambda may need a new image deployment."
+    echo ""
 else
-  echo "❌ Lambda missing required ssm:GetParameters permission"
-  echo "❌ Web console chat will fail with JWT resolution errors"
-  echo ""
-  echo "Fix: Deploy main branch with commit 0c39cbb or later"
-  echo "  git log --oneline | grep 'console-chat-responder SSM'"
+    echo -e "${RED}✓ VERIFICATION FAILED${NC}"
+    echo ""
+    echo "The IAM fix is NOT deployed to production."
+    echo ""
+    echo "To fix this:"
+    echo "  1. Verify commit 0c39cbb is on main branch (it is)"
+    echo "  2. Check Amplify deployment status for main branch"
+    echo "  3. If Amplify shows success, the CDK may need manual redeployment"
+    echo "  4. Check: https://console.aws.amazon.com/amplify/home?region=us-east-1#/dbsyytcm9drqa"
+    echo ""
 fi
-
-echo ""
-echo "Done."

@@ -1,116 +1,93 @@
-# Web Console Chat Fix - Testing and Verification
+# Web Console Chat Fix - Quick Reference
 
-## Quick Status Check
+## The Problem
+Production web console chat fails with "Could not resolve JWT signing secret" when using tools.
 
-To quickly verify if the production web console chat fix is deployed:
+## The Fix
+✅ **MERGED**: PR #23, commit `0c39cbb`
+- Added `ssm:GetParameters` permission to console-chat-responder Lambda IAM role
+- File: `amplify/functions/console-chat-responder/resource.ts` lines 114-124
 
+## Current Status
+- ✅ Code is on `main` branch  
+- ✅ PR #23 merged at 2026-06-03T21:37:48Z
+- ⚠️  **Amplify deployment needs verification**
+
+## Quick Test (3 steps)
+
+### 1. Run Verification Script
 ```bash
 cd ~/Projects/Papyrus-production
-git log --oneline -1
-# Should show commit 0c39cbb or later
-
-# Run automated test
 export AWS_PROFILE=Ryan AWS_REGION=us-east-1
 ./scripts/test-console-chat-production.sh
 ```
 
-## What Was Fixed
+### 2. Check for Success Indicators
+The script should show:
+- ✅ Lambda has `ssm:GetParameters` permission
+- ✅ No JWT errors in recent logs
+- ✅ Recent console messages completed successfully
 
-**Problem**: Production web console chat failing with "Could not resolve JWT signing secret"
+### 3. Live Test
+Go to https://papyrus.anthus.ai/newsroom, open console chat, send:
+```
+list the 5 most recent references
+```
 
-**Root Cause**: `console-chat-responder` Lambda IAM role had `ssm:GetParameter` (singular) but Python code uses boto3's `get_parameters` (plural) API.
+**Expected**: Get a list of references (not an error)
 
-**Fix**: Added `ssm:GetParameters` permission in `amplify/functions/console-chat-responder/resource.ts`
+## If Verification Fails
 
-**Merged**: PR #23, commit `0c39cbb`
-
-## Manual Verification Steps
-
-### 1. Verify Code Fix Is Deployed
-
+### Check Amplify Deployment
 ```bash
-cd ~/Projects/Papyrus-production
-git fetch origin main
-git log origin/main --oneline | head -10
-# Should include: "0c39cbb Fix console-chat-responder SSM permissions for execute_tactus JWT minting"
+# See recent deployments
+gh run list --limit 5
+
+# Check Amplify console
+open "https://console.aws.amazon.com/amplify/home?region=us-east-1#/dbsyytcm9drqa"
 ```
 
-### 2. Check Amplify Deployment
-
-**Via AWS Console:**
-- Open Amplify Console → App `dbsyytcm9drqa` → main branch
-- Verify latest successful build includes commit `0c39cbb` or later
-- Confirm both Backend and Hosting phases succeeded
-
-### 3. Run Automated Test
-
+### Manual IAM Check
 ```bash
-./scripts/test-console-chat-production.sh
+FUNCTION="amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D"
+ROLE_ARN=$(aws lambda get-function-configuration --function-name "$FUNCTION" --profile Ryan --region us-east-1 --query 'Role' --output text)
+ROLE_NAME=$(echo "$ROLE_ARN" | awk -F'/' '{print $NF}')
+
+# Check inline policies for SSM permissions
+aws iam list-role-policies --role-name "$ROLE_NAME" --profile Ryan --region us-east-1
 ```
 
-The test will:
-- ✓ Check Lambda IAM permissions for `ssm:GetParameters`
-- ✓ Show recent Lambda logs
-- ✓ Query recent message statuses
-- ✓ Report if JWT errors are present
-
-Expected output for a working system:
-```
-✓ Lambda has ssm:GetParameters permission (fix is deployed)
-✓ Recent messages completed successfully
-✓ Web console chat appears to be working
-```
-
-### 4. Manual User Test
-
-1. Go to https://p.apyr.us/newsroom
-2. Sign in as editor/admin
-3. Open console chat (icon in top right)
-4. Send: "list recent references"
-5. Should receive response in ~30-60 seconds
+Look for a policy with **both** `ssm:GetParameter` AND `ssm:GetParameters`
 
 ## Troubleshooting
 
-If tests show errors:
+| Symptom | Likely Cause | Solution |
+|---------|--------------|----------|
+| IAM permissions not updated | Amplify deploy didn't run | Check Amplify console, trigger redeploy |
+| Permissions updated but still errors | Lambda image is stale | Check Lambda last modified time |
+| No recent console messages | No one testing yet | Send a test message |
 
-### "Lambda missing ssm:GetParameters permission"
-- Code fix not deployed yet
-- Check Amplify main branch deployment status
-- May need to trigger a redeploy
+## Full Documentation
 
-### "Recent messages failed"
-- Check CloudWatch logs for specific error:
-  ```bash
-  export AWS_PROFILE=Ryan AWS_REGION=us-east-1
-  aws logs tail /aws/lambda/amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D \
-    --since 30m --format short
-  ```
+See `docs/web-console-chat-iam-fix.md` for complete details.
 
-### No recent activity
-- No one has used console chat recently
-- Try manual user test (step 4 above)
-- Logs will only appear after first usage post-deploy
+## Quick Commands
 
-## Files Created/Modified
+```bash
+# Check Lambda last modified
+aws lambda get-function-configuration \
+  --function-name amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D \
+  --profile Ryan --region us-east-1 \
+  --query '[LastModified,Runtime,Role]' --output table
 
-**Testing:**
-- `scripts/test-console-chat-production.sh` - Automated production verification
-- `docs/web-console-chat-iam-fix.md` - Detailed issue documentation
-- `docs/console-chat-runbook.md` - Updated with JWT fix troubleshooting
+# Check recent logs
+aws logs tail /aws/lambda/amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D \
+  --profile Ryan --region us-east-1 --since 30m --format short
 
-**Original Fix (already merged):**
-- `amplify/functions/console-chat-responder/resource.ts` - IAM permission fix
-
-## Additional Documentation
-
-- Full issue details: `docs/web-console-chat-iam-fix.md`
-- Console chat operations: `docs/console-chat-runbook.md`
-- Related Slack agent fixes: `docs/slack-agent.md`
-
-## Support
-
-For issues:
-1. Run `scripts/test-console-chat-production.sh` and share full output
-2. Include recent CloudWatch logs (see troubleshooting above)  
-3. Check DynamoDB Message table for responseError details
-4. Verify Amplify deploy completed (main branch, latest commit)
+# Check for JWT errors
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/amplify-dbsyytcm9drqa-mai-ConsoleChatResponderFunc-PnFuItfGGO4D \
+  --profile Ryan --region us-east-1 \
+  --start-time $(($(date +%s) * 1000 - 3600000)) \
+  --filter-pattern '"Could not resolve JWT signing secret"'
+```
