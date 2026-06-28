@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Isolated gaming environment</title>
+  <desc id="desc">A game controller contained in one zone, separated from finance and work zones by strong boundaries.</desc>
+  <rect width="1200" height="1200" fill="#fcfcfc"/>
+  <circle cx="602" cy="600" r="378" fill="#ffffff" stroke="#23262b" stroke-width="20" opacity=".96"/>
+  <circle cx="602" cy="600" r="286" fill="none" stroke="#d0021b" stroke-width="22" stroke-dasharray="36 26"/>
+  <path d="M366 548c26-72 84-110 164-86l64 20h16l64-20c80-24 138 14 164 86l48 132c24 66-18 136-88 136-40 0-72-18-100-54l-44-56H550l-44 56c-28 36-60 54-100 54-70 0-112-70-88-136l48-132Z" fill="#ffffff" stroke="#23262b" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M458 610h98M507 560v100" stroke="#d0021b" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="704" cy="594" r="23" fill="#23262b"/>
+  <circle cx="770" cy="640" r="23" fill="#23262b" opacity=".76"/>
+  <circle cx="780" cy="528" r="56" fill="none" stroke="#d0021b" stroke-width="18" opacity=".7"/>
+  <g fill="#ffffff" stroke="#23262b" stroke-width="16" stroke-linejoin="round">
+    <rect x="134" y="204" width="210" height="150" rx="22"/>
+    <rect x="856" y="204" width="210" height="150" rx="22"/>
+    <rect x="856" y="846" width="210" height="150" rx="22"/>
+  </g>
+  <path d="M180 288h118M180 320h78" stroke="#23262b" stroke-width="14" stroke-linecap="round" opacity=".54"/>
+  <path d="M904 272h112M904 316h112" stroke="#d0021b" stroke-width="14" stroke-linecap="round"/>
+  <path d="M918 930h88M918 962h118" stroke="#23262b" stroke-width="14" stroke-linecap="round" opacity=".54"/>
+  <path d="M344 280h148M768 280h88M870 846l-120-120" stroke="#23262b" stroke-width="16" stroke-linecap="round" opacity=".2"/>
+  <path d="M392 280h76M792 280h40M820 796l-42-42" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
+  <path d="M240 410v390M960 410v360" stroke="#23262b" stroke-width="12" stroke-linecap="round" stroke-dasharray="24 24" opacity=".2"/>
+</svg>

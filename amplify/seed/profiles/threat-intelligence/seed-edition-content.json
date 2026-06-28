@@ -13,8 +13,23 @@
       "section": "Mission",
       "headline": "The Balance of Power Is Shifting",
       "deck": "AI weakens the old defensive assumption that only nation-state-level actors can bring scale, patience, and advanced tradecraft to ordinary targets.",
+      "excerpt": "Treat AI as a force multiplier for ordinary attackers, not a magic upgrade to elite status. Controls that relied on obscurity, friction, or attacker fatigue need a fresh threat model, because more adversaries can now sustain the work required to break them.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
+      "image": {
+        "src": "/seed-art/threat-intelligence/balance-shift.svg",
+        "alt": "A tilted balance beam showing many smaller attacker nodes outweighing a single larger capability source.",
+        "caption": "Capability is becoming less scarce, changing who defenders must plan for.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The scarce resource was never malice. It was capability.",
         "Controls built for casual attackers cannot be treated as boundaries anymore."
@@ -38,6 +53,7 @@
       "section": "Mission",
       "headline": "The New Sensitive Data Estate",
       "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces.",
+      "excerpt": "Secure AI work by inventorying what each artifact can reveal, not just where the original data lived. Training byproducts, logs, notebooks, embeddings, and evaluations often become concentrated records of customers, business logic, failures, and operational judgment.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -63,6 +79,7 @@
       "section": "Mission",
       "headline": "From Lessons Learned to Defenses Checked",
       "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run.",
+      "excerpt": "Good threat intelligence should leave teams with something to inspect, not just something to remember. Use each reported failure to tighten a habit, verify a control, or challenge an assumption before the same weakness shows up in your own AI and security environment.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -87,8 +104,23 @@
       "section": "AWS",
       "headline": "Audit S3 Risk Exposure With Macie",
       "deck": "Amazon Macie gives defenders a practical way to find sensitive data in S3 and compare that sensitivity against bucket exposure.",
+      "excerpt": "Start your S3 review with the data, not the bucket list. Macie helps surface where sensitive content intersects with weak access boundaries, cross-account sharing, or encryption gaps so remediation follows real exposure instead of naming conventions or stale ownership assumptions.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
+      "image": {
+        "src": "/seed-art/threat-intelligence/s3-exposure-map.svg",
+        "alt": "A storage map with bucket icons, red sensitivity hotspots, and an exposure path.",
+        "caption": "Sensitive-data discovery turns an S3 inventory into an exposure map.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Exposure is not only who can reach a bucket. It is what that bucket contains.",
         "A sensitive-data map turns storage inventory into a risk conversation."
@@ -112,8 +144,23 @@
       "section": "Gaming",
       "headline": "How to Play Games Securely",
       "deck": "Treat unfamiliar games, experimental builds, launchers, mods, and anti-cheat drivers as software that deserves its own blast radius.",
+      "excerpt": "Keep gaming away from the accounts and files that would hurt most to lose. Use a dedicated device, separate OS account, or clean browser profile so launchers, mods, overlays, and community downloads cannot casually share space with banking, tax records, work sessions, or password recovery.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
+      "image": {
+        "src": "/seed-art/threat-intelligence/secure-gaming-isolation.svg",
+        "alt": "A game controller inside a protected zone separated from finance and work systems.",
+        "caption": "A gaming setup is safer when it has its own blast radius.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The most practical gaming security control is separation.",
         "Do not make one machine responsible for every part of your life."
