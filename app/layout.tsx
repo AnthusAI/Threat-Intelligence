@@ -4,7 +4,7 @@ import Script from "next/script";
 import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SITE_BRAND } from "../lib/site-brand";
+import { SITE_BRAND, getPresentationChoices } from "../lib/site-brand";
 import "./tailwind.css";
 import "./globals.css";
 
@@ -32,12 +32,17 @@ export const metadata: Metadata = {
   },
 };
 
+const presentationChoices = getPresentationChoices();
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
       data-papyrus-theme={defaultTheme}
       data-site-brand={SITE_BRAND.id}
+      data-default-presentation={SITE_BRAND.defaultPresentation}
+      data-presentation-choices={presentationChoices.join(",")}
+      {...(SITE_BRAND.forcedPresentation ? { "data-forced-presentation": SITE_BRAND.forcedPresentation } : {})}
       suppressHydrationWarning
     >
       <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable}`}>
