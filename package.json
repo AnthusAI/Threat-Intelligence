@@ -43,6 +43,7 @@
     "test:bdd:agent-local": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend --tags=@live-agent",
     "test:reader-cache": "node scripts/test-reader-storage-url.mjs",
     "verify:reader-cache": "node scripts/verify-reader-cache.mjs",
+    "check:reader-route-content-source": "node scripts/check-reader-route-content-source.mjs",
     "test:bdd:agent-local:core": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend --tags=@agent-core",
     "test:bdd:agent-local:assignments": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend --tags=@agent-assignments",
     "test:bdd:agent-local:references": "npm run -s check:reference-action-contract && PAPYRUS_LIVE_AGENT_BDD=1 PAPYRUS_LIVE_AGENT_LOCAL_RESPONDER=1 poetry run behave features_backend --tags=@agent-references",
