@@ -603,6 +603,31 @@ return plan_research_update{ assignment_item = assignment, research = research }
         self.assertEqual(len(relation_records), 2)
         self.assertEqual({record["input"]["subjectId"] for record in relation_records}, {"assignment-1-v2", "item-ai-agents-enter-the-lab"})
 
+    def test_list_assignments_research_type_includes_all_research_prefix_keys(self):
+        assignments = [
+            {
+                "id": "assignment-curation-1",
+                "assignmentTypeKey": "curation.reference-intake",
+                "createdAt": "2026-06-03T19:18:00Z",
+            },
+            {
+                "id": "assignment-tavily-1",
+                "assignmentTypeKey": "research.tavily-deep",
+                "createdAt": "2026-06-03T19:14:00Z",
+                "title": "LLM webinar",
+            },
+            {
+                "id": "assignment-edition-1",
+                "assignmentTypeKey": "research.edition-candidate",
+                "createdAt": "2026-05-31T19:00:00Z",
+                "title": "World models",
+            },
+        ]
+        with mock.patch.object(papyrus_newsroom, "_list_assignments", return_value=assignments):
+            result = papyrus_newsroom.papyrus_list_assignments(limit=5, type="research")
+        ids = [entry["id"] for entry in result["assignments"]]
+        self.assertEqual(ids, ["assignment-tavily-1", "assignment-edition-1"])
+
     def test_research_plan_preserves_assignment_type(self):
         plan = papyrus_newsroom.build_research_update_plan(
             generated_at="2026-05-16T12:15:00Z",

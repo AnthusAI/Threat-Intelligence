@@ -147,6 +147,23 @@ export function Newspaper({
   }, [metrics, content.items, content.layoutPlan, fontRevision]);
 
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_PAPYRUS_CONTENT_LOAD_TIMING !== "1") return;
+    if (!metrics) {
+      console.info(`[papyrus-content-load] newspaper-awaiting-metrics ${JSON.stringify({ editionDate: content.editionDate })}`);
+      return;
+    }
+    if (!layout) return;
+    console.info(
+      `[papyrus-content-load] newspaper-layout-ready ${JSON.stringify({
+        editionDate: content.editionDate,
+        pageCount: layout.pages.length,
+        pageWidth: metrics.pageWidth,
+        viewportHeight: metrics.viewportHeight,
+      })}`,
+    );
+  }, [content.editionDate, layout, metrics]);
+
+  useEffect(() => {
     let active = true;
     setEditorAppendixReady(false);
     if (content.placeholderMode === "emptyEdition" || content.suppressNewsDeskAppendix) {
