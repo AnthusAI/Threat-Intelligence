@@ -1,23 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
-  <title id="title">Isolated gaming environment</title>
-  <desc id="desc">A game controller contained in one zone, separated from finance and work zones by strong boundaries.</desc>
+  <title id="title">Gaming separated from sensitive data</title>
+  <desc id="desc">A game controller is kept apart from a database of sensitive records by a clear isolation gap.</desc>
   <rect width="1200" height="1200" fill="#fcfcfc"/>
-  <circle cx="602" cy="600" r="378" fill="#ffffff" stroke="#23262b" stroke-width="20" opacity=".96"/>
-  <circle cx="602" cy="600" r="286" fill="none" stroke="#d0021b" stroke-width="22" stroke-dasharray="36 26"/>
-  <path d="M366 548c26-72 84-110 164-86l64 20h16l64-20c80-24 138 14 164 86l48 132c24 66-18 136-88 136-40 0-72-18-100-54l-44-56H550l-44 56c-28 36-60 54-100 54-70 0-112-70-88-136l48-132Z" fill="#ffffff" stroke="#23262b" stroke-width="22" stroke-linejoin="round"/>
-  <path d="M458 610h98M507 560v100" stroke="#d0021b" stroke-width="24" stroke-linecap="round"/>
-  <circle cx="704" cy="594" r="23" fill="#23262b"/>
-  <circle cx="770" cy="640" r="23" fill="#23262b" opacity=".76"/>
-  <circle cx="780" cy="528" r="56" fill="none" stroke="#d0021b" stroke-width="18" opacity=".7"/>
-  <g fill="#ffffff" stroke="#23262b" stroke-width="16" stroke-linejoin="round">
-    <rect x="134" y="204" width="210" height="150" rx="22"/>
-    <rect x="856" y="204" width="210" height="150" rx="22"/>
-    <rect x="856" y="846" width="210" height="150" rx="22"/>
+  <path d="M600 180v840" stroke="#23262b" stroke-width="18" stroke-linecap="round" stroke-dasharray="34 30" opacity=".18"/>
+  <path d="M536 600h128" stroke="#d0021b" stroke-width="24" stroke-linecap="round" stroke-dasharray="34 34"/>
+  <path d="M568 552l64 96M632 552l-64 96" stroke="#d0021b" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="350" cy="600" r="304" fill="#ffffff" stroke="#23262b" stroke-width="20"/>
+  <circle cx="350" cy="600" r="232" fill="none" stroke="#d0021b" stroke-width="22" stroke-dasharray="36 26"/>
+  <path d="M154 570c24-74 84-116 168-92l66 20h22l66-20c84-24 144 18 168 92l46 130c23 64-18 132-86 132-42 0-76-20-104-58l-42-56H292l-42 56c-28 38-62 58-104 58-68 0-109-68-86-132l46-130Z" fill="#ffffff" stroke="#23262b" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M246 634h102M297 584v102" stroke="#d0021b" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="496" cy="606" r="24" fill="#23262b"/>
+  <circle cx="560" cy="650" r="24" fill="#23262b" opacity=".76"/>
+  <circle cx="566" cy="538" r="52" fill="none" stroke="#d0021b" stroke-width="18" opacity=".72"/>
+  <g transform="translate(736 320)">
+    <path d="M0 92c0-51 82-92 184-92s184 41 184 92v376c0 51-82 92-184 92S0 519 0 468V92Z" fill="#ffffff" stroke="#23262b" stroke-width="22"/>
+    <ellipse cx="184" cy="92" rx="184" ry="92" fill="#ffffff" stroke="#23262b" stroke-width="22"/>
+    <path d="M0 218c0 51 82 92 184 92s184-41 184-92M0 344c0 51 82 92 184 92s184-41 184-92" fill="none" stroke="#23262b" stroke-width="18" opacity=".44"/>
+    <path d="M80 84h208M92 216h184M108 344h152" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
+    <circle cx="296" cy="438" r="28" fill="#d0021b"/>
   </g>
-  <path d="M180 288h118M180 320h78" stroke="#23262b" stroke-width="14" stroke-linecap="round" opacity=".54"/>
-  <path d="M904 272h112M904 316h112" stroke="#d0021b" stroke-width="14" stroke-linecap="round"/>
-  <path d="M918 930h88M918 962h118" stroke="#23262b" stroke-width="14" stroke-linecap="round" opacity=".54"/>
-  <path d="M344 280h148M768 280h88M870 846l-120-120" stroke="#23262b" stroke-width="16" stroke-linecap="round" opacity=".2"/>
-  <path d="M392 280h76M792 280h40M820 796l-42-42" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
-  <path d="M240 410v390M960 410v360" stroke="#23262b" stroke-width="12" stroke-linecap="round" stroke-dasharray="24 24" opacity=".2"/>
+  <path d="M744 874h312" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".14"/>
+  <path d="M222 222h260" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
+  <path d="M270 274h170" stroke="#d0021b" stroke-width="18" stroke-linecap="round" opacity=".68"/>
+  <path d="M770 222h244" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".38"/>
+  <path d="M830 274h184" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".26"/>
+  <path d="M642 568l58 64M700 568l-58 64" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
 </svg>

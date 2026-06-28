@@ -1,22 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Shift in defensive balance</title>
-  <desc id="desc">A tilted balance beam with many smaller red nodes outweighing a single larger node.</desc>
+  <desc id="desc">A tilted balance beam with many red attacker nodes pulling the heavy side downward.</desc>
   <rect width="1200" height="1200" fill="#fcfcfc"/>
   <path d="M154 940h892" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".14"/>
   <path d="M600 280v576" stroke="#23262b" stroke-width="28" stroke-linecap="round"/>
   <path d="M490 856h220" stroke="#23262b" stroke-width="32" stroke-linecap="round"/>
-  <path d="M350 355l500 122" stroke="#d0021b" stroke-width="34" stroke-linecap="round"/>
-  <circle cx="600" cy="416" r="56" fill="#fcfcfc" stroke="#23262b" stroke-width="24"/>
-  <path d="M330 388l-122 260h244L330 388Z" fill="#ffffff" stroke="#23262b" stroke-width="18" stroke-linejoin="round"/>
-  <path d="M872 520L732 812h280L872 520Z" fill="#ffffff" stroke="#23262b" stroke-width="18" stroke-linejoin="round"/>
-  <circle cx="276" cy="610" r="34" fill="#d0021b"/>
-  <circle cx="334" cy="578" r="34" fill="#d0021b" opacity=".84"/>
-  <circle cx="390" cy="614" r="34" fill="#d0021b" opacity=".7"/>
-  <circle cx="806" cy="760" r="44" fill="#23262b"/>
-  <circle cx="872" cy="716" r="44" fill="#23262b" opacity=".78"/>
-  <circle cx="940" cy="766" r="44" fill="#23262b" opacity=".62"/>
-  <path d="M236 244h270" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
-  <path d="M236 296h190" stroke="#d0021b" stroke-width="18" stroke-linecap="round" opacity=".7"/>
-  <path d="M720 252h244" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".38"/>
-  <path d="M782 304h182" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".26"/>
+  <path d="M350 360l500 128" stroke="#23262b" stroke-width="34" stroke-linecap="round"/>
+  <path d="M606 424l244 64" stroke="#d0021b" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="600" cy="424" r="56" fill="#fcfcfc" stroke="#23262b" stroke-width="24"/>
+  <path d="M328 392L206 640h244L328 392Z" fill="#ffffff" stroke="#23262b" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M874 532L716 850h316L874 532Z" fill="#ffffff" stroke="#d0021b" stroke-width="22" stroke-linejoin="round"/>
+  <circle cx="292" cy="598" r="48" fill="#23262b" opacity=".88"/>
+  <circle cx="354" cy="620" r="34" fill="#23262b" opacity=".42"/>
+  <circle cx="780" cy="784" r="36" fill="#d0021b" opacity=".72"/>
+  <circle cx="836" cy="730" r="39" fill="#d0021b" opacity=".82"/>
+  <circle cx="894" cy="790" r="42" fill="#d0021b"/>
+  <circle cx="952" cy="736" r="38" fill="#d0021b" opacity=".86"/>
+  <circle cx="982" cy="814" r="31" fill="#d0021b" opacity=".68"/>
+  <path d="M216 250h242" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".36"/>
+  <path d="M276 302h174" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".24"/>
+  <path d="M720 246h270" stroke="#d0021b" stroke-width="18" stroke-linecap="round"/>
+  <path d="M780 298h210" stroke="#d0021b" stroke-width="18" stroke-linecap="round" opacity=".7"/>
 </svg>
