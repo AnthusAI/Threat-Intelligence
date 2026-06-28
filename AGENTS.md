@@ -708,5 +708,23 @@ do not stop or restart it unless asked.
 Use `PAPYRUS_BASE_URL` for another server. Use `PAPYRUS_HEADLESS=false` or
 `npm run test:bdd:headed` when debugging geometry visually.
 
+Frontend BDD is site-brand aware. The running app exposes reader capabilities on
+`<html>` through `data-site-brand`, `data-default-presentation`,
+`data-forced-presentation`, and `data-presentation-choices`. Scenarios declare
+requirements with tags such as `@newspaper`, `@blog`, `@presentation-choice`,
+and `@brand-agnostic`; incompatible scenarios skip automatically on locked fork
+brands instead of failing during setup.
+
+- **Full newspaper regression:** start the app with the canonical BDD brand from
+  `.env.bdd.example` (`PAPYRUS_SITE_BRAND=papyrus`,
+  `NEXT_PUBLIC_PAPYRUS_SITE_BRAND=papyrus`), then run
+  `npm run test:bdd:canonical`.
+- **Fork checkout CI:** run `npm run test:bdd` against the fork's normal brand.
+  Newspaper-only scenarios skip; blog scenarios run when the fork forces or
+  defaults to blog.
+- **Preflight only:** `npm run test:bdd:check-brand` reports the active site
+  profile. Set `PAPYRUS_BDD_REQUIRE_CANONICAL_BRAND=1` to fail when the server
+  is not on the canonical Papyrus reader profile.
+
 `npm run test:bdd:agent-live` runs backend live-agent BDD (Behave/Python),
 not frontend browser geometry checks.
