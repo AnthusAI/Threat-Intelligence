@@ -223,3 +223,15 @@ Amplify `main` build: failed backend deploys skip the Next.js phase entirely.
   but `console.webUi` is missing: redeploy the frontend from a green Amplify
   `main` build; the responder is already running but never received location
   metadata on the trigger message.
+
+## JWT IAM Fix (June 2026)
+
+**Issue**: Console chat was failing with "Could not resolve JWT signing secret"
+
+**Cause**: Lambda role had `ssm:GetParameter` but code uses `get_parameters` (plural)
+
+**Fix**: PR #23 / commit `0c39cbb` added `ssm:GetParameters` permission
+
+**Verification**: Run `scripts/test-console-chat-production.sh`
+
+See `docs/web-console-chat-iam-fix.md` for full details.
