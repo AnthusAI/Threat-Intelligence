@@ -147,7 +147,7 @@ if (enableConsoleResponder || enableSlackAgent) {
     || "";
 
   if (enableConsoleResponder) {
-    new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
+    const consoleChatResponder = new ConsoleChatResponderStack(dataStack, "ConsoleChatResponder", {
       messageTable,
       messageStreamArn,
       threadTable: messageThreadTable,
@@ -158,6 +158,18 @@ if (enableConsoleResponder || enableSlackAgent) {
       model: process.env.PAPYRUS_CONSOLE_MODEL,
       prebuiltImageUri: process.env.PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI,
     });
+    if (jwtSsmEnvConfig) {
+      consoleChatResponder.responderFunction.addEnvironment("AMPLIFY_SSM_ENV_CONFIG", jwtSsmEnvConfig);
+    }
+    const jwtSecretSsmParam =
+      process.env.PAPYRUS_JWT_SECRET_SSM_PARAM?.trim()
+      || (amplifyAppId === "dbsyytcm9drqa"
+        ? `/amplify/${amplifyAppId}/main-branch-cb38ada667/PAPYRUS_JWT_SECRET`
+        : "/amplify/papyrus/ryan-sandbox-adcd88a186/PAPYRUS_JWT_SECRET");
+    consoleChatResponder.responderFunction.addEnvironment(
+      "PAPYRUS_JWT_SECRET_SSM_PARAM",
+      jwtSecretSsmParam,
+    );
   }
 
   if (enableSlackAgent) {
