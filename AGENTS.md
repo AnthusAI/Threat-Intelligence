@@ -716,7 +716,7 @@ and `@brand-agnostic`; incompatible scenarios skip automatically on locked fork
 brands instead of failing during setup.
 
 - **Full newspaper regression:** start the app with the canonical BDD brand from
-  `.env.bdd.example` (`PAPYRUS_SITE_BRAND=papyrus`,
+  `config/bdd-canonical.env.example` (`PAPYRUS_SITE_BRAND=papyrus`,
   `NEXT_PUBLIC_PAPYRUS_SITE_BRAND=papyrus`), then run
   `npm run test:bdd:canonical`.
 - **Fork checkout CI:** run `npm run test:bdd` against the fork's normal brand.

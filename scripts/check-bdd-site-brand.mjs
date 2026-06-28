@@ -55,7 +55,7 @@ async function main() {
   if (attributes.siteBrand !== "papyrus") {
     console.error(
       `Canonical BDD requires PAPYRUS_SITE_BRAND=papyrus on the running server; found ${attributes.siteBrand ?? "unknown"}. `
-      + "Start the app with .env.bdd.example or set NEXT_PUBLIC_PAPYRUS_SITE_BRAND=papyrus.",
+      + "Start the app with config/bdd-canonical.env.example or set NEXT_PUBLIC_PAPYRUS_SITE_BRAND=papyrus.",
     );
     process.exit(1);
   }
