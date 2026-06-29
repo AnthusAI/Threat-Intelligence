@@ -10233,7 +10233,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header {
-  --threat-intelligence-section-rule-height: 1.18rem;
+  --threat-intelligence-section-rule-height: 2.36rem;
 
   align-items: center;
   border-bottom: 0;
