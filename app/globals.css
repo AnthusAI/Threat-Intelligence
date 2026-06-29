@@ -10026,6 +10026,50 @@ img {
   font-family: var(--site-body-font);
 }
 
+:root[data-site-brand="threat-intelligence"] body {
+  --ti-body-page-padding-x: clamp(18px, 4vw, 56px);
+  --ti-masthead-font-size: clamp(3.05rem, 9.4vw, 7.7rem);
+  --ti-blog-rail-max-width: 1180px;
+  --ti-body-rail-width: min(
+    calc(100vw - (var(--ti-body-page-padding-x) * 2)),
+    var(--ti-blog-rail-max-width),
+    calc(var(--ti-masthead-font-size) * 9.55)
+  );
+  --ti-body-rail-margin: max(0px, calc((100vw - var(--ti-body-rail-width)) * 0.5));
+  --ti-body-background-mark-size: clamp(300px, 33vw, 470px);
+  --ti-body-background-mark-right: calc(var(--ti-body-rail-margin) - (var(--ti-body-background-mark-size) * 0.3));
+  --ti-body-background-mark-top: clamp(-180px, -9vw, -112px);
+
+  background: var(--background);
+  overflow-x: clip;
+  overflow-y: visible;
+  position: relative;
+}
+
+:root[data-site-brand="threat-intelligence"] body:has(.presentation-page--blog)::before {
+  aspect-ratio: 1;
+  background-image: url("/brand/gemini-svg.svg");
+  background-position: right center;
+  background-repeat: no-repeat;
+  background-size: var(--ti-body-background-mark-size) var(--ti-body-background-mark-size);
+  content: "";
+  height: var(--ti-body-background-mark-size);
+  pointer-events: none;
+  position: absolute;
+  right: max(0px, var(--ti-body-background-mark-right));
+  top: var(--ti-body-background-mark-top);
+  width: min(
+    var(--ti-body-background-mark-size),
+    calc(var(--ti-body-background-mark-size) + min(0px, var(--ti-body-background-mark-right)))
+  );
+  z-index: 0;
+}
+
+:root[data-site-brand="threat-intelligence"] body:has(.presentation-page--blog) .papyrus-console-page {
+  position: relative;
+  z-index: 1;
+}
+
 :root[data-site-brand="threat-intelligence"] .masthead h1,
 :root[data-site-brand="threat-intelligence"] .presentation-header h1,
 :root[data-site-brand="threat-intelligence"] .presentation-item__header h2,
@@ -10182,7 +10226,8 @@ img {
 
   background: var(--background);
   isolation: isolate;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
   position: relative;
 }
 
@@ -10318,7 +10363,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__header h2 {
-  font-size: clamp(1.65rem, 3.6vw, 3.4rem);
+  font-size: clamp(1.35rem, 2.55vw, 2.42rem);
   font-weight: 780;
   line-height: 0.98;
   margin-bottom: 12px;
@@ -10326,7 +10371,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .presentation-item__header h2 {
-  font-size: clamp(2.35rem, 5.8vw, 5.4rem);
+  font-size: clamp(1.75rem, 3.9vw, 3.65rem);
   letter-spacing: -0.035em;
   line-height: 0.9;
 }
@@ -10590,6 +10635,11 @@ img {
     top: clamp(-92px, -8vw, -42px);
   }
 
+  :root[data-site-brand="threat-intelligence"] body {
+    --ti-body-background-mark-size: clamp(280px, 58vw, 420px);
+    --ti-body-background-mark-top: clamp(-92px, -8vw, -42px);
+  }
+
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header,
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog,
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-has-image="true"],
@@ -10649,6 +10699,15 @@ img {
     --ti-blog-rail-margin: 0px;
   }
 
+  :root[data-site-brand="threat-intelligence"] body {
+    --ti-body-page-padding-x: 18px;
+    --ti-masthead-font-size: clamp(2.35rem, 13.2vw, 3.35rem);
+    --ti-body-rail-width: calc(100vw - 36px);
+    --ti-body-rail-margin: 18px;
+    --ti-body-background-mark-size: 300px;
+    --ti-body-background-mark-top: -72px;
+  }
+
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header {
     margin-bottom: 14px;
     min-height: 220px;
@@ -10695,7 +10754,7 @@ img {
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__header h2,
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .presentation-item__header h2 {
-    font-size: clamp(1.7rem, 10vw, 2.7rem);
+    font-size: clamp(1.35rem, 7.4vw, 2.05rem);
     letter-spacing: -0.025em;
     line-height: 0.96;
   }
