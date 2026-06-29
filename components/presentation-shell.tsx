@@ -195,7 +195,7 @@ function PresentationFooter({
         {title ? (
           <span className="front-footer__brand">
             <span className="front-footer__brand-title">{title}</span>
-            <span className="front-footer__brand-subtitle">{subtitle}</span>
+            {subtitle ? <span className="front-footer__brand-subtitle">{subtitle}</span> : null}
           </span>
         ) : (
           <span>{subtitle}</span>
@@ -303,8 +303,8 @@ function BlogPresentation({
         entries={footerEntries}
         onSectionClick={handleBlogFooterSectionClick}
         resolveSectionHref={(entry) => getBlogFooterSectionHref(entry, editionBasePath)}
-        subtitle={footerSubtitle}
-        title={SITE_BRAND.id === "threat-intelligence" ? SITE_BRAND.mastheadTitle : undefined}
+        subtitle={SITE_BRAND.id === "threat-intelligence" ? "" : footerSubtitle}
+        title={SITE_BRAND.id === "threat-intelligence" ? "ANTHUS THREAT INTELLIGENCE" : undefined}
       />
     </main>
   );

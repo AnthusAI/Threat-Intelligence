@@ -10436,7 +10436,7 @@ img {
   font-weight: 900;
   letter-spacing: -0.02em;
   line-height: 0.92;
-  max-width: 12ch;
+  max-width: 100%;
   text-transform: uppercase;
 }
 
