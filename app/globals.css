@@ -10458,7 +10458,7 @@ img {
   font-style: normal;
   font-weight: 650;
   line-height: var(--ti-deck-line-height);
-  max-width: 31rem;
+  max-width: min(100%, 58rem);
   text-transform: none;
 }
 
