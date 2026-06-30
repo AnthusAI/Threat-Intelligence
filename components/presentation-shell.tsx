@@ -262,6 +262,7 @@ function PresentationItem({
   const imageSrc = image ? resolveThemedImageSrc(image.src, image.themeVariants, resolvedTheme) : null;
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
+  const itemRole = getPresentationItemRole(mode, index);
   const lines = useMemo(() => {
     if (!maxWidth || !text.trim()) return [];
     return layoutAllTextLines({
@@ -278,6 +279,7 @@ function PresentationItem({
       className={`presentation-item presentation-item--${mode}`}
       data-item-id={item.slug}
       data-item-index={index}
+      data-item-role={itemRole}
       data-item-type={item.type}
       data-has-image={image ? "true" : "false"}
       id={item.slug}
@@ -340,6 +342,12 @@ function PresentationItem({
       ) : null}
     </article>
   );
+}
+
+function getPresentationItemRole(mode: "blog" | "magazine" | "magazine-feature", index?: number): "lead" | "secondary" {
+  if (mode === "magazine-feature") return "lead";
+  if (mode === "blog" && index === 0) return "lead";
+  return "secondary";
 }
 
 function MeasuredPresentationLines({ lines }: { lines: TextLine[] }) {

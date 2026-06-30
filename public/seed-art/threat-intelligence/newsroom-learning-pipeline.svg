@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Newsroom learning pipeline</title>
   <desc id="desc">A continuous newsroom pipeline connecting expert steering, AI research loops, a knowledge graph, and practical security guidance.</desc>
-  <rect width="1200" height="1200" fill="#f9f9fb"/>
+  <rect width="1200" height="1200" fill="#f9f9f8"/>
 
   <g fill="none" stroke="#23262b" stroke-width="12" opacity=".12">
     <path d="M170 234h860"/>
@@ -24,9 +24,9 @@
   <circle cx="958" cy="168" r="18" fill="#23262b" opacity=".25"/>
 
   <g stroke="#23262b" stroke-width="14" stroke-linejoin="round">
-    <path d="M156 312h214c28 0 50 22 50 50v104c0 28-22 50-50 50H156c-28 0-50-22-50-50V362c0-28 22-50 50-50Z" fill="#f9f9fb"/>
-    <path d="M490 270h220c32 0 58 26 58 58v172c0 32-26 58-58 58H490c-32 0-58-26-58-58V328c0-32 26-58 58-58Z" fill="#f9f9fb"/>
-    <path d="M844 312h200c28 0 50 22 50 50v104c0 28-22 50-50 50H844c-28 0-50-22-50-50V362c0-28 22-50 50-50Z" fill="#f9f9fb"/>
+    <path d="M156 312h214c28 0 50 22 50 50v104c0 28-22 50-50 50H156c-28 0-50-22-50-50V362c0-28 22-50 50-50Z" fill="#f9f9f8"/>
+    <path d="M490 270h220c32 0 58 26 58 58v172c0 32-26 58-58 58H490c-32 0-58-26-58-58V328c0-32 26-58 58-58Z" fill="#f9f9f8"/>
+    <path d="M844 312h200c28 0 50 22 50 50v104c0 28-22 50-50 50H844c-28 0-50-22-50-50V362c0-28 22-50 50-50Z" fill="#f9f9f8"/>
   </g>
 
   <g fill="none" stroke="#d0021b" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
@@ -53,9 +53,9 @@
   </g>
 
   <g stroke="#23262b" stroke-width="12">
-    <circle cx="600" cy="358" r="54" fill="#f9f9fb"/>
-    <circle cx="532" cy="458" r="44" fill="#f9f9fb"/>
-    <circle cx="668" cy="458" r="44" fill="#f9f9fb"/>
+    <circle cx="600" cy="358" r="54" fill="#f9f9f8"/>
+    <circle cx="532" cy="458" r="44" fill="#f9f9f8"/>
+    <circle cx="668" cy="458" r="44" fill="#f9f9f8"/>
     <path d="M568 390l-24 36"/>
     <path d="M632 390l24 36"/>
     <path d="M576 458h48"/>
@@ -72,8 +72,8 @@
   <path d="M1030 388l28 28-62 62" fill="none" stroke="#d0021b" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 
   <g stroke="#23262b" stroke-width="14" stroke-linejoin="round">
-    <path d="M206 704h170c28 0 50 22 50 50v94c0 28-22 50-50 50H206c-28 0-50-22-50-50v-94c0-28 22-50 50-50Z" fill="#f9f9fb"/>
-    <path d="M824 704h170c28 0 50 22 50 50v94c0 28-22 50-50 50H824c-28 0-50-22-50-50v-94c0-28 22-50 50-50Z" fill="#f9f9fb"/>
+    <path d="M206 704h170c28 0 50 22 50 50v94c0 28-22 50-50 50H206c-28 0-50-22-50-50v-94c0-28 22-50 50-50Z" fill="#f9f9f8"/>
+    <path d="M824 704h170c28 0 50 22 50 50v94c0 28-22 50-50 50H824c-28 0-50-22-50-50v-94c0-28 22-50 50-50Z" fill="#f9f9f8"/>
   </g>
   <path d="M224 780c44-46 92-46 136 0" fill="none" stroke="#d0021b" stroke-width="16" stroke-linecap="round"/>
   <path d="M224 824h136" stroke="#23262b" stroke-width="14" stroke-linecap="round" opacity=".36"/>
