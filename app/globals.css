@@ -10450,6 +10450,11 @@ img {
     height: 100%;
   }
 
+  :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="1"] .presentation-item__text-frame,
+  :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="2"] .presentation-item__text-frame {
+    margin-bottom: 1em;
+  }
+
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="1"] .presentation-item__cta,
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="2"] .presentation-item__cta {
     margin-top: auto;
