@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Gaming separated from sensitive data</title>
   <desc id="desc">A game controller is kept apart from a database of sensitive records by a clear isolation gap.</desc>
-  <rect width="1200" height="1200" fill="#101214"/>
+  <rect width="1200" height="1200" fill="#18191b"/>
   <path d="M600 180v840" stroke="#eceff3" stroke-width="18" stroke-linecap="round" stroke-dasharray="34 30" opacity=".18"/>
   <path d="M536 600h128" stroke="#ff3b52" stroke-width="24" stroke-linecap="round" stroke-dasharray="34 34"/>
   <path d="M568 552l64 96M632 552l-64 96" stroke="#ff3b52" stroke-width="20" stroke-linecap="round"/>

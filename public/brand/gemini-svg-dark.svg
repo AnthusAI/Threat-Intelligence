@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
-  <rect width="100%" height="100%" fill="#101214" />
+  <rect width="100%" height="100%" fill="#18191b" />
 
-  <g stroke="#3b4654" stroke-width="2" stroke-linecap="round" stroke-opacity="0.5" fill="none">
+  <g stroke="#212225" stroke-width="2" stroke-linecap="round" stroke-opacity="0.5" fill="none">
     <path d="M 50 250 L 77 150 L 150 77 L 250 50 L 350 77 L 423 150 L 450 250 L 423 350 L 350 423 L 250 450 L 150 423 L 77 350 Z" />
     
     <path d="M 120 250 L 158 158 L 250 120 L 342 158 L 380 250 L 342 342 L 250 380 L 158 342 Z" />
@@ -25,7 +25,7 @@
     <path d="M 250 250 L 282 306 L 210 360 L 270 420 L 170 455 L 90 400" />
   </g>
 
-  <g fill="#3b4654" fill-opacity="0.5">
+  <g fill="#212225" fill-opacity="0.5">
     <circle cx="50" cy="250" r="6" />
     <circle cx="77" cy="150" r="6" />
     <circle cx="150" cy="77" r="6" />
@@ -53,7 +53,7 @@
     <circle cx="218" cy="306" r="6" />
   </g>
 
-  <g fill="#ff3b52" stroke="#101214" stroke-width="6">
+  <g fill="#ff3b52" stroke="#18191b" stroke-width="6">
     <circle cx="250" cy="250" r="12" /> <circle cx="282" cy="306" r="12" />
     <circle cx="210" cy="360" r="12" />
     <circle cx="270" cy="420" r="12" />

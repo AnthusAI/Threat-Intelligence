@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Shift in defensive balance</title>
   <desc id="desc">A tilted balance beam with many red attacker nodes pulling the heavy side downward.</desc>
-  <rect width="1200" height="1200" fill="#101214"/>
+  <rect width="1200" height="1200" fill="#18191b"/>
   <path d="M154 940h892" stroke="#eceff3" stroke-width="18" stroke-linecap="round" opacity=".14"/>
   <path d="M600 280v576" stroke="#eceff3" stroke-width="28" stroke-linecap="round"/>
   <path d="M490 856h220" stroke="#eceff3" stroke-width="32" stroke-linecap="round"/>
   <path d="M350 360l500 128" stroke="#eceff3" stroke-width="34" stroke-linecap="round"/>
   <path d="M606 424l244 64" stroke="#ff3b52" stroke-width="34" stroke-linecap="round"/>
-  <circle cx="600" cy="424" r="56" fill="#101214" stroke="#eceff3" stroke-width="24"/>
+  <circle cx="600" cy="424" r="56" fill="#18191b" stroke="#eceff3" stroke-width="24"/>
   <path d="M328 392L206 640h244L328 392Z" fill="#191d22" stroke="#eceff3" stroke-width="18" stroke-linejoin="round"/>
   <path d="M874 532L716 850h316L874 532Z" fill="#191d22" stroke="#ff3b52" stroke-width="22" stroke-linejoin="round"/>
   <circle cx="292" cy="598" r="48" fill="#eceff3" opacity=".88"/>

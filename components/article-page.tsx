@@ -4,20 +4,33 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Article, ArticleImage } from "../lib/articles";
 import { shouldBypassImageOptimization } from "../lib/image-url";
+import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
 import { resolveThemedImageSrc } from "../lib/themed-image";
+import { PresentationFooter } from "./presentation-footer";
 import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
+
+export type ArticlePageEditionFooter = {
+  editionBasePath: string;
+  entries: PresentationFooterEntry[];
+  subtitle: string;
+  title?: string;
+};
 
 type ArticlePageViewProps = {
   article: Article;
   backHref: string;
   backLabel?: string;
+  editionFooter?: ArticlePageEditionFooter;
+  editionDate?: string;
 };
 
-export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.backToHomeLabel }: ArticlePageViewProps) {
+export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.backToHomeLabel, editionFooter, editionDate }: ArticlePageViewProps) {
+  const articleDate = editionDate ? formatArticleDate(editionDate) : null;
+
   return (
-    <main className="article-shell">
+    <main className={getArticleShellClassName(editionFooter)}>
       <nav className="article-nav">
         <Link href={backHref}>{backLabel}</Link>
         <span>{article.section}</span>
@@ -30,20 +43,17 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
           <div className="story-byline">
             <span>{article.byline}</span>
             <span>{article.dateline}</span>
+            {articleDate ? <time dateTime={editionDate}>{articleDate}</time> : null}
           </div>
         </header>
-        {article.image ? (
-          <figure className="article-photo">
-            <ArticlePhotoImage image={article.image} />
-            <figcaption>{article.image.caption ?? article.image.credit}</figcaption>
-          </figure>
-        ) : null}
         <div className="article-body">
+          {article.image ? <ArticlePhotoFigure image={article.image} /> : null}
           {article.body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
         </div>
       </article>
+      {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
     </main>
   );
 }
@@ -52,13 +62,19 @@ type ItemPageViewProps = {
   item: PublicationItem;
   backHref: string;
   backLabel?: string;
+  editionFooter?: ArticlePageEditionFooter;
+  editionDate?: string;
 };
 
-export function ItemPageView({ item, backHref, backLabel = "Back to edition" }: ItemPageViewProps) {
-  if (item.type === "article") return <ArticlePageView article={item} backHref={backHref} backLabel={backLabel} />;
+export function ItemPageView({ item, backHref, backLabel = "Back to edition", editionFooter, editionDate }: ItemPageViewProps) {
+  if (item.type === "article") {
+    return <ArticlePageView article={item} backHref={backHref} backLabel={backLabel} editionFooter={editionFooter} editionDate={editionDate} />;
+  }
+
+  const itemDate = editionDate ? formatArticleDate(editionDate) : null;
 
   return (
-    <main className="article-shell">
+    <main className={getArticleShellClassName(editionFooter)}>
       <nav className="article-nav">
         <Link href={backHref}>{backLabel}</Link>
         <span>{item.section ?? item.type}</span>
@@ -68,20 +84,60 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition" }: 
           <p className="story-label">{item.section ?? item.type}</p>
           <h1>{item.title}</h1>
           {item.deck ? <p className="article-deck">{item.deck}</p> : null}
+          {itemDate ? (
+            <div className="story-byline">
+              <time dateTime={editionDate}>{itemDate}</time>
+            </div>
+          ) : null}
         </header>
-        {item.image ? (
-          <figure className="article-photo">
-            <ArticlePhotoImage image={item.image} />
-            <figcaption>{item.image.caption ?? item.image.credit}</figcaption>
-          </figure>
-        ) : null}
         <div className="article-body">
+          {item.image ? <ArticlePhotoFigure image={item.image} /> : null}
           {(item.body ?? []).map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
         </div>
       </article>
+      {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
     </main>
+  );
+}
+
+function ArticleEditionFooter({ footer }: { footer: ArticlePageEditionFooter }) {
+  return (
+    <PresentationFooter
+      editionBasePath={footer.editionBasePath}
+      entries={footer.entries}
+      resolveSectionHref={(entry) => `${footer.editionBasePath}#section-${entry.sectionKey}`}
+      subtitle={footer.subtitle}
+      title={footer.title}
+    />
+  );
+}
+
+function getArticleShellClassName(editionFooter: ArticlePageEditionFooter | undefined): string {
+  return editionFooter ? "article-shell article-shell--edition" : "article-shell";
+}
+
+function formatArticleDate(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return value;
+
+  const date = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function ArticlePhotoFigure({ image }: { image: ArticleImage }) {
+  return (
+    <figure className="article-photo">
+      <ArticlePhotoImage image={image} />
+      <figcaption>{image.caption ?? image.credit}</figcaption>
+    </figure>
   );
 }
 

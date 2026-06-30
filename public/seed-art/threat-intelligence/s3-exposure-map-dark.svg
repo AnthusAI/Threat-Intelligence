@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Sensitive data exposure map</title>
   <desc id="desc">A grid of storage buckets with red sensitivity hotspots and access paths.</desc>
-  <rect width="1200" height="1200" fill="#101214"/>
+  <rect width="1200" height="1200" fill="#18191b"/>
   <g fill="none" stroke="#eceff3" stroke-width="12" opacity=".14">
     <path d="M214 240h772"/>
     <path d="M214 420h772"/>

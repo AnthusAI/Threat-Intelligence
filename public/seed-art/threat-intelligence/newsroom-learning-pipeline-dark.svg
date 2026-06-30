@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Newsroom learning pipeline</title>
   <desc id="desc">A continuous newsroom pipeline connecting expert steering, AI research loops, a knowledge graph, and practical security guidance.</desc>
-  <rect width="1200" height="1200" fill="#101214"/>
+  <rect width="1200" height="1200" fill="#18191b"/>
 
   <g fill="none" stroke="#eceff3" stroke-width="12" opacity=".12">
     <path d="M170 234h860"/>
