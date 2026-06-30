@@ -9980,6 +9980,7 @@ img {
   --surface-foreground: #23262b;
   --danger: #d0021b;
   --danger-rgb: 208 2 27;
+  --ti-section-rule: var(--danger);
   --danger-foreground: #ffffff;
   --ink-solid-rgb: 35 38 43;
   --ink-alpha: 0.94;
@@ -10293,7 +10294,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header::before {
-  background: rgb(var(--danger-rgb) / 0.085);
+  background: var(--ti-section-rule);
   content: "";
   height: var(--threat-intelligence-section-rule-height);
   left: 0;
