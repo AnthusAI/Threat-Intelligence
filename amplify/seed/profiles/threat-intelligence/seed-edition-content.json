@@ -296,6 +296,200 @@
       ]
     },
     {
+      "slug": "audit-azure-blast-radius-before-attackers-do",
+      "shortSlug": "AZURE",
+      "section": "Azure",
+      "headline": "Audit Your Azure Blast Radius Before Attackers Do",
+      "deck": "Azure exposure is an identity problem before it is a resource problem. Teams need to know who can sign in, who can elevate, what workloads can reach, what data is sensitive, and which paths turn one compromise into many.",
+      "excerpt": "Do not wait for automated attackers to map your Azure tenant for you. Start with Entra identities, Azure RBAC, subscriptions, storage, keys, apps, workload identities, and Defender for Cloud findings, then reduce the paths where exposed resources, sensitive data, and broad privilege overlap.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AZURE",
+      "image": {
+        "src": "/seed-art/threat-intelligence/azure-exposure-map.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/azure-exposure-map-dark.svg"
+          }
+        },
+        "alt": "An Azure exposure map showing Entra identities, subscriptions, sensitive data, and an attacker path crossing privilege boundaries.",
+        "caption": "Azure blast radius starts with identity paths, privilege, data, and reachability.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "Azure exposure is an identity problem before it is a resource problem.",
+        "The dangerous path is where privilege, reachability, and sensitive data meet."
+      ],
+      "body": [
+        "Audit your Azure blast radius before attackers do it for you. The same scarcity collapse that changes AWS risk changes Azure risk: attackers can now sustain tenant reconnaissance, role analysis, exposed-storage review, app-permission review, and path chaining with far less manual effort.",
+        "In Azure, exposure is an identity problem before it is a resource problem. A storage account, database, key vault, or subscription becomes more dangerous when the wrong user, group, service principal, managed identity, application, or external collaborator can reach it or elevate toward it.",
+        "Start with Entra ID. Know who can sign in, which accounts bypass normal controls, which groups grant administrative power, which external identities remain trusted, and which Conditional Access rules actually apply to privileged paths. Identity controls are the front door to the rest of the tenant.",
+        "Then look at privilege. Azure RBAC assignments, Entra roles, Privileged Identity Management eligibility, owner assignments, inherited permissions, management groups, and stale access reviews all shape how far one compromise can spread. Standing privilege should be treated as stored blast radius.",
+        "Workload identities deserve the same review. Service principals, app registrations, certificates, secrets, federated credentials, and managed identities can carry production authority without looking like human accounts. If one of them is overbroad, forgotten, or poorly monitored, an attacker may not need to phish an administrator.",
+        "Defender for Cloud can help turn this into an exposure program rather than a one-time inventory. Secure score, recommendations, attack paths, and data-aware posture signals are useful when they are tied to owners and remediation, not when they become another dashboard nobody is accountable for.",
+        "Data sensitivity changes priority. A permissive subscription matters more when it contains regulated data, high-value operational logs, key material, customer records, or storage that can be reached from broad identities. The practical question is not whether Azure has findings. It is which findings collapse into real impact.",
+        "What to check now: list the tenant paths where a compromised user, group, application, service principal, or managed identity could reach sensitive data or administrative scope.",
+        "What to check now: compare Defender for Cloud attack paths and high-impact recommendations against Entra roles, Azure RBAC assignments, storage exposure, key vault access, and known sensitive data locations.",
+        "What to check now: assign remediation by blast-radius category: identity exposure, standing privilege, workload identity exposure, public reachability, key access, sensitive data, and logging gaps."
+      ]
+    },
+    {
+      "slug": "make-azure-privilege-temporary",
+      "shortSlug": "PIM",
+      "section": "Azure",
+      "headline": "Make Azure Privilege Temporary",
+      "deck": "Standing privilege is blast radius waiting to be used. Azure teams should use Entra, PIM, access reviews, Conditional Access, and narrow RBAC scopes to make powerful access explicit, temporary, reviewed, and logged.",
+      "excerpt": "The question is not only who has admin access today. It is who can activate it, from where, under what conditions, for how long, and whether anyone reviews that access before it becomes stale. Temporary privilege is one of the most practical ways to make Azure compromise harder to chain.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AZURE",
+      "pullQuotes": [
+        "Standing privilege is blast radius waiting to be used.",
+        "The privilege review should ask who can activate power, not only who currently holds it."
+      ],
+      "body": [
+        "The cleanest Azure privilege is the privilege that does not exist until it is needed. Standing administrative access gives attackers a durable target. Temporary, reviewed, conditional access makes compromise harder to chain.",
+        "Start by separating current access from activatable access. A user with no active admin role may still be eligible to activate one through Privileged Identity Management. That can be good if activation is deliberate, logged, time-bound, and protected. It can be dangerous if eligibility is broad, stale, or poorly reviewed.",
+        "Review Entra roles and Azure roles together. Global Administrator, Privileged Role Administrator, Owner, User Access Administrator, subscription-level Contributor, and inherited management-group permissions all shape blast radius. A narrow role at the right scope is usually safer than a broad role held for convenience.",
+        "Conditional Access should protect privileged paths. Require strong authentication, block risky sign-ins, limit where admin actions can originate, and treat break-glass accounts as exceptional assets with documented monitoring and testing. A break-glass account that quietly becomes daily access is not a safety net.",
+        "Access reviews keep old decisions from becoming current exposure. Review privileged users, groups, guest accounts, application owners, role-assignable groups, and administrative eligibility. If nobody can explain why access exists, it should expire or be reduced.",
+        "Workload identities need privilege hygiene too. Prefer managed identities where they fit. Avoid long-lived client secrets when certificate or federated patterns are available. Scope service principals to the smallest resource set that can do the job, and monitor changes to credentials and role assignments.",
+        "Privilege should have friction proportional to impact. Activation should require a reason, a short duration, approval where appropriate, strong authentication, and logs that a reviewer can actually use. The goal is not ceremony. The goal is making powerful access visible before it becomes attacker leverage.",
+        "What to check now: export privileged Entra role assignments, Azure RBAC assignments, PIM eligibility, and role-assignable groups, then identify access that is permanent, inherited, broad, or unreviewed.",
+        "What to check now: confirm Conditional Access protects administrator sign-ins and activation paths, including MFA or phishing-resistant authentication for privileged operations.",
+        "What to check now: review service principals and managed identities with high-impact roles. Remove stale credentials, reduce scope, and make owners accountable for each production identity."
+      ]
+    },
+    {
+      "slug": "find-sensitive-data-paths-in-azure",
+      "shortSlug": "DATA",
+      "section": "Azure",
+      "headline": "Find Sensitive Data Paths in Azure",
+      "deck": "Sensitive data is not just a catalog entry. It becomes risk when reachable identities, exposed workloads, weak storage controls, or lateral movement paths can get to it.",
+      "excerpt": "Use Purview, Defender for Cloud, Defender for Storage, storage inventory, labels, and attack-path context to find where sensitive Azure data lives and who or what can reach it. The useful output is not a prettier map. It is a prioritized list of data paths to close, narrow, monitor, or assign to an owner.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AZURE",
+      "pullQuotes": [
+        "Sensitive data becomes security risk when a reachable path leads to it.",
+        "The useful output is a remediation list, not a prettier catalog."
+      ],
+      "body": [
+        "Sensitive data discovery should answer an operational question: where can exposure become impact? A catalog of data locations is useful, but it is not enough unless it is connected to identities, networks, keys, owners, and attack paths.",
+        "Use Microsoft Purview and data classification to find likely sensitive information across the Azure data estate. Scans, labels, sensitive information types, and source metadata help teams avoid guessing where regulated or high-value data lives.",
+        "Then connect sensitivity to reachability. Storage accounts, containers, shares, databases, analytics workspaces, backups, exports, logs, and staging locations all deserve different urgency depending on who can read them, which workloads can reach them, and whether external or public paths exist.",
+        "Defender for Cloud and Defender for Storage can help prioritize data paths by combining posture findings, storage threat signals, malware scanning, sensitive-data context, and attack-path analysis. The value is in the combination: sensitive data plus a reachable path plus weak control deserves attention.",
+        "Storage access needs careful review. Public access, anonymous access, shared access signatures, storage account keys, cross-tenant collaboration, broad Azure RBAC assignments, permissive firewall rules, and missing private endpoints can all change the practical blast radius.",
+        "Key and secret paths matter too. Key Vault permissions, managed identities, storage encryption settings, app secrets, and automation accounts can decide whether sensitive data is merely present or actually reachable after compromise.",
+        "Ownership and retention keep findings from becoming permanent. Sensitive data without a named owner, expiration policy, business purpose, or remediation path is likely to sit until the next incident gives it a deadline.",
+        "What to check now: identify Azure storage and data services that likely contain customer, employee, authentication, financial, health, source-code, support, or regulated records.",
+        "What to check now: compare classification results against public access, network exposure, Azure RBAC scope, storage keys, SAS usage, Key Vault access, private endpoints, Defender findings, and attack paths.",
+        "What to check now: assign remediation where sensitive data and reachable access overlap. Close public paths, narrow roles, rotate exposed secrets, add monitoring, shorten retention, and name an owner for every high-risk data store."
+      ]
+    },
+    {
+      "slug": "treat-openai-accounts-like-production-infrastructure",
+      "shortSlug": "AI",
+      "section": "AI",
+      "headline": "Treat OpenAI Accounts Like Production Infrastructure",
+      "deck": "An OpenAI account can hold prompts, files, connectors, agents, API keys, service accounts, usage authority, and access to business systems. That makes account security an operational control, not a personal preference.",
+      "excerpt": "Secure OpenAI the way you would secure a production control plane. Use strong identity, managed workspace membership, scoped projects, service accounts, restricted keys, connector governance, logging, and review cycles so one compromised user, token, app, or project cannot quietly become organization-wide exposure.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AI",
+      "image": {
+        "src": "/seed-art/threat-intelligence/openai-account-control-plane.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/openai-account-control-plane-dark.svg"
+          }
+        },
+        "alt": "An OpenAI account control plane connected to projects, API keys, service accounts, files, connectors, and audit signals.",
+        "caption": "AI accounts become control planes when they connect identity, data, tools, and automation.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "An AI account is a control plane when it can reach data, tools, and spend.",
+        "One compromised token should not quietly become organization-wide exposure."
+      ],
+      "body": [
+        "Treat OpenAI accounts like production infrastructure. A modern AI account can hold prompts, uploaded files, connectors, agents, API keys, service accounts, usage authority, and access to business systems. That is not just a personal productivity surface.",
+        "The balance-of-power shift matters here too. Attackers can automate credential stuffing, phishing, token theft, OAuth abuse, leaked-secret discovery, and quiet usage of compromised accounts. Defenders need account controls that assume persistent, automated probing.",
+        "Start with identity. Require MFA or phishing-resistant authentication where available, use passkeys and Advanced Account Security where they fit, and make SSO and SCIM part of the operating model for business workspaces. Manual membership lists age quickly.",
+        "Then review roles. Workspace owners, admins, members, readers, project owners, service accounts, and API administrators have different blast radii. Use the least powerful role that can do the job, and make ownership visible enough that access can be reviewed.",
+        "Projects should be security boundaries, not only billing folders. Separate production, development, experiments, client work, and personal testing where practical. A key or service account for one project should not casually inherit authority over unrelated work.",
+        "Connector and app governance matters because AI accounts increasingly reach outside the chat window. Files, company knowledge, cloud drives, calendars, code repositories, ticket systems, and custom actions can all widen the blast radius of a compromised session or overbroad permission grant.",
+        "Logging and review close the loop. Audit logs, usage review, key inventory, project ownership, connector inventory, and periodic access reviews turn account security from a one-time setup into an operational control.",
+        "What to check now: list workspace owners, admins, project owners, service accounts, API keys, connected apps, enabled connectors, uploaded knowledge sources, and high-spend projects.",
+        "What to check now: confirm strong authentication, SSO or managed membership where appropriate, role reviews, scoped projects, restricted keys, connector approvals, and audit visibility for administrative actions.",
+        "What to check now: decide what incident containment looks like. Know how to disable users, revoke keys, remove connected apps, pause risky projects, and review recent usage quickly."
+      ]
+    },
+    {
+      "slug": "shrink-openai-api-key-blast-radius",
+      "shortSlug": "KEYS",
+      "section": "AI",
+      "headline": "Shrink OpenAI API Key Blast Radius",
+      "deck": "API keys should not behave like master keys. Scope them to projects, restrict permissions, separate environments, monitor usage, and replace long-lived secrets with workload identity federation where practical.",
+      "excerpt": "OpenAI API security starts with the boring mechanics: separate projects, service accounts for automation, restricted key permissions, server-side secret storage, rotation, usage review, and clear ownership. For supported workloads, short-lived federated tokens reduce the damage a leaked static key can do.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AI",
+      "pullQuotes": [
+        "API keys should not behave like master keys.",
+        "A leaked key should expose one bounded workload, not the organization."
+      ],
+      "body": [
+        "API keys are small strings with large consequences. If a key can spend money, access models, read project resources, or power production workflows, then it deserves the same discipline as any other production secret.",
+        "Start with project separation. Keep production, development, experiments, demos, client work, and personal testing in different projects where practical. A key used by a prototype should not have a path into production usage or unrelated customer data.",
+        "Use service accounts for automation instead of tying long-running systems to personal user keys. A service account should have an owner, a project, a purpose, and a review cadence. If nobody owns it, nobody will notice when it becomes stale or overbroad.",
+        "Restrict permissions. Use read-only or limited permissions where possible, separate Admin API keys from application keys, and avoid creating a single all-purpose credential for every script, dashboard, and backend service.",
+        "Keep keys server-side. Do not place secret keys in browser code, mobile apps, public repositories, logs, analytics payloads, screenshots, shared notebooks, or client-side environment files. If users can inspect the runtime, assume they can extract the key.",
+        "Rotation should be boring and tested. Teams should know which service uses each key, how to replace it, how to revoke it, what usage pattern is normal, and what alert should fire when usage spikes or appears from the wrong environment.",
+        "Where supported, workload identity federation can reduce reliance on long-lived static keys by exchanging trusted workload identity for short-lived access. That does not remove the need for authorization review, but it changes the impact of a leaked secret.",
+        "What to check now: inventory OpenAI projects, API keys, service accounts, owners, permissions, environments, budgets, and usage patterns.",
+        "What to check now: remove unused keys, split shared keys by workload, restrict permissions, move secrets into server-side secret storage, and document the rotation path.",
+        "What to check now: build an incident action list for leaked keys: revoke, rotate, review usage, check logs, inspect repositories and deployment history, and identify which data or spending authority the key could reach."
+      ]
+    },
+    {
+      "slug": "control-chatgpt-workspace-access-and-connected-data",
+      "shortSlug": "APPS",
+      "section": "AI",
+      "headline": "Control ChatGPT Workspace Access and Connected Data",
+      "deck": "ChatGPT becomes more powerful as it connects to company knowledge, apps, agents, and workflows. That also means workspace admins must govern who can use which tools, what data they can reach, and what actions need approval.",
+      "excerpt": "Workspace security is more than inviting the right users. Review SSO and SCIM, role assignments, app access, connector scopes, action controls, approved domains, company-knowledge permissions, audit logs, and retention settings so connected AI does not inherit messy access without anyone noticing.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AI",
+      "pullQuotes": [
+        "Connected AI inherits the messiness of connected access.",
+        "Workspace security is not just who can log in; it is what the workspace can reach."
+      ],
+      "body": [
+        "ChatGPT workspace security is not only about who can open the chat window. The risk changes as the workspace connects to company knowledge, files, apps, actions, agents, and external systems.",
+        "Managed identity is the first layer. SSO and SCIM help keep membership aligned with employment, groups, and role changes. Without managed lifecycle controls, old users, stale guests, and informal admins can remain long after the business reason is gone.",
+        "Roles should match responsibility. Owners and admins can change the workspace in ways ordinary users cannot. Review who holds those roles, why they hold them, and whether they still need them. Administrative convenience is not a durable reason for broad access.",
+        "Connected data deserves its own review. Workspace knowledge, uploaded files, cloud-drive connectors, code repositories, calendars, tickets, and other apps can bring sensitive business context into AI workflows. The workspace should not become a shortcut around source-system permissions.",
+        "Connector and app controls should be deliberate. Decide which connectors are allowed, who can use them, what scopes they request, whether actions require approval, and which domains or external services are trusted enough for workspace use.",
+        "Source permissions still matter. If a connected system has messy sharing, ChatGPT may faithfully reflect that mess. A workspace security review should therefore include the underlying systems that provide files, tickets, documents, repositories, and company knowledge.",
+        "Auditability makes governance real. Admin events, connector changes, app access, workspace membership changes, retention settings, and unusual usage should be reviewable by someone who has the authority to act.",
+        "What to check now: list workspace owners, admins, groups, guests, enabled connectors, connected apps, action settings, approved domains, company knowledge sources, and retention settings.",
+        "What to check now: review source-system permissions for the most sensitive connected repositories, drives, ticket queues, and knowledge bases. Do not let AI access hide stale sharing.",
+        "What to check now: create a recurring workspace review that covers membership, roles, connectors, app scopes, logs, retention, and incident response for connected-data exposure."
+      ]
+    },
+    {
       "slug": "how-to-play-games-securely",
       "shortSlug": "GAME",
       "section": "Gaming",
