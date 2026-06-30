@@ -10308,7 +10308,7 @@ img {
   align-items: center;
   justify-self: center;
   background: var(--background);
-  color: rgb(var(--ink-rgb) / 0.86);
+  color: rgb(var(--ink-solid-rgb) / var(--ink-display-alpha));
   display: inline-flex;
   font-size: var(--threat-intelligence-section-rule-height);
   line-height: 1;
