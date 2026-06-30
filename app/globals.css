@@ -10475,7 +10475,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .front-footer--presentation .front-footer__brand-title {
-  color: var(--danger);
+  color: var(--ti-section-rule);
   display: block;
   font-family: var(--site-display-font);
   font-size: clamp(1.05rem, 2.2vw, 1.85rem);
