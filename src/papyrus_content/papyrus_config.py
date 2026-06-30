@@ -73,6 +73,10 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
     base_url = _optional_string(public_site.get("baseUrl"))
     if base_url:
         base_url = normalize_public_site_base_url(base_url)
+    reader_cache = raw_config.get("readerCache") or {}
+    if reader_cache is not None and not isinstance(reader_cache, dict):
+        raise ValueError("Papyrus config readerCache must be an object.")
+    reader_cache = reader_cache if isinstance(reader_cache, dict) else {}
     return {
         "configPath": config_path,
         "schemaVersion": 1,
@@ -83,6 +87,9 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
         },
         "publicSite": {
             "baseUrl": base_url,
+        },
+        "readerCache": {
+            "revalidateSecret": _optional_string(reader_cache.get("revalidateSecret")),
         },
     }
 
@@ -129,6 +136,25 @@ def resolve_public_site_base_url() -> str:
         if configured:
             return configured
     return DEFAULT_PUBLIC_SITE_BASE_URL
+
+
+def resolve_reader_cache_revalidate_secret() -> str | None:
+    env_value = str(os.environ.get("PAPYRUS_REVALIDATE_SECRET") or "").strip()
+    if env_value:
+        return env_value
+    config = load_papyrus_config()
+    if config:
+        configured = str((config.get("readerCache") or {}).get("revalidateSecret") or "").strip()
+        if configured:
+            return configured
+    return None
+
+
+def resolve_reader_revalidation_base_url() -> str:
+    env_value = str(os.environ.get("PAPYRUS_BASE_URL") or "").strip().rstrip("/")
+    if env_value:
+        return env_value
+    return resolve_public_site_base_url().rstrip("/")
 
 
 def build_newsroom_reference_public_url(

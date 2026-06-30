@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
 import { getEditionSectionPath } from "../lib/edition-routes";
 import { shouldBypassImageOptimization } from "../lib/image-url";
+import { resolveThemedImageSrc } from "../lib/themed-image";
 import { layoutAllTextLines, prepareWithSegments, type TextLine } from "../lib/pretext-layout";
 import { truncateWords } from "../lib/excerpts";
 import {
@@ -19,6 +20,8 @@ import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
 import { ReaderAuthControl } from "./reader-auth-control";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
+import { ReaderThemeControl } from "./reader-theme-control";
+import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 
 type PresentationShellProps = {
   content: EditionContent;
@@ -230,6 +233,7 @@ function PresentationFooter({
         </nav>
       ) : null}
       <div className="front-footer__utilities" aria-label="Publication utilities">
+        {!disableLinks ? <ReaderThemeControl className="front-footer__theme-control" /> : null}
         {utilityEntries.map((entry) => {
           if (entry.id === "newsDesk" && disableLinks) return null;
 
@@ -403,7 +407,9 @@ function PresentationItem({
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const maxWidth = useMeasuredWidth(frameRef);
+  const resolvedTheme = useResolvedPapyrusTheme();
   const image = getPublicationItemImageAssets(item)[0];
+  const imageSrc = image ? resolveThemedImageSrc(image.src, image.themeVariants, resolvedTheme) : null;
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
   const lines = useMemo(() => {
@@ -426,34 +432,62 @@ function PresentationItem({
       data-has-image={image ? "true" : "false"}
       id={item.slug}
     >
-      <header className="presentation-item__header">
-        <p>{item.section ?? "General"}</p>
-        <h2>
-          <Link href={directHref}>{getPresentationTitle(item)}</Link>
-        </h2>
-        {item.deck ? <span>{item.deck}</span> : null}
+      <div className="presentation-item__copy">
+        <header className="presentation-item__header">
+          <p>{item.section ?? "General"}</p>
+          <h2>
+            <Link href={directHref}>{getPresentationTitle(item)}</Link>
+          </h2>
+          {item.deck ? <span>{item.deck}</span> : null}
+        </header>
+        <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
+          <MeasuredPresentationLines lines={lines} />
+        </div>
         {mode === "blog" ? (
           <Link className="presentation-item__cta" href={directHref}>
             Read Article
           </Link>
         ) : null}
-      </header>
+      </div>
       {image ? (
         <figure className="presentation-item__image">
-          <Image
-            src={image.src}
-            alt={image.alt}
-            width={1200}
-            height={760}
-            sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
-            unoptimized={shouldBypassImageOptimization(image.src)}
-          />
+          {image.themeVariants?.dark?.src ? (
+            <div className="presentation-item__theme-image-stack">
+              <Image
+                className="presentation-item__theme-image presentation-item__theme-image--light"
+                src={image.src}
+                alt={image.alt}
+                width={1200}
+                height={760}
+                sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+                priority={index === 0}
+                unoptimized={shouldBypassImageOptimization(image.src)}
+              />
+              <Image
+                className="presentation-item__theme-image presentation-item__theme-image--dark"
+                src={image.themeVariants.dark.src}
+                alt={image.alt}
+                width={1200}
+                height={760}
+                sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+                priority={index === 0}
+                unoptimized={shouldBypassImageOptimization(image.themeVariants.dark.src)}
+              />
+            </div>
+          ) : (
+            <Image
+              src={imageSrc ?? image.src}
+              alt={image.alt}
+              width={1200}
+              height={760}
+              sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+              priority={index === 0}
+              unoptimized={shouldBypassImageOptimization(imageSrc ?? image.src)}
+            />
+          )}
           <figcaption>{image.caption ?? image.credit}</figcaption>
         </figure>
       ) : null}
-      <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
-        <MeasuredPresentationLines lines={lines} />
-      </div>
     </article>
   );
 }

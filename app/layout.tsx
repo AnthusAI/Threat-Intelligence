@@ -19,7 +19,7 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 const faviconVersion = "20260517-1";
-const defaultTheme = SITE_BRAND.id === "threat-intelligence" ? "light" : "system";
+const defaultTheme = "system";
 
 export const metadata: Metadata = {
   title: SITE_BRAND.appTitle,
@@ -38,6 +38,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html
       lang="en"
+      className="light light-theme"
       data-papyrus-theme={defaultTheme}
       data-site-brand={SITE_BRAND.id}
       data-default-presentation={SITE_BRAND.defaultPresentation}
@@ -85,10 +86,18 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     }
   };
   const isDarkTheme = (theme) => theme === "dark" || (theme === "system" && media.matches);
+  const applyThemeClass = (theme) => {
+    const isDark = isDarkTheme(theme);
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("dark-theme", isDark);
+    document.documentElement.classList.toggle("light", !isDark);
+    document.documentElement.classList.toggle("light-theme", !isDark);
+    return isDark;
+  };
   const apply = () => {
     const theme = readTheme();
     document.documentElement.dataset.papyrusTheme = theme;
-    const isDark = isDarkTheme(theme);
+    const isDark = applyThemeClass(theme);
     const nextHref = isDark ? darkHref : lightHref;
     if (iconLink.getAttribute("href") !== nextHref) {
       iconLink.setAttribute("href", nextHref);

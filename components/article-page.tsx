@@ -1,9 +1,13 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import type { Article } from "../lib/articles";
+import type { Article, ArticleImage } from "../lib/articles";
 import { shouldBypassImageOptimization } from "../lib/image-url";
 import type { PublicationItem } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
+import { resolveThemedImageSrc } from "../lib/themed-image";
+import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 
 type ArticlePageViewProps = {
   article: Article;
@@ -30,15 +34,7 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
         </header>
         {article.image ? (
           <figure className="article-photo">
-            <Image
-              src={article.image.src}
-              alt={article.image.alt}
-              width={1200}
-              height={680}
-              sizes="(max-width: 980px) 100vw, 900px"
-              priority
-              unoptimized={shouldBypassImageOptimization(article.image.src)}
-            />
+            <ArticlePhotoImage image={article.image} />
             <figcaption>{article.image.caption ?? article.image.credit}</figcaption>
           </figure>
         ) : null}
@@ -75,15 +71,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition" }: 
         </header>
         {item.image ? (
           <figure className="article-photo">
-            <Image
-              src={item.image.src}
-              alt={item.image.alt}
-              width={1200}
-              height={680}
-              sizes="(max-width: 980px) 100vw, 900px"
-              priority
-              unoptimized={shouldBypassImageOptimization(item.image.src)}
-            />
+            <ArticlePhotoImage image={item.image} />
             <figcaption>{item.image.caption ?? item.image.credit}</figcaption>
           </figure>
         ) : null}
@@ -94,5 +82,51 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition" }: 
         </div>
       </article>
     </main>
+  );
+}
+
+function ArticlePhotoImage({ image }: { image: ArticleImage }) {
+  const resolvedTheme = useResolvedPapyrusTheme();
+  const imageSrc = resolveThemedImageSrc(image.src, image.themeVariants, resolvedTheme);
+  const darkSrc = image.themeVariants?.dark?.src;
+
+  if (darkSrc) {
+    return (
+      <div className="article-photo__theme-image-stack">
+        <Image
+          className="article-photo__theme-image article-photo__theme-image--light"
+          src={image.src}
+          alt={image.alt}
+          width={1200}
+          height={680}
+          sizes="(max-width: 980px) 100vw, 900px"
+          priority
+          unoptimized={shouldBypassImageOptimization(image.src)}
+        />
+        <Image
+          className="article-photo__theme-image article-photo__theme-image--dark"
+          src={darkSrc}
+          alt={image.alt}
+          width={1200}
+          height={680}
+          sizes="(max-width: 980px) 100vw, 900px"
+          priority
+          unoptimized={shouldBypassImageOptimization(darkSrc)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <Image
+      key={imageSrc}
+      src={imageSrc}
+      alt={image.alt}
+      width={1200}
+      height={680}
+      sizes="(max-width: 980px) 100vw, 900px"
+      priority
+      unoptimized={shouldBypassImageOptimization(imageSrc)}
+    />
   );
 }

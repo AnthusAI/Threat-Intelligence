@@ -4,7 +4,7 @@
   "slug": "current",
   "title": "Anthus Threat Intelligence",
   "description": "Practical AI/ML security analysis from Anthus AI Solutions.",
-  "publishDate": "2026-06-28",
+  "publishDate": "2026-07-04",
   "suppressNewsDeskAppendix": true,
   "articles": [
     {
@@ -12,12 +12,17 @@
       "shortSlug": "BALANCE",
       "section": "Mission",
       "headline": "The Balance of Power Is Shifting",
-      "deck": "AI weakens the old defensive assumption that only nation-state-level actors can bring scale, patience, and advanced tradecraft to ordinary targets.",
-      "excerpt": "Treat AI as a force multiplier for ordinary attackers, not a magic upgrade to elite status. Controls that relied on obscurity, friction, or attacker fatigue need a fresh threat model, because more adversaries can now sustain the work required to break them.",
+      "deck": "AI weakens the old defensive assumption that only nation-state-level actors can bring scale, patience, and advanced tradecraft to ordinary targets. Defenders need to revisit controls that were tolerated because capable attackers were assumed to be rare.",
+      "excerpt": "Treat AI as a force multiplier for ordinary attackers, not a magic upgrade to elite status. Controls that relied on obscurity, friction, or attacker fatigue need a fresh threat model, because more adversaries can now sustain the work required to break them. The important shift is capability diffusion: cheaper reconnaissance, faster variation, better translation, and more patient automation make old assumptions about who can exploit a weakness much less reliable.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "image": {
         "src": "/seed-art/threat-intelligence/balance-shift.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/balance-shift-dark.svg"
+          }
+        },
         "alt": "A tilted balance beam showing many smaller attacker nodes outweighing a single larger capability source.",
         "caption": "Capability is becoming less scarce, changing who defenders must plan for.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -52,8 +57,8 @@
       "shortSlug": "DATA",
       "section": "Mission",
       "headline": "The New Sensitive Data Estate",
-      "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces.",
-      "excerpt": "Secure AI work by inventorying what each artifact can reveal, not just where the original data lived. Training byproducts, logs, notebooks, embeddings, and evaluations often become concentrated records of customers, business logic, failures, and operational judgment.",
+      "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces. Each artifact can reveal customer data, business logic, model behavior, or operational judgment even when it does not look like a traditional sensitive database.",
+      "excerpt": "Secure AI work by inventorying what each artifact can reveal, not just where the original data lived. Training byproducts, logs, notebooks, embeddings, and evaluations often become concentrated records of customers, business logic, failures, and operational judgment. The sensitive estate now includes caches, exports, review queues, traces, and model-adjacent working files that may never look like official databases but can still expose the organization when copied, searched, or retained too long.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -78,8 +83,8 @@
       "shortSlug": "CHECKS",
       "section": "Mission",
       "headline": "From Lessons Learned to Defenses Checked",
-      "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run.",
-      "excerpt": "Good threat intelligence should leave teams with something to inspect, not just something to remember. Use each reported failure to tighten a habit, verify a control, or challenge an assumption before the same weakness shows up in your own AI and security environment.",
+      "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run, habits they can tighten, and assumptions they can challenge before the same weakness appears in their own environment.",
+      "excerpt": "Good threat intelligence should leave teams with something to inspect, not just something to remember. Use each reported failure to tighten a habit, verify a control, or challenge an assumption before the same weakness shows up in your own AI and security environment. The point is to turn incidents, research notes, and near misses into concrete checks that can be assigned, repeated, and reviewed before the lesson becomes personal.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -99,16 +104,116 @@
       ]
     },
     {
-      "slug": "audit-s3-risk-exposure-with-macie",
+      "slug": "how-our-newsroom-learns",
+      "shortSlug": "LEARN",
+      "section": "Newsroom",
+      "headline": "How Our Newsroom Learns",
+      "deck": "Attackers are using tireless automation to expand what they can do. Defenders need the same persistence applied to evidence, trend analysis, and practical guidance, with expert judgment steering what matters and AI doing the patient work of watching patterns emerge.",
+      "excerpt": "Our newsroom uses continuous AI-assisted research, expert steering, and a growing threat-intelligence knowledge base to turn noisy security signals into practical advice defenders can act on. The goal is not more content for its own sake. It is a defender-side learning system that watches patterns, preserves evidence, compares new signals against past work, and gives seasoned security judgment a persistent operating surface.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "NEWSROOM",
+      "image": {
+        "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline-dark.svg"
+          }
+        },
+        "alt": "A continuous newsroom pipeline connecting expert steering, AI research loops, a knowledge graph, and practical security guidance.",
+        "caption": "A continuous intelligence pipeline turns research signals into practical defensive guidance.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
+      "pullQuotes": [
+        "If attackers get tireless automation, defenders need tireless analysis.",
+        "The newsroom is a defensive system for turning noise into checks."
+      ],
+      "body": [
+        "The balance of power is shifting because attacker capability is becoming less scarce. Reconnaissance, translation, variant generation, target profiling, workflow mapping, and patient repetition are getting cheaper. That does not only change how defenders should secure systems. It changes how defenders should learn.",
+        "A security team that reads occasional reports is competing against adversaries that can keep watching. A publication that waits for obvious incidents is competing against automated discovery, automated testing, and criminal operators willing to run the same playbook until a path opens. Defenders need their own form of persistence.",
+        "Our newsroom is built around that problem. Seasoned information-security experts set the direction: what matters, what is credible, what deserves caution, and what kind of advice would help a real operator. AI systems handle much of the patient work: watching signals, gathering context, comparing sources, surfacing patterns, and preparing structured material for review.",
+        "Papyrus is the CMS and workflow system that supports this newsroom, but the important idea is broader than the software: a defender-side intelligence operation should accumulate memory, preserve evidence, and turn continuous research into decisions that a human can inspect.",
+        "The goal is not to publish more words. The goal is to keep learning between articles. Each source, research packet, trend, entity, relationship, and editorial decision should make the next cycle smarter. The newsroom should know what it has already seen, what it trusts, where the gaps are, and which checks have become more urgent.",
+        "That is where AI is useful when it is constrained by expert steering. It can work through repetitive comparisons, maintain long-running research tracks, notice weak signals, and prepare evidence for human judgment. It can be ever-persistent without being the authority.",
+        "The defensive output has to stay practical. A trend matters when it changes what a team should inspect. A technique matters when it changes a control assumption. A new attacker capability matters when it expands the set of viable threat actors or lowers the cost of a campaign.",
+        "What to check now: ask whether your own security learning process has the same persistence you assume attackers now have. If your threat model changed because of AI, your intelligence workflow probably needs to change too.",
+        "What to check now: separate expert judgment from repetitive labor. Humans should decide priority, credibility, and action. Automated systems should help maintain memory, find relationships, compare signals, and prepare the next useful question.",
+        "This publication is one example of that adjustment. It uses AI not as a shortcut around expertise, but as a way to give expertise a continuous working surface. The promise is practical advice that is grounded, current, and easier to act on before the lesson becomes personal."
+      ]
+    },
+    {
+      "slug": "the-knowledge-base-beneath-the-newsroom",
+      "shortSlug": "MEMORY",
+      "section": "Newsroom",
+      "headline": "The Knowledge Base Beneath the Newsroom",
+      "deck": "A useful AI newsroom needs memory: curated sources, extracted entities, semantic relationships, and graph structure that can be searched, compared, and improved over time. That memory lets new research inherit context instead of starting every assignment from scratch.",
+      "excerpt": "The newsroom does not start from a blank prompt. It builds from accepted references, source trails, extracted entities, ontology relationships, and graph structure that help new research inherit what earlier work already established. That memory lets the system connect actors, tools, services, controls, assets, and recurring failure modes over time, so each assignment can begin with accumulated context instead of rediscovering the same background again.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "NEWSROOM",
+      "pullQuotes": [
+        "The knowledge base is the newsroom's working memory.",
+        "A graph lets new research inherit old context."
+      ],
+      "body": [
+        "A newsroom that uses AI well cannot treat every assignment as a blank prompt. Threat intelligence depends on continuity. Sources need provenance. Claims need context. Actors, tools, techniques, cloud services, data types, controls, and failure modes need to be connected across time.",
+        "The knowledge base is the newsroom's working memory. It starts with accepted references and source trails, not anonymous summaries. Human curation decides what belongs in that memory, what needs caution, and what should stay outside the trusted record.",
+        "Once material is accepted, it becomes more useful when it can be searched and related. Entity extraction identifies the people, organizations, products, services, techniques, vulnerabilities, assets, and controls that matter. Relationship extraction records how those entities interact: exploits target systems, services store data, controls reduce risks, and attacker behaviors repeat across incidents.",
+        "The semantic ontology gives that graph a shape. It helps distinguish an attacker from a tool, a tool from a technique, a technique from a control failure, and a control failure from a check readers can run. That structure matters because similar words are not always similar risks.",
+        "A semantic knowledge graph can then support algorithms that are difficult to run against a pile of articles. The newsroom can cluster related incidents, find repeated control failures, compare new evidence against known patterns, identify coverage gaps, and surface topics that are becoming more connected over time.",
+        "This does not remove editorial judgment. It gives judgment better instruments. A graph can suggest that two incidents rhyme, but an editor still decides whether the comparison is useful. A similarity score can find related material, but a reviewer still decides whether the source belongs in the trusted base.",
+        "The practical benefit is continuity. A reporter researching a new attack technique should be able to inherit prior context about related actors, exposed assets, defensive controls, and unresolved questions. A copywriter should be able to see the accepted evidence behind a claim. A future trend analysis should know which signals were already reviewed.",
+        "What to check now: look for security processes that depend on memory stored only in chat, inboxes, notebooks, or individual people. If a lesson cannot be retrieved, related, and reviewed, it will be hard to reuse when the pattern returns.",
+        "What to check now: treat source curation as security work. The quality of an AI-assisted intelligence system depends less on how fluent the model sounds and more on what evidence it is allowed to use."
+      ]
+    },
+    {
+      "slug": "from-signals-to-practical-advice",
+      "shortSlug": "PIPELINE",
+      "section": "Newsroom",
+      "headline": "From Signals to Practical Advice",
+      "deck": "The goal is not more content. The goal is a pipeline that turns persistent research and trend detection into guidance security teams can actually use, while preserving source trails, uncertainty, risk flags, and the practical reason a topic deserves attention.",
+      "excerpt": "Researcher, reporter, and copywriter agents each handle different parts of the work, while expert steering keeps the system focused on operational risk instead of novelty, volume, or generic AI summaries. The pipeline matters because each handoff preserves source trails, open questions, risk flags, and practical implications, making the final advice easier to audit and more likely to change what a security team checks next.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "NEWSROOM",
+      "pullQuotes": [
+        "The handoffs matter as much as the models.",
+        "Every stage should make the final advice more accountable."
+      ],
+      "body": [
+        "A continuous newsroom needs a pipeline, not a single magic prompt. Different kinds of work require different constraints. Finding sources is not the same as reporting a trend. Reporting a trend is not the same as drafting reader-facing guidance. Drafting guidance is not the same as deciding whether it should be published.",
+        "Researcher agents do the early legwork. They can monitor a beat, search for source material, compare new signals against the knowledge base, and prepare candidate evidence. Their job is breadth, persistence, and orientation.",
+        "Reporter agents turn selected research into structured context. A useful reporting packet should identify the angle, source trail, accepted evidence, open questions, risk flags, coverage gaps, and the practical reason the topic matters. It should make uncertainty visible instead of hiding it in confident prose.",
+        "Copywriter agents work from that selected packet. Their job is not to invent the story. Their job is to turn approved evidence and editorial direction into clear copy that a reader can scan, understand, and apply.",
+        "Expert steering runs through the whole process. Experienced security judgment decides which trends deserve attention, which sources are credible, which claims need restraint, and which recommendations are concrete enough to help a team operate.",
+        "Trend analysis connects the stages. A weak signal may not deserve an article today, but it may become meaningful when it repeats across services, industries, attacker groups, or control failures. The pipeline should preserve those signals so the newsroom can notice when they start to form a pattern.",
+        "The final output should be practical advice. That means more than explaining what happened. It means identifying what assumption changed, what asset class is affected, what control deserves review, and what a defender can check now.",
+        "What to check now: inspect AI-assisted workflows for structured handoffs. If research, reporting, drafting, and review all collapse into one conversational thread, evidence and uncertainty will be harder to audit.",
+        "What to check now: measure the pipeline by the quality of the resulting decisions. More summaries are not the goal. Better prioritization, better checks, and better continuity are the goal."
+      ]
+    },
+    {
+      "slug": "audit-aws-exposure-before-attackers-do",
       "shortSlug": "AWS",
       "section": "AWS",
-      "headline": "Audit S3 Risk Exposure With Macie",
-      "deck": "Amazon Macie gives defenders a practical way to find sensitive data in S3 and compare that sensitivity against bucket exposure.",
-      "excerpt": "Start your S3 review with the data, not the bucket list. Macie helps surface where sensitive content intersects with weak access boundaries, cross-account sharing, or encryption gaps so remediation follows real exposure instead of naming conventions or stale ownership assumptions.",
+      "headline": "Audit Your Exposure Before Attackers Do",
+      "deck": "AWS teams need to know what is exposed, what is sensitive, who can reach it, who can decrypt it, and how far compromise can spread. That review has to happen continuously, before attackers map the same paths and chain them into impact.",
+      "excerpt": "Old security habits that depended on attacker scarcity no longer hold. Defenders now need continuous AWS exposure review so known gaps do not stay open simply because nobody looked this month. The practical question is whether your team can identify what is exposed, what is sensitive, who can reach it, who can decrypt it, and how far compromise can spread before an automated attacker answers those questions first.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "image": {
         "src": "/seed-art/threat-intelligence/s3-exposure-map.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/s3-exposure-map-dark.svg"
+          }
+        },
         "alt": "A storage map with bucket icons, red sensitivity hotspots, and an exposure path.",
         "caption": "Sensitive-data discovery turns an S3 inventory into an exposure map.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -122,20 +227,72 @@
         }
       },
       "pullQuotes": [
-        "Exposure is not only who can reach a bucket. It is what that bucket contains.",
-        "A sensitive-data map turns storage inventory into a risk conversation."
+        "Audit your own blast radius before attackers do it for you.",
+        "Known exposure is no longer slow-burn risk. It is reachable attack surface."
       ],
       "body": [
-        "S3 risk is easy to underestimate because the inventory looks familiar: bucket names, regions, object counts, encryption settings, public-access controls, lifecycle rules, and account ownership. Those details matter, but they do not answer the question that decides urgency: what sensitive data is actually sitting there?",
-        "Amazon Macie is useful because it connects two views defenders too often review separately. It can discover sensitive data in S3 objects using managed identifiers, custom identifiers, and pattern matching. It also evaluates bucket-level security and access context, including signals such as public accessibility, encryption posture, and sharing outside the organization.",
-        "That combination turns an S3 review from a settings audit into an exposure audit. A public bucket with harmless website assets is one problem. A broadly shared bucket with payroll exports, customer identifiers, access logs, support transcripts, or AI training data is a different problem. Macie helps teams sort the storage estate by actual blast radius instead of by bucket name or owner memory.",
-        "The right first use is not to admire the dashboard. Turn on automated sensitive-data discovery where appropriate, confirm the AWS Regions and accounts in scope, and use the resulting inventory to build a ranked remediation list. Sensitive buckets with weak access boundaries, missing encryption, unclear ownership, or cross-account sharing deserve attention before tidy but low-value storage.",
-        "Macie's S3 buckets map can make that conversation easier because it gives teams a visual way to compare sensitivity across the S3 estate. The map is not a substitute for evidence review, but it is a useful starting point for asking why certain accounts or buckets are hotter than expected and whether current controls match the data they hold.",
-        "What to check now: enable Macie deliberately, not casually. Decide which account administers Macie for the organization, which Regions are in scope, and which buckets should be analyzed first. Automated discovery is regional, so a single enabled Region does not prove the estate has been reviewed.",
-        "What to check now: review coverage gaps. If Macie cannot analyze particular buckets or objects because of restrictive policies, unsupported object types, encryption constraints, or scope decisions, record those gaps as audit findings. Unknown is not clean.",
-        "What to check now: tune what counts as sensitive. Managed identifiers are a strong default, but many organizations need custom data identifiers for account numbers, internal case IDs, project names, model artifacts, or business-specific records. Use allow lists to reduce noise without hiding real exposure.",
-        "What to check now: connect findings to action. A sensitive-data finding should create an owner, a classification decision, an access-control review, and a retention decision. Publishing findings into Security Hub or EventBridge can help if someone is accountable for the queue.",
-        "Macie will not fix data governance by itself. It will, however, make a common defense failure harder to sustain: believing an S3 estate is low risk because no one has looked inside it. The audit begins when storage exposure and data sensitivity are reviewed together."
+        "Audit your own AWS blast radius before attackers do it for you. That is the practical cloud-security lesson of the shifting threat landscape: attackers can scale reconnaissance, permission analysis, data discovery, and attack chaining faster than many teams scale review cycles.",
+        "A backlog of known exposure is no longer a slow-burn risk. It is reachable attack surface. The old comfort that a weakness was obscure, inconvenient to find, or unlikely to attract a capable actor depends on attacker scarcity. That assumption is breaking down.",
+        "AWS teams should continuously answer five questions: what is exposed, what is sensitive, who can reach it, who can decrypt it, and how far compromise can spread. Those questions cut across storage, identity, networking, logging, key management, backups, and service-to-service access.",
+        "The native AWS control set is useful because it can turn those questions into repeatable signals. Some tools inspect data sensitivity. Some detect suspicious behavior. Some check drift from policy. Some expose unintended access. Some reconstruct what happened after a finding. The point is not the brand name of any one service. The point is building a habit of continuous exposure reduction.",
+        "Amazon Macie belongs in that program when S3-sensitive-data discovery matters, but it should not be the whole frame. A low-risk bucket, an overbroad KMS policy, a stale cross-account role, an unreviewed snapshot, and a noisy GuardDuty finding are different signals in the same operating problem: where could an attacker create impact quickly?",
+        "The practical objective is prioritized remediation. Fix first what combines sensitive data, broad reachability, weak identity boundaries, permissive keys, and poor observability. Use findings to assign owners, tighten least privilege, reduce unnecessary sharing, and contain blast radius before the next campaign tests the same path.",
+        "What to check now: inventory your highest-impact AWS exposure questions and make sure each one has a continuous signal source, not a one-time audit. If the question is important, it should have an owner, a cadence, and an alert path.",
+        "What to check now: treat known security gaps as time-sensitive debt. If a control is known to be weak, track how long it stays weak and who can close it. Scarcity-based assumptions are no longer a safe excuse for delay."
+      ]
+    },
+    {
+      "slug": "build-the-aws-exposure-control-stack",
+      "shortSlug": "STACK",
+      "section": "AWS",
+      "headline": "Build the AWS Exposure Control Stack",
+      "deck": "AWS risk reduction depends on complementary signals: data sensitivity, suspicious behavior, drift, findings triage, investigation, key activity, and unintended access. The stack works when those signals are tied to owners, response paths, and blast-radius decisions.",
+      "excerpt": "No single AWS service answers the whole exposure question. The stronger pattern is a layered control stack where each tool tells defenders something different about reachability, sensitivity, behavior, and blast radius. Macie, GuardDuty, Config, Security Hub, Detective, CloudTrail, CloudWatch, and IAM Access Analyzer each cover a different signal, and the defensive value comes from turning those signals into owned review and remediation paths.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AWS",
+      "pullQuotes": [
+        "No single service is the full answer; coverage comes from the stack.",
+        "Layered controls turn isolated findings into operational defense."
+      ],
+      "body": [
+        "A common mistake is treating AWS security tooling as a service catalog. For exposure reduction, the better question is operational: which signals tell us what an attacker could reach, abuse, decrypt, or chain?",
+        "For sensitive data, Macie can identify sensitive content in S3 and help compare data sensitivity against bucket exposure. That answers one important question, but only one.",
+        "For suspicious behavior, GuardDuty can surface threat signals, including S3-related activity. It helps defenders notice when exposure is not just theoretical.",
+        "For drift and compliance, AWS Config can check whether resources and permissions still match policy. It helps catch the quiet changes that turn a controlled environment into a permissive one.",
+        "For findings prioritization, Security Hub can centralize and normalize signals from AWS services and partner tools. It helps teams avoid treating every alert as equal.",
+        "For investigation, Amazon Detective can help reconstruct related activity after a finding fires. It helps answer how a risk developed, not just that a risk exists.",
+        "For key and control-plane activity, CloudTrail plus CloudWatch can show what KMS and administrative operations are happening and which patterns deserve attention.",
+        "For unintended access, IAM Access Analyzer can identify policies and grants that expose resources across accounts or publicly, including key-management paths that can change the real blast radius of sensitive data.",
+        "What to check now: map each layer to one exposure question and one owner. If a service has no clear question and no accountable owner, it becomes dashboard noise.",
+        "What to check now: connect services through routing and response paths. High-severity findings should reach a queue with ownership, deadlines, and closure criteria.",
+        "What to check now: review the stack by blast-radius category. Data exposure, identity exposure, key exposure, public reachability, and detection gaps should all have visible coverage."
+      ]
+    },
+    {
+      "slug": "find-pii-risk-in-s3-buckets",
+      "shortSlug": "S3PII",
+      "section": "AWS",
+      "headline": "Find PII Risk in Your S3 Buckets",
+      "deck": "Start with the basic question: which S3 buckets contain PII, and which of those buckets create real exposure because of access, sharing, encryption, retention, ownership, or unclear remediation paths?",
+      "excerpt": "Sensitive data discovery is useful only when it changes decisions. Use S3 bucket inventory and Macie findings to identify likely PII, then combine those findings with public access, cross-account access, broad roles, KMS policy exposure, weak ownership, and unclear retention. The priority is not to produce a perfect catalog. It is to find the buckets where sensitive content and reachable access overlap, then assign remediation before attackers map the same risk.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "AWS",
+      "pullQuotes": [
+        "Sensitive data discovery becomes security work only when it changes access, retention, ownership, or remediation decisions.",
+        "The risky bucket is the one where sensitive content and reachable access overlap."
+      ],
+      "body": [
+        "Start with the basic question: which S3 buckets contain PII that would create risk if the wrong person, role, workload, or outside account could reach it?",
+        "A useful S3 review begins with inventory and scope. List the buckets that matter, identify owners, separate production data from exports and test data, and decide whether you need broad automated discovery, targeted discovery jobs, or both.",
+        "Macie is useful here because it can analyze S3 objects for sensitive data patterns and produce findings that help teams identify where likely PII exists. Those findings should be treated as security leads, not as a final answer.",
+        "Coverage matters. Review which buckets and objects were analyzed, which were skipped or unsupported, and whether sampling, object type, encryption, permissions, or account boundaries left gaps. A clean-looking report is not useful if the riskiest data was outside the analysis path.",
+        "The next step is to combine sensitivity with exposure. A bucket containing PII deserves different urgency if it is public, shared across accounts, reachable through broad roles, protected by loose KMS policies, owned by no clear team, retained longer than necessary, or missing logging and alerting.",
+        "Prioritize the overlap. A bucket with sensitive content and reachable access should move ahead of a bucket that is sensitive but tightly owned, tightly scoped, and monitored. The point is not inventory hygiene. The point is reducing blast radius where compromise could turn into data loss quickly.",
+        "Remediation should be assigned like operational work. Tighten bucket and access-point policies, remove stale grants, narrow roles, review KMS key policies, add or confirm logging, apply retention rules, and make ownership visible enough that findings do not sit unresolved.",
+        "What to check now: list S3 buckets that are likely to contain customer, employee, financial, authentication, health, support, or regulated records.",
+        "What to check now: compare Macie findings against public access, cross-account access, IAM role breadth, KMS policy scope, logging, retention, and named ownership.",
+        "What to check now: create remediation tickets for the buckets where sensitive content and reachable access overlap, then track them by owner and deadline.",
+        "S3 discovery is not full-estate PII discovery, but it is the right place to build the habit: find sensitive data, understand who can reach it, and reduce the blast radius before an attacker does the same review."
       ]
     },
     {
@@ -143,12 +300,17 @@
       "shortSlug": "GAME",
       "section": "Gaming",
       "headline": "How to Play Games Securely",
-      "deck": "Treat unfamiliar games, experimental builds, launchers, mods, and anti-cheat drivers as software that deserves its own blast radius.",
-      "excerpt": "Keep gaming away from the accounts and files that would hurt most to lose. Use a dedicated device, separate OS account, or clean browser profile so launchers, mods, overlays, and community downloads cannot casually share space with banking, tax records, work sessions, or password recovery.",
+      "deck": "Treat unfamiliar games, experimental builds, launchers, mods, and anti-cheat drivers as software that deserves its own blast radius. Keep gaming separate from banking, work sessions, recovery accounts, and sensitive files so experimentation cannot drag everything else with it.",
+      "excerpt": "Keep gaming away from the accounts and files that would hurt most to lose. Use a dedicated device, separate OS account, or clean browser profile so launchers, mods, overlays, and community downloads cannot casually share space with banking, tax records, work sessions, or password recovery. The goal is not to make gaming sterile; it is to make experimentation cheap by keeping high-value personal and work data out of the same blast radius as unfamiliar software.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "image": {
         "src": "/seed-art/threat-intelligence/secure-gaming-isolation.svg",
+        "themeVariants": {
+          "dark": {
+            "src": "/seed-art/threat-intelligence/secure-gaming-isolation-dark.svg"
+          }
+        },
         "alt": "A game controller inside a protected zone separated from finance and work systems.",
         "caption": "A gaming setup is safer when it has its own blast radius.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -175,6 +337,58 @@
         "What to check now: separate accounts and payment paths. Use strong unique passwords and MFA for gaming stores, Discord, streaming accounts, and email. Avoid reusing the email-password pair that protects banking or work. Prefer limited payment methods over leaving broad financial access attached to every store account.",
         "What to check now: decide what you are willing to reinstall. A secure gaming setup should be rebuildable. Back up saves and important settings, keep recovery codes somewhere off the gaming machine, and assume that a suspicious install may justify wiping the box instead of trying to prove every file is clean.",
         "The goal is not to make gaming sterile. The goal is to make experimentation cheap. Play odd games, indie builds, foreign releases, mods, and prototypes if you want to. Just do it from a machine or account that can lose the bet without taking the rest of your life with it."
+      ]
+    },
+    {
+      "slug": "separate-game-accounts-from-real-life",
+      "shortSlug": "ACCTS",
+      "section": "Gaming",
+      "headline": "Separate Game Accounts From Real Life",
+      "deck": "Gaming risk is not only malware on a machine. Store accounts, Discord identities, email recovery, payment methods, cloud saves, and social graphs can all become paths from a compromised game account back into real life.",
+      "excerpt": "Treat gaming identity as its own compartment. Use unique passwords, MFA, separate recovery email where practical, limited payment methods, and careful OAuth permissions so a stolen store, Discord, streaming, or launcher account does not become a shortcut to banking, work, family photos, password recovery, or your primary inbox. Account separation is boring, but it keeps a bad gaming incident from becoming a whole-life incident.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "GAMING",
+      "pullQuotes": [
+        "A game account should not be a shortcut into the rest of your life.",
+        "Account separation is boring because it works."
+      ],
+      "body": [
+        "Gaming security is not only about whether a game binary is clean. Store accounts, Discord accounts, streaming logins, email recovery, payment methods, cloud saves, friends lists, and OAuth connections can all carry risk.",
+        "A stolen game account may not look catastrophic at first. But if that account shares a password with email, uses the same recovery inbox as banking, keeps a broad payment method attached, or is connected to other services through permissive OAuth grants, the attacker gets more than skins and save files.",
+        "The practical control is account separation. Use unique passwords for game stores, launchers, Discord, streaming platforms, and related communities. Turn on MFA. Keep recovery codes somewhere outside the gaming machine. Do not reuse the password that protects your primary email, financial accounts, cloud storage, work systems, or password manager.",
+        "Payment paths deserve the same treatment. Avoid leaving broad financial access attached to every game store or in-game marketplace. Where possible, use limited payment methods, prepaid balances, virtual cards, purchase approvals, or store credit. The goal is to make fraud annoying for an attacker and bounded for you.",
+        "Review connected apps and OAuth permissions. Gaming communities often encourage linking accounts for drops, tournaments, chat bots, mods, launchers, streaming overlays, analytics, and community servers. Some connections are fine. Some are stale. Some ask for more access than they need.",
+        "The primary email account is the real prize. If every gaming account recovers through the same inbox that controls banking, tax records, cloud drives, work invitations, and password resets, then gaming identity is not actually separated. Consider a dedicated gaming email or alias, especially for experimental communities and low-trust services.",
+        "What to check now: list every account tied to your gaming life, including stores, Discord, streaming, launchers, mod sites, tournament sites, and community forums.",
+        "What to check now: confirm each one has a unique password, MFA where available, current recovery information, and no reused banking or work credentials.",
+        "What to check now: review payment methods and connected-app permissions. Remove stale cards, broad OAuth grants, forgotten bots, and linked services you no longer use.",
+        "The point is not paranoia. It is containment. A bad game account incident should be a recoverable nuisance, not a bridge into email, finances, work, or family data."
+      ]
+    },
+    {
+      "slug": "treat-mods-and-launchers-like-untrusted-code",
+      "shortSlug": "MODS",
+      "section": "Gaming",
+      "headline": "Treat Mods and Launchers Like Untrusted Code",
+      "deck": "Mods, private servers, launchers, overlays, trainers, anti-cheat systems, and vibe-coded game builds are software supply chain decisions. Install them only inside a trust zone you are willing to rebuild.",
+      "excerpt": "The riskiest gaming software is often not the official game. It is the helper executable, mod loader, private server patch, overlay, trainer, launcher, or prototype build that asks for broad access because that is how the community makes it work. Treat those installs like untrusted code: isolate them, verify sources, avoid admin rights when possible, and keep anything irreplaceable outside the blast radius.",
+      "byline": "Anthus AI Solutions",
+      "dateline": "GAMING",
+      "pullQuotes": [
+        "Every mod loader is a small supply chain decision.",
+        "Only install experiments inside an environment you are willing to rebuild."
+      ],
+      "body": [
+        "The riskiest part of a gaming setup is often not the official game. It is the mod loader, private server patch, launcher, overlay, trainer, anti-cheat component, reshade bundle, controller utility, voice plug-in, or experimental build that arrives through a community link.",
+        "That software may be useful, popular, and benign. It may also be unsigned, rushed, vibe-coded, repacked, copied through mirrors, wrapped with ads, or maintained by people who did not plan for hostile distribution. Popularity is a weak security boundary.",
+        "Treat these installs like untrusted code. Prefer official stores, original project pages, signed releases, reproducible community reputation, and checksums when they are available. Be skeptical of urgent fixes, private download links, cracked builds, cheat tools, and installers that ask you to disable security controls.",
+        "Pay attention to privilege. Some gaming components need deep access, especially anti-cheat systems and low-level overlays. Others ask for administrator rights because the installer is sloppy. Do not grant admin access automatically. If a tool needs broad permissions, decide whether the game is worth that trust.",
+        "Isolation is the practical answer. Use a dedicated gaming account, a separate machine, a console-like device, or a disposable Windows install for high-risk experimentation. Keep work files, financial records, SSH keys, cloud-drive sync, and primary browser profiles away from that zone.",
+        "Backups change the decision. A gaming environment that can be wiped is much safer than one that contains irreplaceable documents and long-lived secrets. Keep saves, screenshots, and configuration backed up separately. Keep recovery codes and important account information off the machine being used for experiments.",
+        "What to check now: list installed launchers, mod managers, overlays, trainers, anti-cheat tools, controller utilities, and private-server patches. Remove what you no longer use.",
+        "What to check now: review which tools require administrator privileges, kernel drivers, browser extensions, Discord tokens, file-system access, or account linking. High access deserves a stronger reason.",
+        "What to check now: choose a rebuild line. If a mod or launcher behaves suspiciously, know when you will wipe the gaming environment instead of trying to prove every file is clean.",
+        "Security does not require avoiding all mods or experimental games. It requires installing them in a place where a bad choice does not inherit your banking, work, identity, and long-term secrets."
       ]
     }
   ]
