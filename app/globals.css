@@ -10140,7 +10140,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 span {
-  color: var(--danger);
+  color: var(--ti-section-rule);
   display: block;
   font-family: var(--site-display-font);
   font-size: var(--ti-masthead-font-size);
