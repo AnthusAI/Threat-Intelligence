@@ -10376,7 +10376,7 @@ img {
 }
 
 :root[data-site-brand="threat-intelligence"] .blog-page-background {
-  --blog-page-background-height: clamp(300px, 33vw, 470px);
+  --blog-page-background-height: clamp(470px, 36vw, 620px);
   aspect-ratio: 1;
   background-image: url("/brand/gemini-svg.svg");
   background-position: center;
@@ -10387,7 +10387,7 @@ img {
   pointer-events: none;
   position: absolute;
   right: calc(var(--ti-blog-rail-margin) - (var(--blog-page-background-height) * 0.3));
-  top: clamp(-180px, -9vw, -112px);
+  top: clamp(-220px, -11vw, -112px);
   width: var(--blog-page-background-height);
   z-index: 0;
 }
