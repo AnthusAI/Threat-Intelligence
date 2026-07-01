@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "test:newsroom": "node scripts/test-newsroom-session.cjs && node scripts/test-newsroom-forum-routes.cjs",
     "test:newsroom-card-layout": "node scripts/test-newsroom-card-layout.cjs",
+    "test:blog-defense-graph": "node scripts/test-blog-defense-graph.cjs",
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
