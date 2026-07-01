@@ -82,6 +82,69 @@ function intersectRect(source: DOMRect, bounds: DOMRect): ObstacleRect | null {
   };
 }
 
+function textFragmentRects(element: HTMLElement, bounds: DOMRect): ObstacleRect[] {
+  const ownerDocument = element.ownerDocument;
+  const elementRect = element.getBoundingClientRect();
+  const computedStyle = ownerDocument.defaultView?.getComputedStyle(element);
+  const context = ownerDocument.createElement("canvas").getContext("2d");
+  if (context && computedStyle) {
+    context.font = computedStyle.font;
+  }
+  const walker = ownerDocument.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return /\S/.test(node.textContent ?? "")
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    },
+  );
+  const range = ownerDocument.createRange();
+  const rects: ObstacleRect[] = [];
+
+  try {
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.textContent ?? "";
+      const tokenPattern = /\S+/g;
+      let match: RegExpExecArray | null;
+      while ((match = tokenPattern.exec(text)) !== null) {
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        for (const fragmentRect of Array.from(range.getClientRects())) {
+          const measuredWidth = context?.measureText(match[0]).width ?? 0;
+          const textWidth = measuredWidth > 0 && measuredWidth < (fragmentRect.width * 0.98)
+            ? measuredWidth
+            : fragmentRect.width;
+          const sourceRect = new DOMRect(
+            fragmentRect.left,
+            elementRect.top,
+            textWidth,
+            elementRect.height,
+          );
+          const rect = intersectRect(sourceRect, bounds);
+          if (rect) rects.push(rect);
+        }
+      }
+      node = walker.nextNode();
+    }
+  } finally {
+    range.detach();
+  }
+
+  return rects;
+}
+
+function elementObstacleRects(element: HTMLElement, bounds: DOMRect): ObstacleRect[] {
+  const fragments = textFragmentRects(element, bounds);
+  if (fragments.length > 0) return fragments;
+  return Array.from(element.getClientRects())
+    .map((lineRect) => intersectRect(lineRect, bounds))
+    .filter((rect): rect is ObstacleRect => Boolean(rect));
+}
+
 function readPictogramColors(container: HTMLElement): PictogramColors {
   const style = getComputedStyle(container);
   return {
@@ -265,10 +328,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
       for (const selector of selectors) {
         const elements = Array.from(page.querySelectorAll<HTMLElement>(selector));
         for (const element of elements) {
-          const lineRects = Array.from(element.getClientRects());
-          for (const lineRect of lineRects) {
-            const rect = intersectRect(lineRect, containerRect);
-            if (!rect) continue;
+          for (const rect of elementObstacleRects(element, containerRect)) {
             next.push({
               x: Math.max(0, rect.x - padding),
               y: Math.max(0, rect.y - padding),
@@ -411,7 +471,13 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
   if (SITE_BRAND.id !== "threat-intelligence") return null;
 
   return (
-    <div aria-hidden="true" className="blog-page-background" data-blog-page-background="true" ref={containerRef}>
+    <div
+      aria-hidden="true"
+      className="blog-page-background"
+      data-blog-page-background="true"
+      data-blog-page-background-obstacles={JSON.stringify(obstacles)}
+      ref={containerRef}
+    >
       {graphLayout ? (
         <svg
           className="blog-page-background__svg"
@@ -433,6 +499,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
                         : colors.edge,
                     strokeWidth: baseStrokeWidth,
                   }}
+                  data-blog-edge-id={edge.id}
                   initial={false}
                   key={edge.id}
                   stroke={isCompromised ? colors.compromised : colors.edge}
@@ -491,6 +558,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
                   }}
                   cx={node.x}
                   cy={node.y}
+                  data-blog-node-id={node.id}
                   fill={isCompromised ? colors.compromised : colors.node}
                   initial={false}
                   key={node.id}

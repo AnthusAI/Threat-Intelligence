@@ -188,6 +188,62 @@ function coreAnchor(
   };
 }
 
+function bestCoreAnchor(input: {
+  width: number;
+  height: number;
+  padX: number;
+  padTop: number;
+  padBottom: number;
+  scale: number;
+  coreNode: BlogDefenseNode;
+  nodeRadius: number;
+  obstacles: LayoutRect[];
+}): { x: number; y: number } {
+  const {
+    width,
+    height,
+    padX,
+    padTop,
+    padBottom,
+    scale,
+    coreNode,
+    nodeRadius,
+    obstacles,
+  } = input;
+  const base = coreAnchor(width, height, padX, scale, coreNode);
+  if (!obstacles.length) return base;
+
+  const coreZoneNodes = BLOG_DEFENSE_NODES.filter((node) => node.zone === "core");
+  const maxAnchorX = width - padX - nodeRadius;
+  const step = Math.max(4, Math.round(width * 0.012));
+  let best = base;
+  let bestScore = -Infinity;
+
+  for (let x = base.x; x <= maxAnchorX + 0.001; x += step) {
+    let score = 0;
+    for (const node of coreZoneNodes) {
+      const candidateX = x + (node.x - coreNode.x) * scale;
+      const candidateY = base.y + (node.y - coreNode.y) * scale;
+      const inBounds = candidateX > padX + nodeRadius
+        && candidateX < width - padX - nodeRadius
+        && candidateY > padTop + nodeRadius
+        && candidateY < height - padBottom - nodeRadius;
+      if (!inBounds) continue;
+      if (nodeIntersectsObstacles(candidateX, candidateY, nodeRadius + 2, obstacles)) continue;
+      score += node.id === BLOG_DEFENSE_CORE_NODE_ID ? 100 : 1;
+    }
+
+    const distancePenalty = Math.abs(x - base.x) / Math.max(1, width);
+    const adjustedScore = score - distancePenalty;
+    if (adjustedScore > bestScore) {
+      bestScore = adjustedScore;
+      best = { x, y: base.y };
+    }
+  }
+
+  return best;
+}
+
 function bestCorridorX(
   width: number,
   height: number,
@@ -731,9 +787,19 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
       ? 1.05
       : 1.02;
   const scale = Math.max(0.48, Math.min(1.18, baseScale * scaleBoost));
-  const anchor = coreAnchor(width, height, padX, scale, core);
-  const corridorX = bestCorridorX(width, height, padX, padTop, padBottom, scale, core, anchor, obstacles);
   const nodeRadius = uniformNodeRadius(scale);
+  const anchor = bestCoreAnchor({
+    width,
+    height,
+    padX,
+    padTop,
+    padBottom,
+    scale,
+    coreNode: core,
+    nodeRadius,
+    obstacles,
+  });
+  const corridorX = bestCorridorX(width, height, padX, padTop, padBottom, scale, core, anchor, obstacles);
 
   const positionedNodes = new Map<string, LayoutDefenseNode>();
   for (const node of BLOG_DEFENSE_NODES) {
