@@ -10748,7 +10748,7 @@ img {
   font-weight: 900;
   letter-spacing: var(--ti-meta-letter-spacing);
   line-height: var(--ti-meta-line-height);
-  margin-left: auto;
+  margin-right: auto;
   margin-top: calc(var(--ti-rhythm) * 3);
   padding: calc(var(--ti-rhythm) * 1.5) calc(var(--ti-rhythm) * 2.25);
   text-transform: uppercase;
