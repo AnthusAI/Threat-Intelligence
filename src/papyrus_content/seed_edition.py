@@ -35,6 +35,7 @@ def seed_edition_content(flags: list[str]) -> None:
     records = build_seed_edition_records(payload)
     client, _claims = create_authoring_client()
     changes = build_record_changes_targeted_by_id(client, records)
+    stale_edition_item_records = list_stale_seed_edition_item_records(client, payload, records)
     stale_media_records = list_stale_seed_media_records(client, payload)
     counts = summarize_changes(changes)
     result = {
@@ -46,12 +47,14 @@ def seed_edition_content(flags: list[str]) -> None:
         "articleCount": len(payload["articles"]),
         "recordCount": len(records),
         "changes": counts,
+        "deleteStaleEditionItems": summarize_stale_media(stale_edition_item_records),
         "deleteStaleMedia": summarize_stale_media(stale_media_records),
         "apply": apply,
     }
     if apply:
         if upload_media:
             upload_seed_media(payload, bucket=str(bucket))
+        delete_stale_seed_records(client, stale_edition_item_records)
         delete_stale_seed_media_records(client, stale_media_records)
         apply_record_changes(client, changes)
         result["applied"] = True
@@ -369,6 +372,35 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
     return records
 
 
+def list_stale_seed_edition_item_records(
+    client: PapyrusGraphQLAuthoringClient,
+    payload: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    edition_id = str(payload["id"])
+    published_id = published_edition_id(edition_id)
+    expected_ids: dict[str, set[str]] = {"EditionItem": set(), "PublishedEditionItem": set()}
+    for record_entry in records:
+        model_name = record_entry.get("modelName")
+        if model_name not in expected_ids:
+            continue
+        record_id = normalize_string((record_entry.get("expected") or {}).get("id"))
+        if record_id:
+            expected_ids[str(model_name)].add(record_id)
+    current = {
+        "EditionItem": client.list_by_index("editionItemsByEditionAndSortKey", edition_id),
+        "PublishedEditionItem": client.list_by_index("publishedEditionItemsByEditionAndSortKey", published_id),
+    }
+    return {
+        model_name: [
+            record_entry
+            for record_entry in records_for_model
+            if normalize_string(record_entry.get("id")) not in expected_ids[model_name]
+        ]
+        for model_name, records_for_model in current.items()
+    }
+
+
 def list_stale_seed_media_records(client: PapyrusGraphQLAuthoringClient, payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     stale = {"MediaAsset": [], "PublishedMediaAsset": []}
     for article in payload["articles"]:
@@ -383,11 +415,11 @@ def summarize_stale_media(records_by_model: dict[str, list[dict[str, Any]]]) -> 
     return {model_name: len(records) for model_name, records in records_by_model.items()}
 
 
-def delete_stale_seed_media_records(
+def delete_stale_seed_records(
     client: PapyrusGraphQLAuthoringClient,
     records_by_model: dict[str, list[dict[str, Any]]],
 ) -> None:
-    for model_name in ("PublishedMediaAsset", "MediaAsset"):
+    for model_name in records_by_model:
         seen_ids: set[str] = set()
         for record_entry in records_by_model.get(model_name, []):
             record_id = normalize_string(record_entry.get("id"))
@@ -395,6 +427,17 @@ def delete_stale_seed_media_records(
                 continue
             seen_ids.add(record_id)
             client.delete_record(model_name, record_id)
+
+
+def delete_stale_seed_media_records(
+    client: PapyrusGraphQLAuthoringClient,
+    records_by_model: dict[str, list[dict[str, Any]]],
+) -> None:
+    ordered = {
+        "PublishedMediaAsset": records_by_model.get("PublishedMediaAsset", []),
+        "MediaAsset": records_by_model.get("MediaAsset", []),
+    }
+    delete_stale_seed_records(client, ordered)
 
 
 def upload_seed_media(payload: dict[str, Any], *, bucket: str) -> None:

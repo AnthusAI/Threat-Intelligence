@@ -50,7 +50,7 @@ const SETTINGS_EVENT = "papyrus:settings-changed";
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   presentation: enforcePresentation(SITE_BRAND.defaultPresentation),
-  theme: SITE_BRAND.id === "threat-intelligence" ? "light" : "system",
+  theme: "system",
   motion: "standard",
 };
 
@@ -123,6 +123,7 @@ export function writeLocalReaderSettings(settings: ReaderSettings) {
 export function applyReaderTheme(theme: ReaderThemeSetting) {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.papyrusTheme = theme;
+  applyReaderThemeClass(theme);
   updateThemeMeta(theme);
 }
 
@@ -303,6 +304,21 @@ function updateThemeMeta(theme: ReaderThemeSetting) {
     document.head.appendChild(meta);
   }
   meta.content = colorScheme;
+}
+
+function applyReaderThemeClass(theme: ReaderThemeSetting) {
+  if (typeof document === "undefined") return;
+  const isDark = resolveReaderThemeIsDark(theme);
+  document.documentElement.classList.toggle("dark", isDark);
+  document.documentElement.classList.toggle("dark-theme", isDark);
+  document.documentElement.classList.toggle("light", !isDark);
+  document.documentElement.classList.toggle("light-theme", !isDark);
+}
+
+function resolveReaderThemeIsDark(theme: ReaderThemeSetting) {
+  if (theme === "dark") return true;
+  if (theme === "light") return false;
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function assertNoDataErrors(errors: DataClientErrors, operation: string): void {
