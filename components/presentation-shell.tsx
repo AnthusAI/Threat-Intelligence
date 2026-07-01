@@ -127,10 +127,11 @@ function BlogPresentation({
   const footerEntries = useMemo(() => buildPresentationFooterEntries(content), [content]);
   const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const pageRef = useRef<HTMLElement | null>(null);
   usePresentationTargetScroll(targetSection);
   return (
-    <main className="presentation-page presentation-page--blog" data-presentation-engine="blog">
-      <BlogPageBackground />
+    <main className="presentation-page presentation-page--blog" data-presentation-engine="blog" ref={pageRef}>
+      <BlogPageBackground pageRef={pageRef} />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
       <div className="blog-sections" ref={contentRef}>
