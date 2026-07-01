@@ -1,15 +1,12 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import type { Article, ArticleImage } from "../lib/articles";
-import { shouldBypassImageOptimization } from "../lib/image-url";
+import type { Article } from "../lib/articles";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
-import { resolveThemedImageSrc } from "../lib/themed-image";
+import { PictogramFigure } from "./pictograms/pictogram-figure";
 import { PresentationFooter } from "./presentation-footer";
-import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 
 export type ArticlePageEditionFooter = {
   editionBasePath: string;
@@ -47,7 +44,22 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
           </div>
         </header>
         <div className="article-body">
-          {article.image ? <ArticlePhotoFigure image={article.image} /> : null}
+          {article.image ? (
+            <PictogramFigure
+              alt={article.image.alt}
+              caption={article.image.caption}
+              credit={article.image.credit}
+              figureClassName="article-photo"
+              height={680}
+              layout={article.image.layout}
+              priority
+              sizes="(max-width: 980px) 100vw, 900px"
+              slug={article.slug}
+              src={article.image.src}
+              themeVariants={article.image.themeVariants}
+              width={1200}
+            />
+          ) : null}
           {article.body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -91,7 +103,22 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
           ) : null}
         </header>
         <div className="article-body">
-          {item.image ? <ArticlePhotoFigure image={item.image} /> : null}
+          {item.image ? (
+            <PictogramFigure
+              alt={item.image.alt}
+              caption={item.image.caption}
+              credit={item.image.credit}
+              figureClassName="article-photo"
+              height={680}
+              layout={item.image.layout}
+              priority
+              sizes="(max-width: 980px) 100vw, 900px"
+              slug={item.slug}
+              src={item.image.src}
+              themeVariants={item.image.themeVariants}
+              width={1200}
+            />
+          ) : null}
           {(item.body ?? []).map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -130,59 +157,4 @@ function formatArticleDate(value: string): string {
     month: "long",
     year: "numeric",
   }).format(date);
-}
-
-function ArticlePhotoFigure({ image }: { image: ArticleImage }) {
-  return (
-    <figure className="article-photo">
-      <ArticlePhotoImage image={image} />
-      <figcaption>{image.caption ?? image.credit}</figcaption>
-    </figure>
-  );
-}
-
-function ArticlePhotoImage({ image }: { image: ArticleImage }) {
-  const resolvedTheme = useResolvedPapyrusTheme();
-  const imageSrc = resolveThemedImageSrc(image.src, image.themeVariants, resolvedTheme);
-  const darkSrc = image.themeVariants?.dark?.src;
-
-  if (darkSrc) {
-    return (
-      <div className="article-photo__theme-image-stack">
-        <Image
-          className="article-photo__theme-image article-photo__theme-image--light"
-          src={image.src}
-          alt={image.alt}
-          width={1200}
-          height={680}
-          sizes="(max-width: 980px) 100vw, 900px"
-          priority
-          unoptimized={shouldBypassImageOptimization(image.src)}
-        />
-        <Image
-          className="article-photo__theme-image article-photo__theme-image--dark"
-          src={darkSrc}
-          alt={image.alt}
-          width={1200}
-          height={680}
-          sizes="(max-width: 980px) 100vw, 900px"
-          priority
-          unoptimized={shouldBypassImageOptimization(darkSrc)}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <Image
-      key={imageSrc}
-      src={imageSrc}
-      alt={image.alt}
-      width={1200}
-      height={680}
-      sizes="(max-width: 980px) 100vw, 900px"
-      priority
-      unoptimized={shouldBypassImageOptimization(imageSrc)}
-    />
-  );
 }

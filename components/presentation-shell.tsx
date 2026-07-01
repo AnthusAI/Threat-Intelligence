@@ -1,14 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
 import { getEditionSectionPath } from "../lib/edition-routes";
-import { shouldBypassImageOptimization } from "../lib/image-url";
 import { buildPresentationFooterEntries, type PresentationFooterEntry } from "../lib/presentation-footer";
-import { resolveThemedImageSrc } from "../lib/themed-image";
 import { layoutAllTextLines, prepareWithSegments, type TextLine } from "../lib/pretext-layout";
 import { truncateWords } from "../lib/excerpts";
 import {
@@ -19,9 +16,9 @@ import type { EditionContent, EditionPresentationFormat, EditionSection } from "
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
+import { PictogramFigure } from "./pictograms/pictogram-figure";
 import { PresentationFooter } from "./presentation-footer";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
-import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 
 type PresentationShellProps = {
   content: EditionContent;
@@ -258,9 +255,7 @@ function PresentationItem({
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const maxWidth = useMeasuredWidth(frameRef);
-  const resolvedTheme = useResolvedPapyrusTheme();
   const image = getPublicationItemImageAssets(item)[0];
-  const imageSrc = image ? resolveThemedImageSrc(image.src, image.themeVariants, resolvedTheme) : null;
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
   const itemRole = getPresentationItemRole(mode, index);
@@ -303,43 +298,19 @@ function PresentationItem({
         ) : null}
       </div>
       {image ? (
-        <figure className="presentation-item__image">
-          {image.themeVariants?.dark?.src ? (
-            <div className="presentation-item__theme-image-stack">
-              <Image
-                className="presentation-item__theme-image presentation-item__theme-image--light"
-                src={image.src}
-                alt={image.alt}
-                width={1200}
-                height={760}
-                sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
-                priority={index === 0}
-                unoptimized={shouldBypassImageOptimization(image.src)}
-              />
-              <Image
-                className="presentation-item__theme-image presentation-item__theme-image--dark"
-                src={image.themeVariants.dark.src}
-                alt={image.alt}
-                width={1200}
-                height={760}
-                sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
-                priority={index === 0}
-                unoptimized={shouldBypassImageOptimization(image.themeVariants.dark.src)}
-              />
-            </div>
-          ) : (
-            <Image
-              src={imageSrc ?? image.src}
-              alt={image.alt}
-              width={1200}
-              height={760}
-              sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
-              priority={index === 0}
-              unoptimized={shouldBypassImageOptimization(imageSrc ?? image.src)}
-            />
-          )}
-          <figcaption>{image.caption ?? image.credit}</figcaption>
-        </figure>
+        <PictogramFigure
+          alt={image.alt}
+          caption={image.caption}
+          credit={image.credit}
+          figureClassName="presentation-item__image"
+          height={760}
+          layout={image.layout}
+          sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+          slug={item.slug}
+          src={image.src}
+          themeVariants={image.themeVariants}
+          width={1200}
+        />
       ) : null}
     </article>
   );

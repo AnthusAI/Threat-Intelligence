@@ -10,13 +10,13 @@ import {
 } from "../lib/blog-defense-graph";
 import { layoutDefenseGraph, type LayoutDefenseNode } from "../lib/blog-defense-layout";
 import { SITE_BRAND } from "../lib/site-brand";
+import { PICTOGRAM_CYCLE_MS } from "../lib/threat-intelligence-pictograms";
 import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
 
 const THROB_MS = 190;
 const COMPROMISE_MS = 120;
 const STEP_GAP_MS = 36;
 const START_DELAY_MS = 40;
-const ATTACK_CYCLE_MS = 20_000;
 const COMPROMISE_TRANSITION_S = COMPROMISE_MS / 1000;
 const THROB_TRANSITION_S = 0.21;
 const BREACH_RING_DELAYS_S = [0, 0.6, 1.2];
@@ -324,7 +324,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
     if (!enableStochasticPath) return;
     const interval = window.setInterval(() => {
       setAttackCycle((current) => current + 1);
-    }, ATTACK_CYCLE_MS);
+    }, PICTOGRAM_CYCLE_MS);
     return () => {
       window.clearInterval(interval);
     };
