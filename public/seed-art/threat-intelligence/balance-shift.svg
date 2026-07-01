@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
   <title id="title">Shift in defensive balance</title>
   <desc id="desc">A tilted balance beam with many red attacker nodes pulling the heavy side downward.</desc>
-  <rect width="1200" height="1200" fill="#fcfcfc"/>
+  <rect width="1200" height="1200" fill="#f9f9f8"/>
   <path d="M154 940h892" stroke="#23262b" stroke-width="18" stroke-linecap="round" opacity=".14"/>
   <path d="M600 280v576" stroke="#23262b" stroke-width="28" stroke-linecap="round"/>
   <path d="M490 856h220" stroke="#23262b" stroke-width="32" stroke-linecap="round"/>
   <path d="M350 360l500 128" stroke="#23262b" stroke-width="34" stroke-linecap="round"/>
   <path d="M606 424l244 64" stroke="#d0021b" stroke-width="34" stroke-linecap="round"/>
-  <circle cx="600" cy="424" r="56" fill="#fcfcfc" stroke="#23262b" stroke-width="24"/>
-  <path d="M328 392L206 640h244L328 392Z" fill="#ffffff" stroke="#23262b" stroke-width="18" stroke-linejoin="round"/>
-  <path d="M874 532L716 850h316L874 532Z" fill="#ffffff" stroke="#d0021b" stroke-width="22" stroke-linejoin="round"/>
+  <circle cx="600" cy="424" r="56" fill="#f9f9f8" stroke="#23262b" stroke-width="24"/>
+  <path d="M328 392L206 640h244L328 392Z" fill="#f9f9f8" stroke="#23262b" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M874 532L716 850h316L874 532Z" fill="#f9f9f8" stroke="#d0021b" stroke-width="22" stroke-linejoin="round"/>
   <circle cx="292" cy="598" r="48" fill="#23262b" opacity=".88"/>
   <circle cx="354" cy="620" r="34" fill="#23262b" opacity=".42"/>
   <circle cx="780" cy="784" r="36" fill="#d0021b" opacity=".72"/>

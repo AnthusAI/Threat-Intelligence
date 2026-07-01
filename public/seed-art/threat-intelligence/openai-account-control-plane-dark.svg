@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
+  <title id="title">OpenAI account control plane</title>
+  <desc id="desc">An OpenAI account control plane connected to projects, API keys, service accounts, files, connectors, and audit signals.</desc>
+  <rect width="1200" height="1200" fill="#191918"/>
+
+  <g fill="none" stroke="#eceff3" stroke-width="12" opacity=".18">
+    <path d="M170 250h860"/>
+    <path d="M170 430h860"/>
+    <path d="M170 610h860"/>
+    <path d="M170 790h860"/>
+    <path d="M170 970h860"/>
+    <path d="M250 150v900"/>
+    <path d="M430 150v900"/>
+    <path d="M610 150v900"/>
+    <path d="M790 150v900"/>
+    <path d="M970 150v900"/>
+  </g>
+
+  <g stroke="#eceff3" stroke-width="14" stroke-linejoin="round">
+    <path d="M484 206h232l116 200-116 200H484L368 406l116-200Z" fill="#191918"/>
+    <path d="M136 172h214c30 0 54 24 54 54v126c0 30-24 54-54 54H136c-30 0-54-24-54-54V226c0-30 24-54 54-54Z" fill="#191918"/>
+    <path d="M850 180h210c30 0 54 24 54 54v118c0 30-24 54-54 54H850c-30 0-54-24-54-54V234c0-30 24-54 54-54Z" fill="#191918"/>
+    <path d="M106 744h232c30 0 54 24 54 54v128c0 30-24 54-54 54H106c-30 0-54-24-54-54V798c0-30 24-54 54-54Z" fill="#191918"/>
+    <path d="M840 734h238c30 0 54 24 54 54v138c0 30-24 54-54 54H840c-30 0-54-24-54-54V788c0-30 24-54 54-54Z" fill="#191918"/>
+  </g>
+
+  <g fill="none" stroke="#eceff3" stroke-width="14" stroke-linecap="round">
+    <circle cx="600" cy="378" r="84"/>
+    <path d="M600 294v168"/>
+    <path d="M516 378h168"/>
+    <path d="M540 318c50 36 70 84 60 144"/>
+    <path d="M660 318c-50 36-70 84-60 144"/>
+  </g>
+  <circle cx="600" cy="378" r="24" fill="#ff3b52"/>
+
+  <g fill="#eceff3">
+    <circle cx="166" cy="264" r="18"/>
+    <circle cx="226" cy="264" r="18"/>
+    <circle cx="286" cy="264" r="18"/>
+  </g>
+  <path d="M150 326h180" stroke="#eceff3" stroke-width="16" stroke-linecap="round" opacity=".40"/>
+  <path d="M872 264h166" stroke="#eceff3" stroke-width="16" stroke-linecap="round" opacity=".44"/>
+  <path d="M872 320h116" stroke="#eceff3" stroke-width="16" stroke-linecap="round" opacity=".30"/>
+  <path d="M1022 244l44 44-44 44" fill="none" stroke="#ff3b52" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g stroke="#eceff3" stroke-width="14" stroke-linejoin="round">
+    <path d="M166 806h100c30 0 54 24 54 54s-24 54-54 54H166c-30 0-54-24-54-54s24-54 54-54Z" fill="#191918"/>
+    <circle cx="938" cy="818" r="34" fill="#191918"/>
+    <path d="M904 884h104"/>
+    <path d="M904 930h154"/>
+  </g>
+  <circle cx="290" cy="860" r="14" fill="#ff3b52"/>
+  <circle cx="938" cy="818" r="12" fill="#ff3b52"/>
+
+  <g fill="none" stroke="#ff3b52" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M404 320c42 12 72 28 108 58"/>
+    <path d="M512 378l-34-2"/>
+    <path d="M512 378l-8-32"/>
+    <path d="M796 322c-42 12-72 28-108 56"/>
+    <path d="M688 378l34-4"/>
+    <path d="M688 378l8-32"/>
+    <path d="M392 842c86-78 152-150 184-298"/>
+    <path d="M576 544l24 28"/>
+    <path d="M576 544l-34 6"/>
+    <path d="M786 842c-86-78-148-152-180-298"/>
+    <path d="M606 544l-24 28"/>
+    <path d="M606 544l34 6"/>
+  </g>
+
+  <circle cx="600" cy="378" r="174" fill="#ff3b52" opacity=".08"/>
+  <circle cx="956" cy="858" r="112" fill="#ff3b52" opacity=".12"/>
+
+  <path d="M190 1042h820" stroke="#eceff3" stroke-width="20" stroke-linecap="round" opacity=".22"/>
+  <path d="M256 994h196" stroke="#eceff3" stroke-width="18" stroke-linecap="round" opacity=".42"/>
+  <path d="M506 994h238" stroke="#ff3b52" stroke-width="18" stroke-linecap="round"/>
+  <path d="M802 994h148" stroke="#eceff3" stroke-width="18" stroke-linecap="round" opacity=".30"/>
+</svg>
