@@ -3,7 +3,7 @@
   "id": "edition-current",
   "slug": "current",
   "title": "Anthus Threat Intelligence",
-  "description": "Practical AI/ML security analysis from Anthus AI Solutions.",
+  "description": "AI/ML security analysis from Anthus AI Solutions: how attacker capability is shifting, and what defenders should do about it.",
   "publishDate": "2026-07-04",
   "suppressNewsDeskAppendix": true,
   "articles": [
@@ -12,8 +12,8 @@
       "shortSlug": "BALANCE",
       "section": "Mission",
       "headline": "The Balance of Power Is Shifting",
-      "deck": "AI weakens the old defensive assumption that only nation-state-level actors can bring scale, patience, and advanced tradecraft to ordinary targets. Defenders need to revisit controls that were tolerated because capable attackers were assumed to be rare.",
-      "excerpt": "Treat AI as a force multiplier for ordinary attackers, not a magic upgrade to elite status. Controls that relied on obscurity, friction, or attacker fatigue need a fresh threat model, because more adversaries can now sustain the work required to break them. The important shift is capability diffusion: cheaper reconnaissance, faster variation, better translation, and more patient automation make old assumptions about who can exploit a weakness much less reliable.",
+      "deck": "AI is making attacker capability cheap. Controls that were tolerated because capable adversaries were rare need a new threat model.",
+      "excerpt": "Somewhere in your stack is a control that survives only because nobody has tried hard enough. The number of attackers who can try hard enough just went up.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "image": {
@@ -40,16 +40,17 @@
         "Controls built for casual attackers cannot be treated as boundaries anymore."
       ],
       "body": [
-        "Information security has always depended on assumptions about scarcity. Not scarcity of hostile intent; the internet has never lacked that. The scarce resource was capability: time, language skill, infrastructure, tooling, reverse-engineering patience, vulnerability chaining, operational discipline, and the ability to keep trying after the first easy attempt failed.",
-        "AI changes that assumption. It does not make every attacker brilliant, and it does not give every criminal gang the full intelligence apparatus of Russia or North Korea. It does make pieces of that capability cheaper, faster, and easier to repeat. Reconnaissance can be automated. Variants can be generated. Translation, phishing copy, log analysis, exploit adaptation, target profiling, and persistence planning can be assisted at a scale that used to require a larger team.",
-        "That is why the balance of power is shifting. Many defenses were built around a quiet bargain: they were known to be limited, but they were good enough against casual attackers. They might stop opportunistic snooping, lazy credential reuse, a local thief, a hurried bot, or a small crew that lacked time and expertise. Against a patient state actor, everyone knew those controls could fail.",
-        "Call that little-sister encryption: an informal metaphor for protection that keeps a curious sibling, casual coworker, or low-effort intruder out, but should not be treated as a real security boundary against a well-resourced adversary. It is not useless. It reduces everyday risk. The mistake is pretending it can carry a threat model it was never designed to carry.",
-        "For years, many organizations tolerated little-sister controls because the strongest adversaries were rare. If only a state-level team could defeat a workflow, a data store, a weak isolation boundary, or an obscure internal service, the practical exposure could be rationalized as low. The risk calculation changes when criminal operators can rent, prompt, buy, or compose enough automation to behave more like a state-tier attacker for the parts of the kill chain that matter.",
-        "The result is not that every random attacker becomes North Korea. The result is that the number of viable threat actors dramatically increases. A weakness that once required rare expertise may now require a cheaper toolchain, a few good prompts, leaked code, commodity infrastructure, and persistence. Defenders should expect more actors to find more paths through systems that were previously protected by obscurity, friction, language barriers, or attacker fatigue.",
-        "What to check now: identify controls whose justification quietly depends on attackers giving up. Include obscure URLs, weak internal segmentation, reversible masking, client-side controls, permissive logs, unreviewed exports, stale credentials, lightly protected backups, and private documentation that becomes dangerous when discovered.",
-        "What to check now: separate controls that reduce nuisance risk from controls that can survive a capable adversary. Little-sister controls may still belong in the stack, but they should be labeled honestly. Do not let them satisfy requirements for sensitive data, privileged access, production systems, model artifacts, or customer records.",
-        "What to check now: revisit threat models that say 'only a nation-state could do this.' Ask which part actually requires a nation-state today. If AI-assisted reconnaissance, code analysis, phishing, translation, workflow mapping, or exploit variation removes the bottleneck, the defense is already outdated.",
-        "Anthus Threat Intelligence exists to study that shift as a practical operating problem. We are interested in the places where old scarcity assumptions still shape modern defenses, and in the checks readers can run before a newly capable attacker makes the lesson personal."
+        "Every security program rests on an assumption it rarely writes down: most attackers will give up. Not because they lack malice — the internet has never lacked malice — but because capability has always been scarce. Time, language skill, infrastructure, tooling, reverse-engineering patience, the discipline to keep trying after the first easy attempt fails: all of it was expensive, so most attackers stopped early.",
+        "AI changes the price. It does not make every attacker brilliant, and it does not hand every criminal crew the full intelligence apparatus of a nation-state. What it does is make pieces of that apparatus cheaper, faster, and easier to repeat. Reconnaissance can be automated. Variants can be generated. Phishing copy, translation, log analysis, target profiling, and persistence planning can be assisted at a scale that used to require a much larger team.",
+        "Consider an ordinary example: an internal reporting tool protected mostly by the fact that nobody outside the company knows its URL. For years that was a reasonable bet. The people who might stumble onto it lacked the patience to map an unfamiliar workflow. Automated reconnaissance does not lack patience. It maps everything it touches, and it does not get bored.",
+        "Many defenses were built around a quiet bargain: known to be limited, but good enough against casual attackers. They stopped opportunistic snooping, lazy credential reuse, a hurried bot. Against a patient, well-resourced adversary, everyone understood they could fail — and that was acceptable, because such adversaries were rare and had better things to do.",
+        "Call it little-sister encryption: protection that keeps out a curious sibling, a casual coworker, or a low-effort intruder, but was never a real boundary against someone determined. It is not useless. It reduces everyday risk. The mistake is asking it to carry a threat model it was never designed to carry.",
+        "That mistake used to be affordable. If only a state-level team could defeat a weak isolation boundary or an obscure internal service, the exposure could be rationalized as low. The calculation changes when ordinary criminal operators can rent, prompt, buy, or compose enough automation to behave like a far more capable team for the parts of the kill chain that matter.",
+        "The result is not that every attacker becomes elite. The result is that the number of viable threat actors goes up, dramatically. A weakness that once demanded rare expertise may now demand only a decent toolchain and persistence. Obscurity, friction, language barriers, and attacker fatigue are all worth less than they were. That is capability diffusion.",
+        "What to check now: find the controls whose real justification is that attackers give up. Obscure URLs, weak internal segmentation, reversible masking, client-side enforcement, stale credentials, lightly protected backups, and private documentation that becomes dangerous the day it is discovered.",
+        "What to check now: sort your controls honestly. Which ones reduce nuisance, and which can survive a capable adversary? Little-sister controls can stay in the stack, labeled as what they are. They should not be the only thing standing between an attacker and sensitive data, privileged access, production systems, or customer records.",
+        "What to check now: reread every threat model that says 'only a nation-state could do this' and ask which part still requires one. If AI-assisted reconnaissance, code analysis, or workflow mapping removes the bottleneck, the defense is already out of date.",
+        "Anthus Threat Intelligence exists to study that shift as a practical operating problem: the places where old scarcity assumptions still hold up modern defenses, and the checks worth running while the assumption is merely wrong, and not yet expensive."
       ]
     },
     {
@@ -57,8 +58,8 @@
       "shortSlug": "DATA",
       "section": "Mission",
       "headline": "The New Sensitive Data Estate",
-      "deck": "AI/ML work concentrates value in training sets, embeddings, prompts, outputs, evaluations, logs, notebooks, and operational traces. Each artifact can reveal customer data, business logic, model behavior, or operational judgment even when it does not look like a traditional sensitive database.",
-      "excerpt": "Secure AI work by inventorying what each artifact can reveal, not just where the original data lived. Training byproducts, logs, notebooks, embeddings, and evaluations often become concentrated records of customers, business logic, failures, and operational judgment. The sensitive estate now includes caches, exports, review queues, traces, and model-adjacent working files that may never look like official databases but can still expose the organization when copied, searched, or retained too long.",
+      "deck": "AI/ML work concentrates value in artifacts that do not look like databases: embeddings, prompt logs, notebooks, evaluation sets, traces.",
+      "excerpt": "The training data was governed. The notebook that sampled it, the evaluation set that encoded its failures, and the log that recorded every prompt were not.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -66,16 +67,16 @@
         "The first control is knowing what now exists."
       ],
       "body": [
-        "AI/ML programs do not merely consume sensitive data. They create new forms of it. A training corpus may contain customer records, internal decisions, private communications, proprietary process knowledge, regulated artifacts, or operational history. The work around that corpus then creates derivatives: embeddings, prompts, evaluation sets, labels, notebooks, traces, generated outputs, and tuning decisions.",
-        "Those derivatives can be just as valuable as the source data. An embedding index may reveal semantic relationships. A prompt log may expose business logic. A notebook may contain credentials, sample records, or a shortcut that became production practice. An evaluation set may encode exactly what the organization fears the system will mishandle.",
-        "This is the new sensitive data estate. It does not always look like a database. It may be a bucket, a vector index, a workspace, a cache, a queue, a transcript, a dashboard export, a model artifact, or a pile of operational logs kept because they were useful during development.",
-        "The security challenge is that this estate grows through normal work. Teams experiment, copy samples, run evaluations, inspect failures, and preserve traces for debugging. None of that is inherently careless. The risk comes when the security model still sees only the old source systems while the AI/ML pipeline has created new stores of concentrated context.",
-        "The practical defensive principle is simple: treat AI/ML artifacts according to what they can reveal, not according to what file extension, product category, or team boundary they happen to have.",
-        "What to check now: build an inventory of AI/ML data stores and derivatives. Include training data, validation data, embeddings, feature stores, prompt and response logs, human review queues, notebooks, experiment trackers, model artifacts, and exports used for debugging or evaluation.",
-        "What to check now: map access by task, not by team. A person or service may need to evaluate model quality without needing raw sensitive records. A support workflow may need a summary without needing prompt history. A development environment may need synthetic examples instead of production traces.",
-        "What to check now: review retention defaults. AI/ML systems often keep logs and intermediate artifacts because they are useful. That usefulness needs an expiration policy. If an artifact is sensitive enough to harm the organization when copied, it is sensitive enough to deserve an owner, a retention window, and monitoring.",
-        "What to check now: look for silent data multiplication. Backups, notebook downloads, manual test files, copied evaluation sets, cached retrieval results, and ad hoc exports often carry the real blast radius. The official system may be governed while the working copies are not.",
-        "Anthus Threat Intelligence will keep returning to this estate because it is where many AI security failures become practical. The problem is not only model behavior. It is the shape, movement, and memory of the data around the model."
+        "A data scientist copies a few thousand production records into a notebook to debug a model. The experiment ends in March. The notebook is still there in November — synced to a laptop, duplicated into a shared workspace, holding customer data that no inventory has ever listed.",
+        "AI/ML programs do not merely consume sensitive data. They create new forms of it. A training corpus may hold customer records, internal decisions, private communications, or proprietary process knowledge. The work around that corpus then creates derivatives: embeddings, prompts, evaluation sets, labels, notebooks, traces, and tuning decisions.",
+        "The derivatives can be worth as much as the source. An embedding index reveals semantic relationships. A prompt log exposes business logic. A notebook may contain credentials, sample records, or a shortcut that quietly became production practice. An evaluation set encodes exactly what the organization fears its system will mishandle.",
+        "This is the new sensitive data estate, and it rarely looks like a database. It looks like a bucket, a vector index, a cache, a transcript, a dashboard export, a pile of operational logs kept because they were useful during development.",
+        "The estate grows through normal work, which is what makes it hard to see. Teams experiment, copy samples, run evaluations, and preserve traces for debugging. None of that is careless. The risk arrives when the security model still watches only the original source systems while the pipeline has been quietly building new stores of concentrated context.",
+        "The defensive principle is simple: treat AI/ML artifacts according to what they can reveal, not according to their file extension, product category, or team boundary.",
+        "What to check now: build an inventory of AI/ML data stores and their derivatives — training data, embeddings, prompt and response logs, review queues, notebooks, model artifacts, and the exports made along the way.",
+        "What to check now: map access by task, not by team. Evaluating model quality rarely requires raw sensitive records. A support workflow may need a summary, not the prompt history. A development environment may need synthetic examples, not production traces.",
+        "What to check now: review retention defaults, then go looking for silent multiplication. Logs and intermediate artifacts get kept because they are useful, and usefulness needs an expiration date. The official system is often governed while the working copies — notebook downloads, copied evaluation sets, cached retrieval results, ad hoc exports — carry the real exposure.",
+        "We will keep returning to this estate, because it is where many AI security failures become practical. The problem is not only how the model behaves. It is the shape, movement, and memory of the data around it."
       ]
     },
     {
@@ -83,8 +84,8 @@
       "shortSlug": "CHECKS",
       "section": "Mission",
       "headline": "From Lessons Learned to Defenses Checked",
-      "deck": "The point of threat intelligence is not to admire the attack. It is to turn other people's hard lessons into checks readers can run, habits they can tighten, and assumptions they can challenge before the same weakness appears in their own environment.",
-      "excerpt": "Good threat intelligence should leave teams with something to inspect, not just something to remember. Use each reported failure to tighten a habit, verify a control, or challenge an assumption before the same weakness shows up in your own AI and security environment. The point is to turn incidents, research notes, and near misses into concrete checks that can be assigned, repeated, and reviewed before the lesson becomes personal.",
+      "deck": "The point of threat intelligence is not to admire the attack. Every lesson someone else paid for should become a check you can run.",
+      "excerpt": "An incident report is a bill someone else already paid. Most teams read it, nod, and file it under 'not our stack.' The lesson was never about the stack.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "pullQuotes": [
@@ -92,15 +93,16 @@
         "We want intelligence that changes behavior."
       ],
       "body": [
-        "Threat reporting often stops at the most dramatic part of the story. Something was exposed, bypassed, chained, extracted, or abused. The details may be interesting, but interest is not enough. The useful question is what the defender can inspect before the lesson becomes personal.",
-        "Anthus Threat Intelligence will approach the AI/ML information-security space as a living body of evidence. Individual attacks, near misses, research findings, architectural mistakes, and operational failures become more valuable when they are connected to each other. The goal is to find patterns that explain how risk is moving.",
-        "That means the publication should not behave like a feed of recent vulnerabilities. A feed can tell readers what happened. It does not necessarily tell them which habit to change, which control to verify, or which assumption to retire. We want intelligence that changes behavior.",
-        "Our editorial pattern is straightforward: identify the trend, explain the failure mode, extract the defensive lesson, and translate that lesson into checks that security and AI/ML teams can run against their own systems.",
-        "Some checks will be immediate and specific: review access to prompt logs, confirm who can export embeddings, test whether service accounts can read training artifacts they do not need, or inspect where notebook outputs are stored. Other checks will mature into generalized best practices tagged by cloud service, vendor, system type, control family, and use case.",
-        "What to check now: when reading any incident or research note, ask what class of asset made the failure possible. Was it identity, data movement, retrieval, logging, model interaction, supply chain, human review, or deployment automation? If the class exists in your environment, the lesson may apply even when the product names differ.",
-        "What to check now: maintain a defensible lessons register. For each lesson, record the trend, the relevant assets, the control that would reduce risk, the owner who can verify it, and the date it was last checked. A lesson that cannot be assigned or checked will decay into awareness.",
-        "What to check now: separate confidence from urgency. Some threats are real but poorly understood. Some are mundane but already active. A practical program needs room for both: investigation where evidence is thin, and immediate control work where the failure mode is already clear.",
-        "Over time, Anthus Threat Intelligence should become more than a stream of articles. It should become a curated map of AI/ML security lessons, defensive practices, and recurring checks. The first obligation is modest and strict: every article should help readers defend something they are responsible for."
+        "A breach writeup makes the rounds. The team reads it, agrees it is interesting, and notes with some relief that they use a different vendor. Filed. Forgotten. Except the failure was never about the vendor — it was about an export path with no owner, and the team has three of those.",
+        "Threat reporting tends to stop at the dramatic part: something was exposed, bypassed, chained, or abused. Interesting is not the same as useful. The useful question is what a defender can inspect while the lesson still belongs to someone else.",
+        "We treat the AI/ML security space as a living body of evidence. Individual attacks, near misses, research findings, and architectural mistakes each become more valuable when connected to the others. The goal is pattern: how risk is moving, not just where it last landed.",
+        "That means this publication should not behave like a vulnerability feed. A feed tells you what happened. It does not tell you which habit to change, which control to verify, or which assumption to retire. We want intelligence that changes behavior.",
+        "The editorial pattern is fixed: identify the trend, explain the failure mode, extract the defensive lesson, and translate the lesson into checks a team can actually run.",
+        "Some checks are immediate and specific — review who can access prompt logs, confirm who can export embeddings, test whether service accounts can read training artifacts they do not need. Others mature into general practices, tagged by cloud service, control family, and use case, and returned to as the evidence grows.",
+        "What to check now: when you read any incident or research note, ask what class of asset made the failure possible. Identity? Data movement? Retrieval? Logging? Human review? If the class exists in your environment, the lesson may apply even when every product name differs.",
+        "What to check now: keep a lessons register you could defend. For each lesson: the trend, the assets it touches, the control that would reduce the risk, the owner who can verify it, and the date it was last checked. A lesson that cannot be assigned will decay into awareness.",
+        "What to check now: separate confidence from urgency. Some threats are real but poorly understood; some are mundane and already active. A practical program makes room for both — investigation where evidence is thin, immediate control work where the failure mode is clear.",
+        "Over time this should become more than a stream of articles: a curated map of AI/ML security lessons, defensive practices, and recurring checks. The first obligation is modest and strict — every article should help you defend something you are responsible for."
       ]
     },
     {
@@ -108,8 +110,8 @@
       "shortSlug": "LEARN",
       "section": "Newsroom",
       "headline": "How Our Newsroom Learns",
-      "deck": "Attackers are using tireless automation to expand what they can do. Defenders need the same persistence applied to evidence, trend analysis, and practical guidance, with expert judgment steering what matters and AI doing the patient work of watching patterns emerge.",
-      "excerpt": "Our newsroom uses continuous AI-assisted research, expert steering, and a growing threat-intelligence knowledge base to turn noisy security signals into practical advice defenders can act on. The goal is not more content for its own sake. It is a defender-side learning system that watches patterns, preserves evidence, compares new signals against past work, and gives seasoned security judgment a persistent operating surface.",
+      "deck": "Attackers no longer get tired. Defenders need the same persistence in how they learn — expert judgment steering, AI doing the patient watching.",
+      "excerpt": "A security team that reads occasional reports is competing against adversaries that never stop watching. This newsroom is built to close that gap.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
       "image": {
@@ -136,16 +138,15 @@
         "The newsroom is a defensive system for turning noise into checks."
       ],
       "body": [
-        "The balance of power is shifting because attacker capability is becoming less scarce. Reconnaissance, translation, variant generation, target profiling, workflow mapping, and patient repetition are getting cheaper. That does not only change how defenders should secure systems. It changes how defenders should learn.",
-        "A security team that reads occasional reports is competing against adversaries that can keep watching. A publication that waits for obvious incidents is competing against automated discovery, automated testing, and criminal operators willing to run the same playbook until a path opens. Defenders need their own form of persistence.",
-        "Our newsroom is built around that problem. Seasoned information-security experts set the direction: what matters, what is credible, what deserves caution, and what kind of advice would help a real operator. AI systems handle much of the patient work: watching signals, gathering context, comparing sources, surfacing patterns, and preparing structured material for review.",
-        "Papyrus is the CMS and workflow system that supports this newsroom, but the important idea is broader than the software: a defender-side intelligence operation should accumulate memory, preserve evidence, and turn continuous research into decisions that a human can inspect.",
-        "The goal is not to publish more words. The goal is to keep learning between articles. Each source, research packet, trend, entity, relationship, and editorial decision should make the next cycle smarter. The newsroom should know what it has already seen, what it trusts, where the gaps are, and which checks have become more urgent.",
-        "That is where AI is useful when it is constrained by expert steering. It can work through repetitive comparisons, maintain long-running research tracks, notice weak signals, and prepare evidence for human judgment. It can be ever-persistent without being the authority.",
-        "The defensive output has to stay practical. A trend matters when it changes what a team should inspect. A technique matters when it changes a control assumption. A new attacker capability matters when it expands the set of viable threat actors or lowers the cost of a campaign.",
-        "What to check now: ask whether your own security learning process has the same persistence you assume attackers now have. If your threat model changed because of AI, your intelligence workflow probably needs to change too.",
-        "What to check now: separate expert judgment from repetitive labor. Humans should decide priority, credibility, and action. Automated systems should help maintain memory, find relationships, compare signals, and prepare the next useful question.",
-        "This publication is one example of that adjustment. It uses AI not as a shortcut around expertise, but as a way to give expertise a continuous working surface. The promise is practical advice that is grounded, current, and easier to act on before the lesson becomes personal."
+        "The balance of power is shifting because attacker capability is getting cheap. That changes more than how defenders should secure systems. It changes how defenders should learn.",
+        "A security team that reads occasional reports is competing against automated discovery, automated testing, and operators willing to run the same playbook until a path opens. The attacker's advantage is not brilliance. It is that the watching never stops. Defenders need their own form of persistence.",
+        "Our newsroom is built around that problem. Seasoned information-security experts set the direction: what matters, what is credible, what deserves caution, and what kind of advice would help a real operator. AI systems handle the patient work: watching signals, gathering context, comparing sources, and preparing structured material for review.",
+        "Papyrus is the CMS and workflow system underneath, but the idea is bigger than the software: a defender-side intelligence operation should accumulate memory, preserve evidence, and turn continuous research into decisions a human can inspect.",
+        "The goal is not to publish more words. It is to keep learning between articles. Each source, trend, entity, and editorial decision should make the next cycle smarter. The newsroom should know what it has already seen, what it trusts, where the gaps are, and which checks have become urgent.",
+        "AI is useful here precisely because it is constrained. It can maintain long-running research tracks, work through repetitive comparisons, notice weak signals, and prepare evidence for human judgment. It can be tireless without being the authority.",
+        "What to check now: ask whether your own security learning has the persistence you now assume attackers have. If AI changed your threat model, it probably needs to change your intelligence workflow too.",
+        "What to check now: separate expert judgment from repetitive labor. Humans decide priority, credibility, and action. Automation maintains memory, finds relationships, compares signals, and prepares the next useful question.",
+        "This publication is one working example of that adjustment: AI not as a shortcut around expertise, but as a way to give expertise a continuous operating surface — and to keep the resulting advice grounded, current, and easy to act on."
       ]
     },
     {
@@ -153,8 +154,8 @@
       "shortSlug": "MEMORY",
       "section": "Newsroom",
       "headline": "The Knowledge Base Beneath the Newsroom",
-      "deck": "A useful AI newsroom needs memory: curated sources, extracted entities, semantic relationships, and graph structure that can be searched, compared, and improved over time. That memory lets new research inherit context instead of starting every assignment from scratch.",
-      "excerpt": "The newsroom does not start from a blank prompt. It builds from accepted references, source trails, extracted entities, ontology relationships, and graph structure that help new research inherit what earlier work already established. That memory lets the system connect actors, tools, services, controls, assets, and recurring failure modes over time, so each assignment can begin with accumulated context instead of rediscovering the same background again.",
+      "deck": "A useful AI newsroom needs memory: curated sources, extracted entities, and graph structure that improves with every cycle.",
+      "excerpt": "New research here does not start from a blank prompt. It inherits the actors, assets, failure modes, and open questions that earlier work already established.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
       "pullQuotes": [
@@ -162,15 +163,15 @@
         "A graph lets new research inherit old context."
       ],
       "body": [
-        "A newsroom that uses AI well cannot treat every assignment as a blank prompt. Threat intelligence depends on continuity. Sources need provenance. Claims need context. Actors, tools, techniques, cloud services, data types, controls, and failure modes need to be connected across time.",
-        "The knowledge base is the newsroom's working memory. It starts with accepted references and source trails, not anonymous summaries. Human curation decides what belongs in that memory, what needs caution, and what should stay outside the trusted record.",
-        "Once material is accepted, it becomes more useful when it can be searched and related. Entity extraction identifies the people, organizations, products, services, techniques, vulnerabilities, assets, and controls that matter. Relationship extraction records how those entities interact: exploits target systems, services store data, controls reduce risks, and attacker behaviors repeat across incidents.",
-        "The semantic ontology gives that graph a shape. It helps distinguish an attacker from a tool, a tool from a technique, a technique from a control failure, and a control failure from a check readers can run. That structure matters because similar words are not always similar risks.",
-        "A semantic knowledge graph can then support algorithms that are difficult to run against a pile of articles. The newsroom can cluster related incidents, find repeated control failures, compare new evidence against known patterns, identify coverage gaps, and surface topics that are becoming more connected over time.",
-        "This does not remove editorial judgment. It gives judgment better instruments. A graph can suggest that two incidents rhyme, but an editor still decides whether the comparison is useful. A similarity score can find related material, but a reviewer still decides whether the source belongs in the trusted base.",
-        "The practical benefit is continuity. A reporter researching a new attack technique should be able to inherit prior context about related actors, exposed assets, defensive controls, and unresolved questions. A copywriter should be able to see the accepted evidence behind a claim. A future trend analysis should know which signals were already reviewed.",
-        "What to check now: look for security processes that depend on memory stored only in chat, inboxes, notebooks, or individual people. If a lesson cannot be retrieved, related, and reviewed, it will be hard to reuse when the pattern returns.",
-        "What to check now: treat source curation as security work. The quality of an AI-assisted intelligence system depends less on how fluent the model sounds and more on what evidence it is allowed to use."
+        "A newsroom that uses AI well cannot treat every assignment as a blank prompt. Threat intelligence depends on continuity: sources need provenance, claims need context, and actors, tools, techniques, and controls need to stay connected across time.",
+        "The knowledge base is the newsroom's working memory. It starts with accepted references and source trails, not anonymous summaries. Human curation decides what enters that memory, what needs caution, and what stays outside the trusted record.",
+        "Once material is accepted, structure makes it useful. Entity extraction identifies the people, organizations, products, techniques, and assets that matter. Relationship extraction records how they interact: exploits target systems, services store data, controls reduce risks, attacker behaviors repeat across incidents.",
+        "An ontology gives the graph its shape. It is what distinguishes an attacker from a tool, a tool from a technique, a technique from a control failure, and a control failure from a check a reader can run. Similar words are not always similar risks.",
+        "With that structure, the newsroom can do things that are hard to do against a pile of articles: cluster related incidents, spot repeated control failures, compare new evidence against known patterns, and notice topics becoming more connected over time.",
+        "None of this removes editorial judgment. It gives judgment better instruments. A graph can suggest that two incidents rhyme. An editor still decides whether the rhyme means anything.",
+        "The payoff is inheritance. A reporter researching a new technique starts with the related actors, exposed assets, and unresolved questions already attached. A copywriter can see the accepted evidence behind every claim. A future trend analysis knows which signals were already reviewed.",
+        "What to check now: find the security processes in your own organization whose memory lives only in chat threads, inboxes, and individual people. If a lesson cannot be retrieved and related, it will not be there when the pattern returns.",
+        "What to check now: treat source curation as security work. An AI-assisted intelligence system is only as good as the evidence it is allowed to use. Fluency is not the limiting factor."
       ]
     },
     {
@@ -178,8 +179,8 @@
       "shortSlug": "PIPELINE",
       "section": "Newsroom",
       "headline": "From Signals to Practical Advice",
-      "deck": "The goal is not more content. The goal is a pipeline that turns persistent research and trend detection into guidance security teams can actually use, while preserving source trails, uncertainty, risk flags, and the practical reason a topic deserves attention.",
-      "excerpt": "Researcher, reporter, and copywriter agents each handle different parts of the work, while expert steering keeps the system focused on operational risk instead of novelty, volume, or generic AI summaries. The pipeline matters because each handoff preserves source trails, open questions, risk flags, and practical implications, making the final advice easier to audit and more likely to change what a security team checks next.",
+      "deck": "Research, reporting, drafting, and review are different jobs with different constraints. The handoffs are what keep evidence and uncertainty intact.",
+      "excerpt": "A researcher finds it. A reporter frames it. A copywriter makes it readable. An editor decides whether it ships. Collapse those into one thread and you can no longer tell where the evidence ended and the confidence began.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
       "pullQuotes": [
@@ -187,24 +188,24 @@
         "Every stage should make the final advice more accountable."
       ],
       "body": [
-        "A continuous newsroom needs a pipeline, not a single magic prompt. Different kinds of work require different constraints. Finding sources is not the same as reporting a trend. Reporting a trend is not the same as drafting reader-facing guidance. Drafting guidance is not the same as deciding whether it should be published.",
-        "Researcher agents do the early legwork. They can monitor a beat, search for source material, compare new signals against the knowledge base, and prepare candidate evidence. Their job is breadth, persistence, and orientation.",
-        "Reporter agents turn selected research into structured context. A useful reporting packet should identify the angle, source trail, accepted evidence, open questions, risk flags, coverage gaps, and the practical reason the topic matters. It should make uncertainty visible instead of hiding it in confident prose.",
-        "Copywriter agents work from that selected packet. Their job is not to invent the story. Their job is to turn approved evidence and editorial direction into clear copy that a reader can scan, understand, and apply.",
-        "Expert steering runs through the whole process. Experienced security judgment decides which trends deserve attention, which sources are credible, which claims need restraint, and which recommendations are concrete enough to help a team operate.",
-        "Trend analysis connects the stages. A weak signal may not deserve an article today, but it may become meaningful when it repeats across services, industries, attacker groups, or control failures. The pipeline should preserve those signals so the newsroom can notice when they start to form a pattern.",
-        "The final output should be practical advice. That means more than explaining what happened. It means identifying what assumption changed, what asset class is affected, what control deserves review, and what a defender can check now.",
-        "What to check now: inspect AI-assisted workflows for structured handoffs. If research, reporting, drafting, and review all collapse into one conversational thread, evidence and uncertainty will be harder to audit.",
-        "What to check now: measure the pipeline by the quality of the resulting decisions. More summaries are not the goal. Better prioritization, better checks, and better continuity are the goal."
+        "A continuous newsroom needs a pipeline, not a single magic prompt. Finding sources is not the same as reporting a trend. Reporting a trend is not the same as drafting guidance. Drafting is not the same as deciding whether to publish. Each stage has its own constraints, and collapsing them together destroys the audit trail.",
+        "Researcher agents do the early legwork: monitor a beat, search for source material, compare new signals against the knowledge base, prepare candidate evidence. Their job is breadth and orientation.",
+        "Reporter agents turn selected research into structured context. A good reporting packet identifies the angle, the source trail, the open questions, the risk flags, and the practical reason the topic matters. It makes uncertainty visible instead of hiding it in confident prose.",
+        "Copywriter agents work from that packet. Their job is not to invent the story. It is to turn approved evidence and editorial direction into copy a reader can scan, understand, and apply.",
+        "Expert steering runs through all of it. Experienced security judgment decides which trends deserve attention, which sources are credible, which claims need restraint, and which recommendations are concrete enough to help a team operate.",
+        "Trend analysis connects the stages across time. A weak signal may not deserve an article today, but it becomes meaningful when it repeats across services, industries, or control failures. The pipeline preserves those signals so the pattern is visible when it forms.",
+        "The output has to stay practical: not just what happened, but what assumption changed, what asset class is affected, what control deserves review, and what a defender can check now.",
+        "What to check now: inspect your own AI-assisted workflows for structured handoffs. If research, drafting, and review all live in one conversational thread, evidence and uncertainty will be impossible to audit later.",
+        "What to check now: measure a pipeline by the decisions it produces, not the volume. More summaries are not the goal. Better prioritization, better checks, and better continuity are."
       ]
     },
     {
       "slug": "audit-aws-exposure-before-attackers-do",
       "shortSlug": "AWS",
-      "section": "AWS",
-      "headline": "Correlate AWS Exposure Signals Before They Chain",
-      "deck": "AWS risk rarely arrives as one finding. It appears when identity reachability, sensitive data, public paths, key policy, logging gaps, and suspicious activity line up across accounts. The work is to correlate those signals before an attacker does.",
-      "excerpt": "Use AWS-native signals to turn a noisy multi-account estate into a prioritized exposure queue. Security Hub, GuardDuty, Config, CloudTrail, CloudWatch, IAM Access Analyzer, Macie, and Detective each answer a different question; the defensive value comes from joining them into one view of what can be reached, abused, decrypted, or exfiltrated.",
+      "section": "Cloud",
+      "headline": "Turn AWS Findings Into an Exposure Queue",
+      "deck": "AWS risk rarely arrives as one finding. It shows up when identity, data, key policy, and logging gaps line up across accounts — and the work is to see the line-up first.",
+      "excerpt": "Security Hub, GuardDuty, Config, Macie, and Access Analyzer each answer one question — and nobody is responsible for the sentence they form together. That sentence is the finding that matters.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "image": {
@@ -231,25 +232,25 @@
         "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards."
       ],
       "body": [
-        "AWS exposure work is correlation work. A single finding can look ordinary until it is connected to a broad role, a public path, a sensitive bucket, a permissive KMS policy, a missing trail, or suspicious activity in the same account. Attackers are doing that joining work faster now, so defenders need to do it first.",
-        "The balance-of-power shift matters in AWS because enumeration is cheap. Automated actors can walk IAM permissions, S3 exposure, public endpoints, organization structure, CloudTrail gaps, KMS relationships, and known misconfigurations without needing the patience once associated with a state-backed team.",
-        "That makes the goal different from inventory hygiene. The useful output is an exposure queue: a ranked set of paths where an attacker could reach something valuable, expand privilege, decrypt data, hide activity, or move from one account to another.",
-        "Security Hub can help aggregate and prioritize findings, but it should not be treated as the only source of truth. It becomes stronger when it is enriched with account ownership, environment labels, data sensitivity, known exceptions, and current incident context.",
-        "GuardDuty answers a behavior question: is something suspicious happening now? Config answers a drift question: did a resource move away from the expected state? IAM Access Analyzer answers a reachability question: is access crossing a boundary that the team did not intend?",
-        "CloudTrail and CloudWatch answer control-plane and monitoring questions: what changed, who changed it, which APIs are being used, and are the important events visible enough to investigate? Macie adds S3 data-sensitivity context, and Detective helps analysts connect activity during an investigation.",
-        "The priority is where signals overlap. A broad role is worse near sensitive data. A public path is worse when keys allow decryption. A suspicious API call is worse when logging is incomplete. A stale exception is worse when it sits in a production account with no owner.",
-        "Start by checking coverage across accounts and regions. Confirm that each production account feeds the same findings pipeline, that excluded regions are intentional, and that every high-risk finding can be tied to an owner who can actually remediate it.",
-        "Then review the intersections: public and cross-account access, high-privilege identities, sensitive S3 data, KMS grants and key policies, exposed workloads, missing trails, and active threat signals. Do not let those reviews live in separate dashboards.",
-        "The operating question is simple: if an attacker mapped this AWS estate today, which chain would they build first? The defensive answer should already be visible in the queue, assigned to an owner, and moving toward closure."
+        "During a routine review, someone notices that an analytics account can read a bucket in production. Nobody remembers granting the access. On its own, the finding is a shrug — until it sits next to the broad role in that analytics account, the key policy that lets the role decrypt, and the region where logging was never fully enabled. Four ordinary findings. One path.",
+        "AWS exposure work is correlation work. A single finding looks routine until it connects to a permissive role, a public path, a sensitive bucket, or a gap in the audit trail. Automated adversaries can do that joining work quickly now, which means findings reviewed one dashboard at a time no longer count as a review.",
+        "Enumeration is cheap in AWS. IAM permissions, S3 exposure, public endpoints, and organization structure can all be walked mechanically, without the patience that used to be the barrier. That shifts the goal away from inventory hygiene toward something more pointed: an exposure queue — a ranked set of paths where someone could reach something valuable, expand privilege, or hide activity.",
+        "Security Hub helps aggregate and prioritize, but it is not the whole truth. It gets stronger when enriched with account ownership, environment labels, data sensitivity, known exceptions, and current incident context.",
+        "Each service answers one question. GuardDuty: is something suspicious happening now? Config: did a resource drift from its expected state? IAM Access Analyzer: is access crossing a boundary nobody intended?",
+        "CloudTrail and CloudWatch answer the control-plane questions — what changed, who changed it, and whether the important events are visible enough to investigate. Macie adds data-sensitivity context for S3. Detective helps an analyst connect activity when a signal needs deeper review.",
+        "Priority lives at the intersections. A broad role is worse near sensitive data. A public path is worse where key policy is permissive. A suspicious API call is worse where logging is incomplete. A stale exception is worse in a production account with no owner.",
+        "Start with coverage: every production account feeding the same findings pipeline, excluded regions intentional, and every high-risk finding tied to an owner who can actually remediate it.",
+        "Then review the intersections together — public and cross-account access, high-privilege identities, sensitive S3 data, key policies, missing trails, active threat signals. Do not let those reviews live in separate dashboards, run by separate people, on separate schedules.",
+        "The operating question is simple: if someone mapped this AWS estate today, which chain would they build first? The answer should already be sitting in the queue, assigned to an owner, and moving toward closure."
       ]
     },
     {
       "slug": "build-the-aws-exposure-control-stack",
       "shortSlug": "STACK",
-      "section": "AWS",
+      "section": "Cloud",
       "headline": "Build the AWS Findings Pipeline",
-      "deck": "A useful AWS control stack does not stop at detection. It routes findings into ownership, context, escalation, and closure so exposure reduction survives noisy accounts, temporary exceptions, and alert fatigue.",
-      "excerpt": "Treat AWS security services as inputs to an operating pipeline. The pipeline should normalize findings, enrich them with account and data context, route them to owners, distinguish drift from active threat, and prove closure. Without that workflow, even good AWS-native detections become dashboard archaeology.",
+      "deck": "Detection is the easy half. A findings pipeline routes signals into ownership, escalation, and closure — so exposure actually goes down.",
+      "excerpt": "When a high-risk finding appears at 2 a.m., whose queue does it land in, and what proves it got fixed? That workflow, not the service list, is the control.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "pullQuotes": [
@@ -257,26 +258,26 @@
         "Coverage is not the same as operations; every high-risk AWS signal needs a path to action."
       ],
       "body": [
-        "AWS security services are most useful when they feed an operating pipeline. The pipeline should collect signals, add context, decide priority, route work, track exceptions, and prove closure. Otherwise, the estate gains more alerts without gaining much defense.",
-        "Start with the questions each layer answers. Security Hub can centralize and normalize findings. GuardDuty can flag suspicious behavior and threat signals. Config can detect resource drift and compliance failures. IAM Access Analyzer can identify unintended access across account and organization boundaries.",
-        "CloudTrail and CloudWatch provide the control-plane and operational record: API calls, configuration changes, metric alarms, log signals, and evidence for investigation. Detective helps analysts follow relationships when a signal needs deeper review.",
-        "Macie belongs in the pipeline as data-sensitivity input for S3. It helps distinguish a merely exposed bucket from a bucket that contains regulated, personal, or business-critical data. That context should change the priority of access and encryption findings.",
-        "The pipeline should also understand the AWS organization. Account names, workload owners, environment labels, production status, data classification, and exception history are not cosmetic metadata. They determine who can fix the finding and how quickly it needs to move.",
-        "A common failure mode is treating findings as permanent background noise. Every high-risk class should have a routing rule, an owner, a remediation expectation, and an exception path with an expiration date. Suppression without ownership is just delayed exposure.",
-        "Separate active threat from posture drift. GuardDuty activity in an account with sensitive data and broad access should move differently than a low-risk configuration drift in a sandbox. The same dashboard can hold both, but the response path should not be identical.",
-        "Use deduplication carefully. Similar findings can point to one root cause, but they can also hide many separately owned resources. The pipeline should collapse noise without hiding the account, region, resource, and owner that make remediation possible.",
-        "What to check now: confirm Security Hub aggregation, GuardDuty coverage, Config rules, IAM Access Analyzer findings, CloudTrail retention, CloudWatch alarms, Macie coverage for sensitive S3 buckets, and Detective access for investigators.",
-        "Then check the workflow around the services: who owns each finding class, how exceptions expire, how urgent findings escalate, how remediation is verified, and how the team knows the same exposure did not return next week.",
-        "The AWS control stack is not a product list. It is a defensive workflow that turns cloud signals into decisions, assignments, and measurable reductions in exposure."
+        "The uncomfortable truth about AWS security services is that turning them on is the easy part. The estate then produces findings — steadily, forever — and findings without a workflow are just decorated risk. The pipeline is what turns signals into ownership, priority, escalation, and proof of closure.",
+        "Start with the question each layer answers. Security Hub centralizes and normalizes findings. GuardDuty flags suspicious behavior. Config detects drift and compliance failures. IAM Access Analyzer identifies access crossing account and organization boundaries.",
+        "CloudTrail and CloudWatch provide the record: API calls, configuration changes, alarms, and the evidence an investigation will need. Detective helps analysts follow relationships when a signal deserves deeper review.",
+        "Macie belongs in the pipeline as data-sensitivity input for S3. It distinguishes a merely exposed bucket from one holding regulated or business-critical data — context that should change the priority of every related access and encryption finding.",
+        "The pipeline also has to understand the organization itself. Account names, workload owners, environment labels, production status, and exception history are not cosmetic metadata. They determine who can fix a finding and how fast it needs to move.",
+        "The common failure mode is letting findings become permanent background noise. Every high-risk class needs a routing rule, an owner, a remediation expectation, and an exception path with an expiration date. Suppression without ownership is just deferred exposure.",
+        "Separate active threat from posture drift. GuardDuty activity in an account with sensitive data should move differently than low-risk drift in a sandbox. The same dashboard can hold both; the response path should not be identical.",
+        "Deduplicate carefully. Similar findings sometimes share one root cause — and sometimes hide many separately owned resources. Collapse the noise without losing the account, region, and owner that make remediation possible.",
+        "What to check now: Security Hub aggregation, GuardDuty coverage, Config rules, Access Analyzer findings, CloudTrail retention, Macie coverage for sensitive buckets, and Detective access for investigators.",
+        "Then check the workflow around the services: who owns each finding class, how exceptions expire, how urgent findings escalate, how remediation is verified, and how the team knows the same exposure did not quietly return next week.",
+        "The AWS control stack is not a product list. It is a workflow that turns cloud signals into decisions, assignments, and measurable reductions in exposure."
       ]
     },
     {
       "slug": "find-pii-risk-in-s3-buckets",
       "shortSlug": "S3PII",
-      "section": "AWS",
+      "section": "Cloud",
       "headline": "Find PII Risk in Your S3 Buckets",
-      "deck": "Start with a concrete AWS question: which S3 buckets contain PII, and which of those buckets create real exposure because of access, sharing, encryption, retention, ownership, or unclear remediation paths?",
-      "excerpt": "S3 discovery should turn bucket sprawl into decisions. Use inventory and Macie findings to identify likely PII, then combine those findings with Block Public Access settings, bucket policies, cross-account access, broad roles, KMS exposure, weak ownership, and unclear retention. The priority is to find the buckets where sensitive content and reachable access overlap.",
+      "deck": "Which S3 buckets hold PII, and which of those can actually be reached? The overlap is where the work is.",
+      "excerpt": "Every long-lived AWS estate has them: buckets of old exports, migration leftovers, analytics copies. Most are harmless. The job is finding the two that are not.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "pullQuotes": [
@@ -284,17 +285,17 @@
         "The risky bucket is the one where sensitive content and reachable access overlap."
       ],
       "body": [
-        "Start with the concrete AWS question: which S3 buckets contain PII that would create risk if the wrong person, role, workload, or outside account could reach it?",
+        "Somewhere in the estate is a bucket named something like customer-data-migration-temp-2023. The migration finished years ago. The bucket did not. Whether it is a non-event or a genuine problem comes down to two questions: what is in it, and what can reach it.",
         "A useful S3 review begins with inventory and scope. List the buckets that matter, identify owners, separate production data from exports and test data, and decide whether you need broad automated discovery, targeted discovery jobs, or both.",
-        "Use Macie automated discovery or targeted discovery jobs to find likely sensitive data in S3. Treat the results as a decision aid, not as an excuse to stop thinking. Classification needs review, ownership, and context before it becomes security work.",
-        "Review coverage before treating results as complete. Unsupported objects, encrypted content that cannot be analyzed, excluded buckets, sampling limits, and stale inventories can all create blind spots. A clean report is not the same as proof that no sensitive data exists.",
-        "Then combine sensitivity with exposure signals. Check Block Public Access settings, bucket policies, access points, ACLs, cross-account access, broad IAM roles, external principals, replication paths, public endpoints, and whether the bucket is reachable from workloads with weak controls.",
-        "Encryption matters, but only when key access is understood. Review KMS key policies, grants, administrative access, service access, rotation expectations, and whether broad identities can decrypt the same data the bucket review flagged as sensitive.",
-        "Ownership and retention matter too. A bucket full of old exports, forgotten logs, or copied customer records may not have a clear application owner. If nobody owns the data, nobody is making the risk decision about access, retention, deletion, or masking.",
-        "Prioritize where sensitive content and reachable access overlap. A bucket with likely PII, broad internal roles, cross-account paths, permissive key access, unclear retention, and no owner should move ahead of a well-owned bucket with narrow access and documented retention.",
-        "Remediation should be specific. Narrow the policy, remove stale principals, fix KMS access, turn on or verify Block Public Access, delete data that should not exist, move exports to controlled locations, add monitoring, and assign an owner for recurring review.",
-        "What to check now: bucket inventory, owner, data classification, public and cross-account paths, broad roles, access points, key policies, retention rules, and open remediation tickets for every bucket where PII and reachable access overlap.",
-        "S3 discovery is not full-estate PII discovery, but it is a practical place to start because S3 often becomes the landing zone for exports, logs, analytics, backups, and forgotten copies of sensitive data."
+        "Macie's automated or targeted discovery will find likely sensitive data. Treat the results as a decision aid, not a verdict. Classification needs review, ownership, and context before it becomes security work.",
+        "Check coverage before trusting completeness. Unsupported objects, content that cannot be analyzed, excluded buckets, sampling limits, and stale inventories all create blind spots. A clean report is not proof that no sensitive data exists.",
+        "Then combine sensitivity with exposure. Block Public Access settings, bucket policies, access points, cross-account access, broad roles, external principals, replication paths — the point is not to audit each in isolation, but to find where they touch the buckets the discovery flagged.",
+        "Encryption counts only when key access is understood. Review key policies, grants, and administrative access, and ask whether broad identities can decrypt the same data the bucket review just flagged as sensitive.",
+        "Ownership and retention close the loop. A bucket of old exports and forgotten logs often has no application owner — and if nobody owns the data, nobody is making the risk decision about access, retention, deletion, or masking.",
+        "Prioritize where sensitive content and reachable access overlap. Likely PII plus broad roles plus unclear retention plus no owner should move ahead of a well-owned bucket with narrow access and documented retention.",
+        "Remediation should be specific: narrow the policy, remove stale principals, fix key access, verify Block Public Access, delete data that should not exist, move exports to controlled locations, and assign an owner for recurring review.",
+        "What to check now: for every bucket where PII and reachable access overlap — owner, classification, public and cross-account paths, key policy, retention rules, and an open remediation ticket.",
+        "S3 is not the whole PII problem, but it is the right place to start. It is where exports, logs, analytics, backups, and forgotten copies of sensitive data tend to land."
       ]
     },
     {
@@ -302,8 +303,8 @@
       "shortSlug": "AZURE",
       "section": "Azure",
       "headline": "Map Azure Attack Paths Through Identity",
-      "deck": "Azure exposure starts with Entra identities, role assignments, applications, managed identities, subscriptions, and data stores. Defender for Cloud attack paths are useful because they show how separate weaknesses can become one route to impact.",
-      "excerpt": "Do not review Azure as a flat resource inventory. Start with Entra ID, Azure RBAC, PIM eligibility, app registrations, managed identities, Key Vault access, storage exposure, and Defender for Cloud attack paths. The Azure question is which identities and workloads can cross boundaries into sensitive systems.",
+      "deck": "In Azure the center of gravity is identity. The question is which identities and workloads can cross boundaries into sensitive systems.",
+      "excerpt": "A stale guest account, a group that conveys more power than its name suggests, an app permission granted in a hurry — none is an incident on its own; chained, they are a route.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
       "image": {
@@ -330,16 +331,17 @@
         "Attack paths matter because separate low-grade weaknesses can become one working route to impact."
       ],
       "body": [
-        "Azure exposure should not be treated as an AWS article with different service names. The center of gravity is identity: Entra users, groups, guests, app registrations, service principals, managed identities, role assignments, and the scopes where those identities can act.",
-        "The same scarcity collapse still applies. Attackers can automate tenant reconnaissance, role analysis, application-permission review, exposed-storage discovery, and path chaining. The defensive response is to map the paths first and remove the easy chains.",
-        "Start with Entra ID. Review who can sign in, which accounts are guests, which groups convey power, which applications have sensitive permissions, and which identities can become privileged through assignment, membership, consent, or eligibility.",
-        "Then follow Azure RBAC across management groups, subscriptions, resource groups, and resources. Inheritance is useful for administration and dangerous when broad roles land higher in the hierarchy than the workload actually requires.",
-        "Privileged Identity Management changes the review because active access is not the whole story. Eligible access, activation requirements, approvers, duration, and review cadence determine whether privilege is truly controlled or merely hidden until needed.",
-        "Conditional Access, MFA or passkeys, device conditions, location rules, and break-glass discipline define whether an identity path is hard to use or easy to abuse. A powerful role protected only by weak sign-in controls is still a reachable path.",
-        "Defender for Cloud attack-path analysis and secure score help prioritize combinations instead of isolated misconfigurations. The important question is which identity, workload, network, key, and data conditions connect into a route that could produce impact.",
-        "Sensitive systems make those routes matter. Key Vault access, storage account keys, SAS tokens, database roles, private endpoint design, public exposure, and Purview data context all change the severity of an identity path.",
-        "What to check now: global administrators, privileged role administrators, subscription owners, PIM-eligible users, stale guests, service principals, managed identities, app permissions, Key Vault access, and Defender for Cloud attack paths that touch sensitive data.",
-        "The Azure output should be a path map, not a prettier inventory. Show which identities can cross boundaries, which workloads they can reach, which sensitive systems sit at the end, and which controls will break the chain."
+        "Review an Azure tenant and you will find them: a guest account from a partnership that ended two years ago, still enabled; a group whose name says reporting and whose role assignments say rather more; an application granted broad permissions during a deadline. None of these is an incident. The question is what they connect to.",
+        "Azure exposure is not an AWS article with different service names. The center of gravity is identity: Entra users, groups, guests, app registrations, service principals, managed identities, and the scopes where those identities can act.",
+        "The same scarcity collapse applies here. Tenant reconnaissance, role analysis, and path chaining can all be automated now, so the defensive move is to map the paths first and remove the easy chains.",
+        "Start with Entra ID. Who can sign in, which accounts are guests, which groups convey power, which applications hold sensitive permissions — and which identities can become privileged through assignment, membership, consent, or eligibility.",
+        "Then follow Azure RBAC down the hierarchy: management groups, subscriptions, resource groups, resources. Inheritance is convenient for administration and dangerous when broad roles land higher than the workload actually requires.",
+        "Privileged Identity Management changes what a review means, because active access is not the whole story. Eligible access, activation requirements, approvers, and review cadence determine whether privilege is controlled or merely dormant.",
+        "Conditional Access, strong authentication, device conditions, and break-glass discipline decide whether an identity path is hard to use or easy to abuse. A powerful role behind weak sign-in controls is still a reachable path.",
+        "Defender for Cloud's attack-path analysis earns its place by prioritizing combinations instead of isolated misconfigurations: which identity, workload, network, key, and data conditions connect into a route that could produce impact.",
+        "Sensitive systems are what make routes matter. Key Vault access, storage account keys, SAS tokens, database roles, and public exposure all change the severity of the identity path that reaches them.",
+        "What to check now: global administrators, subscription owners, PIM-eligible users, stale guests, service principals and managed identities with strong permissions, app permissions, Key Vault access, and every Defender for Cloud attack path that ends at sensitive data.",
+        "The output should be a path map, not a prettier inventory: which identities can cross boundaries, what they can reach, which sensitive systems sit at the end, and which single control would break the chain."
       ]
     },
     {
@@ -347,8 +349,8 @@
       "shortSlug": "PIM",
       "section": "Azure",
       "headline": "Make Azure Admin Access Expire",
-      "deck": "Permanent Azure privilege turns yesterday's exception into tomorrow's compromise path. Use PIM, Conditional Access, access reviews, role scoping, and break-glass discipline to make powerful access temporary, justified, and visible.",
-      "excerpt": "The Azure privilege question is not just who is admin right now. It is who can activate admin, through which group or role, from what device and location, for how long, and with what review. Expiring privilege gives defenders a way to remove stale access before it becomes attacker leverage.",
+      "deck": "Standing admin access is a durable target. PIM, Conditional Access, and access reviews make privilege temporary, justified, and visible.",
+      "excerpt": "The contractor's project ended in the spring. Their eligibility to activate Owner did not. A review that only asks who is admin right now will never find it.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
       "pullQuotes": [
@@ -356,25 +358,25 @@
         "The privilege review should ask who can activate power, not only who currently holds it."
       ],
       "body": [
-        "Azure admin access should expire. Standing administrative access gives attackers a durable target, while temporary, reviewed, conditional access makes compromise harder to chain.",
-        "Start by separating active access from activatable access. A user with no active admin role may still be eligible to activate one through Privileged Identity Management. That can be good when activation is deliberate, logged, time-bound, and protected. It is dangerous when eligibility is broad, stale, or poorly reviewed.",
-        "Review Entra roles and Azure RBAC roles together. Global Administrator, Privileged Role Administrator, Owner, User Access Administrator, Key Vault Administrator, and subscription-level roles can interact in ways that create more power than any single list suggests.",
-        "Scope matters. A role assigned at a management group or subscription can reach far more than a role assigned to one resource group. If the task is narrow, the scope should be narrow too.",
-        "Conditional Access should protect activation and use. Require strong authentication, trusted devices where appropriate, location controls, sign-in risk checks, and clear exceptions. If a privileged path can be activated from an unmanaged device after a weak sign-in, it is not controlled enough.",
-        "Access reviews keep eligibility from becoming permanent background risk. Review privileged users, groups that grant power, guest accounts, emergency exceptions, and stale project access. Remove what no longer has a current business reason.",
-        "Break-glass accounts still need discipline. They should be few, monitored, tested, excluded only where necessary, and protected by procedures that assume their use is exceptional.",
-        "Do not ignore non-human privilege. Service principals, managed identities, automation accounts, deployment systems, and CI/CD credentials can hold powerful roles. Their assignments need owners, scopes, expiration expectations, and monitoring.",
-        "What to check now: active admins, PIM eligibility, activation settings, approvers, role scope, access-review cadence, stale groups, guest users, break-glass monitoring, and service principal assignments.",
-        "The goal is not to make administration painful. The goal is to make powerful access explicit when needed, visible while active, and gone when the reason for it ends."
+        "Azure admin access should expire. Standing administrative access gives an adversary a durable target; temporary, reviewed, conditional access makes any foothold harder to extend.",
+        "Start by separating active access from activatable access. A user with no active admin role may still be eligible to activate one through Privileged Identity Management. Done well — deliberate, logged, time-bound, protected — that is exactly the point. Done carelessly, eligibility becomes privilege no dashboard shows. A contractor whose project ended months ago, still eligible to activate a subscription role, is invisible to any review that only asks who is admin right now.",
+        "Review Entra roles and Azure RBAC together. Global Administrator, Privileged Role Administrator, Owner, User Access Administrator, and subscription-level roles interact in ways that create more power than any single list suggests.",
+        "Scope matters as much as role. An assignment at a management group reaches far more than one scoped to a resource group. Narrow task, narrow scope.",
+        "Conditional Access should protect both activation and use: strong authentication, trusted devices where appropriate, sign-in risk checks, and clear exceptions. A privileged path that can be activated from an unmanaged device after a weak sign-in is not controlled.",
+        "Access reviews keep eligibility from fossilizing into permanent background risk. Review privileged users, power-conveying groups, guest accounts, and emergency exceptions, and remove whatever no longer has a current business reason.",
+        "Break-glass accounts need their own discipline: few, monitored, tested, excluded only where necessary, and governed by procedures that assume their use is exceptional.",
+        "And do not ignore non-human privilege. Service principals, managed identities, automation accounts, and CI/CD systems hold powerful roles too. Their assignments need owners, scopes, expiration expectations, and monitoring, like anyone else's.",
+        "What to check now: active admins, PIM eligibility and activation settings, approvers, role scopes, access-review cadence, stale groups, guest users, break-glass monitoring, and service principal assignments.",
+        "The goal is not to make administration painful. It is to make powerful access explicit when needed, visible while active, and gone when the reason for it ends."
       ]
     },
     {
       "slug": "find-sensitive-data-paths-in-azure",
-      "shortSlug": "DATA",
+      "shortSlug": "AZDATA",
       "section": "Azure",
       "headline": "Classify Azure Data Where Access Paths Reach It",
-      "deck": "Sensitive data discovery in Azure should meet identity and network reality. Purview classification, Defender for Cloud context, Defender for Storage signals, Key Vault access, and storage controls help show where reachable paths lead to valuable data.",
-      "excerpt": "Use Purview scans and classification to find sensitive data, then combine that map with Defender for Cloud attack paths, Defender for Storage alerts, RBAC scope, SAS usage, storage keys, private endpoints, and Key Vault permissions. The useful output is a list of reachable data paths to close or narrow.",
+      "deck": "A catalog tells you where sensitive data may live. Security work starts when classification meets identity and network reality.",
+      "excerpt": "Purview says the container holds regulated data. The SAS token says anyone with the link can read it for another eleven months. The finding is the pair.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
       "pullQuotes": [
@@ -382,16 +384,17 @@
         "Classification should feed remediation, not sit apart from identity and network review."
       ],
       "body": [
-        "Sensitive-data discovery in Azure should meet identity and network reality. A catalog tells you where data may live. Security work starts when that catalog is connected to who and what can reach the data.",
-        "Use Microsoft Purview to scan and classify data sources, apply labels, identify sensitive information types, and maintain source metadata. That gives the team a better starting point than guessing where regulated or high-value data sits.",
-        "Then connect classification to Azure access paths. Review Azure RBAC, Entra groups, service principals, managed identities, storage account keys, SAS tokens, Key Vault permissions, private endpoints, firewall rules, and public exposure.",
-        "Defender for Cloud can help prioritize posture and attack paths, while Defender for Storage can add storage-focused threat and sensitivity context. These signals are strongest when they are joined to ownership and remediation workflows.",
-        "Storage needs special attention. Blob containers, data lake storage, file shares, analytics exports, backups, and temporary transfer locations can accumulate sensitive content. The question is not just whether data is labeled; it is whether the path to that data is controlled.",
-        "Keys can turn a narrow path into a wide one. Review Key Vault access, storage account key use, shared access signatures, long-lived tokens, and workloads that can retrieve secrets. Data classification without key review leaves a major blind spot.",
-        "Network controls matter too. Private endpoints, firewall rules, public network access, trusted service exceptions, and peering relationships can decide whether a sensitive store is reachable from a compromised workload.",
+        "A Purview scan labels a storage container: regulated data, correctly classified, neatly cataloged. The same container is reachable through a shared access signature created for a one-off analytics job — broad permissions, long expiry, no owner. The catalog entry is accurate. It is also not the finding. The finding is the pair.",
+        "Sensitive-data discovery in Azure has to meet identity and network reality. A catalog tells you where data may live. Security work starts when that catalog is joined to who and what can reach the data.",
+        "Use Microsoft Purview to scan and classify data sources, apply labels, and maintain source metadata. That is a far better starting point than guessing where regulated or high-value data sits.",
+        "Then connect classification to access paths: Azure RBAC, Entra groups, service principals, managed identities, storage account keys, SAS tokens, Key Vault permissions, and public exposure.",
+        "Defender for Cloud helps prioritize posture and attack paths, while Defender for Storage adds storage-focused threat and sensitivity context. Both are strongest when joined to ownership and a remediation workflow.",
+        "Storage deserves particular attention. Blob containers, file shares, analytics exports, and temporary transfer locations accumulate sensitive content. The question is not just whether the data is labeled. It is whether the path to that data is controlled.",
+        "Keys can turn a narrow path into a wide one. Review Key Vault access, storage account key use, shared access signatures, and which workloads can retrieve secrets. Classification without key review leaves a major blind spot.",
+        "Network controls matter too. Private endpoints, firewall rules, public network access, and trusted-service exceptions decide whether a sensitive store is reachable from a compromised workload.",
         "Ownership and retention finish the loop. Sensitive data without an owner becomes permanent risk. Old exports, abandoned analytics copies, test data, and unneeded backups should be assigned, reduced, masked, moved, or deleted.",
-        "What to check now: Purview coverage, sensitive labels, Defender for Cloud attack paths, Defender for Storage findings, RBAC scope, SAS usage, account keys, Key Vault access, private endpoints, public access, owners, and retention rules.",
-        "The useful Azure output is a list of reachable data paths to close or narrow. Classification is the starting signal; reduced reachability is the security outcome."
+        "What to check now: Purview coverage and labels, Defender for Cloud attack paths, Defender for Storage findings, RBAC scope, SAS usage and expiry, account keys, Key Vault access, private endpoints, public access, owners, and retention rules.",
+        "The useful output is a list of reachable data paths to close or narrow. Classification is the starting signal. Reduced reachability is the security outcome."
       ]
     },
     {
@@ -399,8 +402,8 @@
       "shortSlug": "AI",
       "section": "AI",
       "headline": "Govern OpenAI Workspaces Like Access Boundaries",
-      "deck": "OpenAI security is not only prompt hygiene. Workspaces, projects, service accounts, connectors, files, custom actions, and API keys define who can use AI systems and what business data they can reach.",
-      "excerpt": "Treat OpenAI administration as access-boundary work. Review workspace owners, SSO and SCIM, project membership, service accounts, API keys, connected apps, uploaded knowledge, audit logs, and data-retention settings so a compromised user or token cannot quietly inherit the whole organization's AI surface.",
+      "deck": "OpenAI security is not prompt hygiene. Workspaces, projects, keys, connectors, and files decide who can use AI systems and what business data they can reach.",
+      "excerpt": "The engineer left in January — but the workspace invite, the project membership, and the connector they authorized are all still live. Nobody watches that boundary, because nobody decided it was one.",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
       "image": {
@@ -427,16 +430,16 @@
         "Prompt security does not matter much if workspace access is unmanaged."
       ],
       "body": [
-        "OpenAI security is not just prompt hygiene. The real boundary is made of workspaces, projects, members, roles, service accounts, API keys, connectors, uploaded files, custom actions, audit trails, and retention settings.",
-        "That makes the AI section different from cloud exposure review. This is a SaaS and developer-platform control plane. The question is not only what infrastructure can be reached, but who can use AI systems, which business data they can connect, and which actions those systems can take.",
-        "Start with identity. Workspace owners and admins should be intentional, membership should follow employment and group lifecycle, and strong account protection should be treated as a requirement for anyone who can administer users, apps, projects, keys, or data.",
-        "SSO and SCIM matter because informal user lifecycle does not scale. If people join and leave through manual invitations, stale accounts and accidental admins become normal. Managed lifecycle keeps the workspace closer to the real organization.",
-        "Project structure matters on the API side. Production, development, experimentation, client work, and personal testing should not all share the same keys, service accounts, budgets, or access assumptions.",
-        "Connectors and apps change the data boundary. A workspace that can reach drives, repositories, tickets, calendars, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface that mess.",
-        "Auditability matters because AI access can be quiet. Review logs, admin events, app changes, key creation, unusual usage, connector changes, and retention settings. Security teams need to know not only that AI is being used, but which boundary it is crossing.",
-        "The balance-of-power shift applies here because attackers can automate credential theft, OAuth abuse, leaked-secret discovery, phishing, and quiet use of compromised accounts. Defenders need the same persistence applied to account review and key hygiene.",
-        "What to check now: workspace owners, admin roles, SSO and SCIM, MFA or passkey adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, usage anomalies, and retention settings.",
-        "The goal is to make one compromised user, token, app, or project boring. It should be bounded, visible, revocable, and unable to quietly become organization-wide exposure."
+        "An engineer leaves the company. The laptop is collected and the SSO account disabled — but the OpenAI workspace membership, added by manual invite a year earlier, survives all of it. So does the connector they authorized. Nobody watches that boundary, because nobody decided it was one.",
+        "OpenAI security is not just prompt hygiene. The real boundary is made of workspaces, projects, members, roles, service accounts, API keys, connectors, uploaded files, and retention settings.",
+        "That makes this a different kind of review than cloud exposure work. It is a SaaS and developer-platform control plane. The question is not what infrastructure can be reached, but who can use AI systems, which business data they can connect, and which actions those systems can take.",
+        "Start with identity. Workspace owners and admins should be intentional. Membership should follow employment and group lifecycle. Strong account protection is a requirement for anyone who can administer users, apps, projects, keys, or data.",
+        "SSO and SCIM matter because informal lifecycle does not scale. If people join and leave through manual invitations, stale accounts and accidental admins become normal. Managed lifecycle keeps the workspace aligned with the real organization.",
+        "Project structure matters on the API side. Production, development, experimentation, and client work should not share the same keys, service accounts, budgets, or access assumptions.",
+        "Connectors and apps move the data boundary. A workspace that can reach drives, repositories, tickets, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface the mess.",
+        "Auditability matters because AI access is quiet. Review admin events, key creation, app and connector changes, unusual usage, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing.",
+        "What to check now: workspace owners, admin roles, SSO and SCIM, MFA or passkey adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, and retention settings.",
+        "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become organization-wide exposure."
       ]
     },
     {
@@ -444,25 +447,25 @@
       "shortSlug": "KEYS",
       "section": "AI",
       "headline": "Scope OpenAI Keys to One Job",
-      "deck": "An OpenAI key should represent one workload, one project, one owner, and one revocation path. Shared all-purpose keys turn a leak into an organization-wide incident.",
-      "excerpt": "Separate OpenAI projects by environment and workload, use service accounts for automation, restrict key permissions, keep secrets server-side, monitor usage, and rotate on a tested path. Where workload identity federation fits, prefer short-lived access over static keys that live forever in deployment history.",
+      "deck": "An OpenAI key should represent one workload, one owner, and one clean revocation path.",
+      "excerpt": "The key was created for a prototype. It now powers a production feature, two internal tools, and a demo nobody remembers. Which of them breaks when you rotate it?",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
       "pullQuotes": [
         "A key should have one job, one owner, and one clean revocation path.",
-        "Shared all-purpose keys turn small leaks into broad incidents."
+        "Sprawl, not sophistication, is what turns small problems into big ones."
       ],
       "body": [
-        "OpenAI API keys should be scoped to one job. If a key powers many workloads, many environments, or many teams, then one leak becomes an organization-wide incident response problem.",
-        "Start with project separation. Keep production, development, experiments, demos, client work, and personal testing in different projects where practical. A prototype key should not have a path into production usage or unrelated customer data.",
+        "An OpenAI API key should be scoped to one job. The prototype key that quietly became load-bearing — powering a production feature, two internal tools, and a demo — cannot be rotated, restricted, or revoked without breaking something nobody can name in advance. Sprawl, not sophistication, is what turns small problems into big ones.",
+        "Start with project separation. Keep production, development, experiments, demos, and client work in different projects where practical. A prototype key should have no path into production usage or unrelated customer data.",
         "Use service accounts for automation instead of tying long-running systems to individual users. Human accounts change roles, leave companies, and accumulate permissions. Workload identity should be owned by the system it serves.",
-        "Restrict key permissions. A read-only or narrowly scoped key is better than a key that can administer resources, create more keys, or operate across projects. The default should be the least authority the workload needs.",
-        "Keep keys server-side. Do not place OpenAI keys in browser code, mobile apps, shared notebooks, public repositories, screenshots, tickets, or client-side configuration. Treat them like production secrets, because they are.",
-        "Use a secrets manager and a tested rotation path. Rotation that nobody has practiced will be skipped during an incident. Each key should have an owner, a creation reason, a last-reviewed date, and a known revocation procedure.",
-        "Monitor usage by project and workload. Sudden spikes, unusual models, odd geographies, unexpected endpoints, and after-hours patterns should be visible enough for someone to notice before the bill or data exposure grows.",
-        "Budgets and rate limits are not full security controls, but they reduce damage. They make abuse more visible and limit how far an exposed key can run before someone responds.",
-        "Where supported and practical, prefer workload identity federation or other short-lived credential patterns over static secrets. Short-lived access reduces the value of a key that leaks into logs, deployment history, or developer machines.",
-        "What to check now: project boundaries, service accounts, key permissions, Admin API keys, server-side storage, rotation dates, owner records, usage dashboards, budgets, rate limits, and the incident path for immediate revocation."
+        "Restrict key permissions. A narrowly scoped key beats one that can administer resources, create more keys, or operate across projects. Default to the least authority the workload needs.",
+        "Keep keys server-side. Not in browser code, mobile apps, shared notebooks, public repositories, screenshots, or tickets. Treat them like production secrets, because they are.",
+        "Use a secrets manager and a tested rotation path. Rotation nobody has practiced will be skipped when it matters most. Each key deserves an owner, a creation reason, a last-reviewed date, and a known revocation procedure.",
+        "Monitor usage by project and workload. Sudden spikes, unusual models, and after-hours patterns should be visible enough for someone to notice early.",
+        "Budgets and rate limits are not full security controls, but they bound damage and make anomalies visible before the bill does.",
+        "Where supported and practical, prefer workload identity federation or other short-lived credential patterns over static secrets that live forever in deployment history and on developer machines.",
+        "What to check now: project boundaries, service accounts, key permissions, Admin API keys, server-side storage, rotation dates, owner records, usage dashboards, budgets, rate limits, and the procedure for immediate revocation."
       ]
     },
     {
@@ -470,8 +473,8 @@
       "shortSlug": "APPS",
       "section": "AI",
       "headline": "Control ChatGPT Connectors and Actions",
-      "deck": "ChatGPT becomes more sensitive when it can reach files, drives, apps, repositories, calendars, tickets, agents, and actions. Workspace admins need connector governance, source-permission hygiene, and approval rules.",
-      "excerpt": "Review which ChatGPT connectors and apps are enabled, who can use them, what OAuth scopes they request, which domains are trusted, which actions need confirmation, and whether source systems already have stale sharing. Connected AI inherits the permissions of connected systems.",
+      "deck": "Once ChatGPT can reach drives, repositories, and actions, workspace security is about what the workspace can reach and do — not just who can log in.",
+      "excerpt": "The folder was over-shared for years and nobody noticed, because noticing required knowing where to look. A connector turns looking into asking.",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
       "pullQuotes": [
@@ -479,25 +482,26 @@
         "Workspace security is not just who can log in; it is what the workspace can reach and do."
       ],
       "body": [
-        "ChatGPT workspace security changes when the workspace connects to company systems. Files, drives, repositories, calendars, tickets, internal knowledge, agents, and actions can turn a chat surface into a business-data access surface.",
-        "Start with connector governance. Decide which connectors are allowed, who can enable them, which groups can use them, and what approval process is required before a new app reaches company data.",
-        "Review OAuth scopes and connected-app permissions. Broad scopes, stale grants, personal app installs, and unclear ownership can give connected AI more reach than the workspace admin intended.",
-        "Source permissions still matter. If a drive, wiki, repository, or ticketing system already has messy sharing, connected AI can make that mess easier to query. Fixing connector policy without fixing source-system access leaves the exposure in place.",
-        "Actions need explicit control. Tools that can send messages, change records, call APIs, create tickets, or trigger workflows should have approval rules, logs, and boundaries that match the consequence of the action.",
-        "Use groups and roles deliberately. Workspace owners, admins, builders, connector users, and ordinary users should not collapse into one informal access tier. The more connected the workspace becomes, the more role boundaries matter.",
-        "Review trusted domains, sharing controls, retention settings, and company-knowledge permissions. These settings shape where content can move and how long it remains available after the immediate work is done.",
-        "Audit logs should be part of routine review. Look for connector changes, app approvals, role changes, unusual access, new actions, and data sources that were added without a clear owner.",
-        "What to check now: enabled connectors, app approvals, OAuth scopes, allowed groups, trusted domains, action confirmation settings, source-system sharing, workspace roles, audit logs, retention, and the owner for every connected data source.",
-        "The practical rule is simple: connected AI should not inherit accidental access. It should inherit deliberate, reviewed, and revocable access."
+        "An HR folder sits over-shared for years and nobody notices, because noticing requires knowing where to look. Then the workspace gets a drive connector, and looking becomes asking. The connector did not create the exposure. It made the exposure conversational.",
+        "ChatGPT workspace security changes the moment the workspace connects to company systems. Files, drives, repositories, calendars, internal knowledge, and actions turn a chat surface into a business-data access surface.",
+        "Start with connector governance. Decide which connectors are allowed, who can enable them, which groups can use them, and what approval a new app needs before it reaches company data.",
+        "Review OAuth scopes and connected-app permissions. Broad scopes, stale grants, personal installs, and unclear ownership can give connected AI more reach than any workspace admin intended.",
+        "Source permissions still matter most. If a drive, wiki, or ticketing system already has messy sharing, connector policy alone will not fix it. The exposure stays in place — just easier to query.",
+        "Actions need explicit control. Tools that can send messages, change records, call APIs, or trigger workflows should have approval rules, logs, and boundaries that match the consequence of the action.",
+        "Use groups and roles deliberately. Workspace owners, admins, builders, connector users, and ordinary users should not collapse into one informal access tier. The more connected the workspace becomes, the more the role boundaries matter.",
+        "Review trusted domains, sharing controls, retention settings, and company-knowledge permissions. These decide where content can travel and how long it lingers after the immediate work is done.",
+        "Make audit logs routine reading: connector changes, app approvals, role changes, unusual access, new actions, and data sources added without a clear owner.",
+        "What to check now: enabled connectors, app approvals, OAuth scopes, allowed groups, trusted domains, action confirmation settings, source-system sharing, workspace roles, audit logs, retention — and an owner for every connected data source.",
+        "The rule is simple: connected AI should not inherit accidental access. It should inherit deliberate, reviewed, revocable access."
       ]
     },
     {
       "slug": "how-to-play-games-securely",
       "shortSlug": "GAME",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "How to Play Games Securely",
-      "deck": "Treat unfamiliar games, experimental builds, launchers, mods, and anti-cheat drivers as software that deserves its own blast radius. Keep gaming separate from banking, work sessions, recovery accounts, and sensitive files so experimentation cannot drag everything else with it.",
-      "excerpt": "Keep gaming away from the accounts and files that would hurt most to lose. Use a dedicated device, separate OS account, or clean browser profile so launchers, mods, overlays, and community downloads cannot casually share space with banking, tax records, work sessions, or password recovery. The goal is not to make gaming sterile; it is to make experimentation cheap by keeping high-value personal and work data out of the same blast radius as unfamiliar software.",
+      "deck": "Games, mods, launchers, and anti-cheat drivers are software from strangers. Give them their own blast radius, away from banking, work, and recovery accounts.",
+      "excerpt": "You do not have to trust every mod and experimental build — you just have to make sure the machine running them can afford to lose the bet.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "image": {
@@ -524,24 +528,24 @@
         "Do not make one machine responsible for every part of your life."
       ],
       "body": [
-        "Games are software from strangers. That does not mean every game is hostile, and it does not mean players should live in fear. It means the security model should match the reality: games often arrive through launchers, update quickly, depend on social accounts, install overlays, load mods, run community servers, and sometimes include anti-cheat components with unusually deep access to the machine.",
-        "The most practical gaming security control is separation. A gaming rig should not be the same trust zone as banking, tax records, password vault recovery, source code, client files, production cloud sessions, or administrative work. If one machine does everything, every game, mod, launcher, browser session, and chat attachment inherits the same blast radius.",
-        "For many people, the best version of this rule is simple: do not connect your gaming environment to your bank records. Use a different device for financial accounts and high-value personal administration. A cheap laptop, a phone with strong account security, or a work-managed machine can be a better place for sensitive sessions than the box where you test experimental games and random mods.",
-        "A console or console-like gaming device can help because it narrows what the machine is for. It is not magic. Consoles have accounts, browsers, stores, cloud saves, voice chat, payment methods, and their own security history. But a dedicated device reduces temptation. If the game machine is for games, it is less likely to accumulate bank logins, tax PDFs, SSH keys, browser profiles, and saved administrator sessions.",
-        "PC players can build the same habit intentionally. Keep a separate operating system account for gaming. Use a separate browser profile with no saved financial credentials. Do not store sensitive documents in the gaming user's downloads folder. Keep password manager access deliberate instead of permanently unlocked. Treat mods, trainers, private servers, cheat tools, and vibe-coded executables as high-risk software unless you have a strong reason to trust them.",
-        "What to check now: list what your gaming machine can currently reach. Look for saved browser sessions, synced documents, cloud drive folders, SSH keys, developer tokens, remote desktop tools, password manager sessions, tax files, banking bookmarks, and work chat attachments. Remove what does not need to be there.",
-        "What to check now: separate accounts and payment paths. Use strong unique passwords and MFA for gaming stores, Discord, streaming accounts, and email. Avoid reusing the email-password pair that protects banking or work. Prefer limited payment methods over leaving broad financial access attached to every store account.",
-        "What to check now: decide what you are willing to reinstall. A secure gaming setup should be rebuildable. Back up saves and important settings, keep recovery codes somewhere off the gaming machine, and assume that a suspicious install may justify wiping the box instead of trying to prove every file is clean.",
-        "The goal is not to make gaming sterile. The goal is to make experimentation cheap. Play odd games, indie builds, foreign releases, mods, and prototypes if you want to. Just do it from a machine or account that can lose the bet without taking the rest of your life with it."
+        "Games are software from strangers. That does not make every game hostile, and it should not make players live in fear. It means the security model should match reality: games arrive through launchers, update constantly, depend on social accounts, load mods, run community servers, and sometimes install anti-cheat components with unusually deep access to the machine.",
+        "The most practical gaming security control is separation. A gaming rig should not share a trust zone with banking, tax records, password vault recovery, source code, client files, or administrative work. When one machine does everything, every game, mod, launcher, and chat attachment inherits access to all of it.",
+        "For many people the rule reduces to one sentence: do not connect your gaming environment to your bank records. A cheap laptop, a phone with strong account security, or a work-managed machine is a better home for financial sessions than the box where you test experimental builds and random mods.",
+        "A console helps because it narrows what the machine is for. Not magic — consoles have accounts, stores, payment methods, and their own security history — but a dedicated device reduces accumulation. If the game machine is for games, it does not slowly collect bank logins, tax PDFs, SSH keys, and saved administrator sessions.",
+        "PC players can build the same habit deliberately. Keep a separate operating system account for gaming, and a browser profile with no saved financial credentials. Keep sensitive documents out of the gaming account's downloads folder. Unlock the password manager deliberately instead of permanently. Treat mods, trainers, private servers, and vibe-coded executables as high-risk software unless you have a strong reason to trust them.",
+        "What to check now: list what your gaming machine can currently reach — saved browser sessions, synced documents, cloud drives, SSH keys, developer tokens, remote desktop tools, tax files, work chat. Remove what does not need to be there.",
+        "What to check now: separate accounts and payment paths. Strong unique passwords and MFA for gaming stores, Discord, streaming, and email. No reuse of the email-password pair that protects banking or work. Limited payment methods instead of broad financial access attached to every store.",
+        "What to check now: decide what you are willing to reinstall. A secure gaming setup should be rebuildable. Back up saves, keep recovery codes off the gaming machine, and accept that a suspicious install may justify wiping the box rather than trying to prove every file is clean.",
+        "The goal is not to make gaming sterile. It is to make experimentation cheap. Play the odd games, the indie builds, the foreign releases, the mods and prototypes — from a machine or account that can lose the bet without taking the rest of your life with it."
       ]
     },
     {
       "slug": "separate-game-accounts-from-real-life",
       "shortSlug": "ACCTS",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "Separate Game Accounts From Real Life",
-      "deck": "Gaming risk is not only malware on a machine. Store accounts, Discord identities, email recovery, payment methods, cloud saves, and social graphs can all become paths from a compromised game account back into real life.",
-      "excerpt": "Treat gaming identity as its own compartment. Use unique passwords, MFA, separate recovery email where practical, limited payment methods, and careful OAuth permissions so a stolen store, Discord, streaming, or launcher account does not become a shortcut to banking, work, family photos, password recovery, or your primary inbox. Account separation is boring, but it keeps a bad gaming incident from becoming a whole-life incident.",
+      "deck": "Store accounts, Discord identities, recovery email, and payment methods can become paths from a compromised game account back into real life.",
+      "excerpt": "Skins and save files are what an attacker takes first. The recovery inbox, the saved card, and the reused password are why they stay.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "pullQuotes": [
@@ -549,25 +553,25 @@
         "Account separation is boring because it works."
       ],
       "body": [
-        "Gaming security is not only about whether a game binary is clean. Store accounts, Discord accounts, streaming logins, email recovery, payment methods, cloud saves, friends lists, and OAuth connections can all carry risk.",
-        "A stolen game account may not look catastrophic at first. But if that account shares a password with email, uses the same recovery inbox as banking, keeps a broad payment method attached, or is connected to other services through permissive OAuth grants, the attacker gets more than skins and save files.",
-        "The practical control is account separation. Use unique passwords for game stores, launchers, Discord, streaming platforms, and related communities. Turn on MFA. Keep recovery codes somewhere outside the gaming machine. Do not reuse the password that protects your primary email, financial accounts, cloud storage, work systems, or password manager.",
-        "Payment paths deserve the same treatment. Avoid leaving broad financial access attached to every game store or in-game marketplace. Where possible, use limited payment methods, prepaid balances, virtual cards, purchase approvals, or store credit. The goal is to make fraud annoying for an attacker and bounded for you.",
-        "Review connected apps and OAuth permissions. Gaming communities often encourage linking accounts for drops, tournaments, chat bots, mods, launchers, streaming overlays, analytics, and community servers. Some connections are fine. Some are stale. Some ask for more access than they need.",
-        "The primary email account is the real prize. If every gaming account recovers through the same inbox that controls banking, tax records, cloud drives, work invitations, and password resets, then gaming identity is not actually separated. Consider a dedicated gaming email or alias, especially for experimental communities and low-trust services.",
-        "What to check now: list every account tied to your gaming life, including stores, Discord, streaming, launchers, mod sites, tournament sites, and community forums.",
-        "What to check now: confirm each one has a unique password, MFA where available, current recovery information, and no reused banking or work credentials.",
-        "What to check now: review payment methods and connected-app permissions. Remove stale cards, broad OAuth grants, forgotten bots, and linked services you no longer use.",
-        "The point is not paranoia. It is containment. A bad game account incident should be a recoverable nuisance, not a bridge into email, finances, work, or family data."
+        "A stolen game account rarely looks catastrophic at first — some skins, a save file, an inconvenience. It becomes catastrophic when the account shares a password with email, recovers through the same inbox as banking, keeps a broad payment method attached, or connects onward through permissive OAuth grants.",
+        "Gaming security is not only about whether a game binary is clean. Store accounts, Discord, streaming logins, email recovery, payment methods, cloud saves, and connected apps all carry risk of their own.",
+        "The practical control is compartmentalization. Unique passwords for game stores, launchers, Discord, and streaming platforms. MFA on. Recovery codes stored somewhere other than the gaming machine. And never the password that protects your primary email, finances, work systems, or password manager.",
+        "Payment paths deserve the same treatment. Avoid leaving broad financial access attached to every store and in-game marketplace. Prefer limited payment methods, prepaid balances, virtual cards, or purchase approvals. The goal is to make fraud annoying for an attacker and bounded for you.",
+        "Review connected apps and OAuth permissions. Gaming communities encourage linking accounts for drops, tournaments, bots, overlays, and community servers. Some connections are fine. Some are stale. Some ask for far more access than they need.",
+        "The primary email account is the real prize. If every gaming account recovers through the same inbox that controls banking, cloud drives, and password resets, then gaming identity was never actually separate. A dedicated gaming email or alias is cheap insurance, especially for experimental communities and low-trust services.",
+        "What to check now: list every account tied to your gaming life — stores, Discord, streaming, launchers, mod sites, tournament sites, community forums.",
+        "What to check now: confirm each one has a unique password, MFA where available, current recovery information, and no credentials shared with banking or work.",
+        "What to check now: prune payment methods and connected-app permissions. Remove stale cards, broad OAuth grants, forgotten bots, and linked services you no longer use.",
+        "The point is not paranoia. It is containment. A bad game-account incident should be a recoverable nuisance, not a bridge into email, finances, work, or family data."
       ]
     },
     {
       "slug": "treat-mods-and-launchers-like-untrusted-code",
       "shortSlug": "MODS",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "Treat Mods and Launchers Like Untrusted Code",
-      "deck": "Mods, private servers, launchers, overlays, trainers, anti-cheat systems, and vibe-coded game builds are software supply chain decisions. Install them only inside a trust zone you are willing to rebuild.",
-      "excerpt": "The riskiest gaming software is often not the official game. It is the helper executable, mod loader, private server patch, overlay, trainer, launcher, or prototype build that asks for broad access because that is how the community makes it work. Treat those installs like untrusted code: isolate them, verify sources, avoid admin rights when possible, and keep anything irreplaceable outside the blast radius.",
+      "deck": "Mod loaders, overlays, trainers, and private-server patches are supply chain decisions. Install them only where you are willing to rebuild.",
+      "excerpt": "The official game came through a store, a review, and a signing process. The mod loader came from a forum post. Guess which one asks for more access.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "pullQuotes": [
@@ -575,16 +579,16 @@
         "Only install experiments inside an environment you are willing to rebuild."
       ],
       "body": [
-        "The riskiest part of a gaming setup is often not the official game. It is the mod loader, private server patch, launcher, overlay, trainer, anti-cheat component, reshade bundle, controller utility, voice plug-in, or experimental build that arrives through a community link.",
-        "That software may be useful, popular, and benign. It may also be unsigned, rushed, vibe-coded, repacked, copied through mirrors, wrapped with ads, or maintained by people who did not plan for hostile distribution. Popularity is a weak security boundary.",
-        "Treat these installs like untrusted code. Prefer official stores, original project pages, signed releases, reproducible community reputation, and checksums when they are available. Be skeptical of urgent fixes, private download links, cracked builds, cheat tools, and installers that ask you to disable security controls.",
-        "Pay attention to privilege. Some gaming components need deep access, especially anti-cheat systems and low-level overlays. Others ask for administrator rights because the installer is sloppy. Do not grant admin access automatically. If a tool needs broad permissions, decide whether the game is worth that trust.",
-        "Isolation is the practical answer. Use a dedicated gaming account, a separate machine, a console-like device, or a disposable Windows install for high-risk experimentation. Keep work files, financial records, SSH keys, cloud-drive sync, and primary browser profiles away from that zone.",
-        "Backups change the decision. A gaming environment that can be wiped is much safer than one that contains irreplaceable documents and long-lived secrets. Keep saves, screenshots, and configuration backed up separately. Keep recovery codes and important account information off the machine being used for experiments.",
-        "What to check now: list installed launchers, mod managers, overlays, trainers, anti-cheat tools, controller utilities, and private-server patches. Remove what you no longer use.",
-        "What to check now: review which tools require administrator privileges, kernel drivers, browser extensions, Discord tokens, file-system access, or account linking. High access deserves a stronger reason.",
-        "What to check now: choose a rebuild line. If a mod or launcher behaves suspiciously, know when you will wipe the gaming environment instead of trying to prove every file is clean.",
-        "Security does not require avoiding all mods or experimental games. It requires installing them in a place where a bad choice does not inherit your banking, work, identity, and long-term secrets."
+        "The riskiest part of a gaming setup is usually not the official game. It is the mod loader, private-server patch, overlay, trainer, reshade bundle, controller utility, or experimental build that arrives through a community link — often asking for more access than the game itself.",
+        "That software may be useful, popular, and benign. It may also be unsigned, rushed, vibe-coded, repacked through mirrors, wrapped with ads, or maintained by people who never planned for hostile distribution. Popularity is a weak security boundary.",
+        "Treat these installs like untrusted code. Prefer official stores, original project pages, signed releases, and checksums when available. Be skeptical of urgent fixes, private download links, cracked builds, cheat tools, and any installer that asks you to disable security controls.",
+        "Pay attention to privilege. Some components genuinely need deep access — anti-cheat systems, low-level overlays. Others demand administrator rights because the installer is sloppy. Do not grant admin automatically. If a tool wants broad permissions, decide whether the game is worth that trust.",
+        "Isolation is the practical answer: a dedicated gaming account, a separate machine, a console-like device, or a disposable install for high-risk experimentation, with work files, financial records, SSH keys, and primary browser profiles kept away from that zone.",
+        "Backups change the decision. An environment that can be wiped is far safer than one holding irreplaceable documents and long-lived secrets. Keep saves and configuration backed up separately, and recovery codes off the machine used for experiments.",
+        "What to check now: list installed launchers, mod managers, overlays, trainers, anti-cheat tools, and private-server patches. Remove what you no longer use.",
+        "What to check now: note which tools require administrator privileges, kernel drivers, browser extensions, Discord tokens, or account linking. High access deserves a stronger reason.",
+        "What to check now: choose your rebuild line in advance. If a mod or launcher behaves suspiciously, know when you will wipe the environment instead of trying to prove every file is clean.",
+        "None of this means avoiding mods or experimental games. It means installing them in a place where a bad choice cannot inherit your banking, work, identity, and long-term secrets."
       ]
     }
   ]
