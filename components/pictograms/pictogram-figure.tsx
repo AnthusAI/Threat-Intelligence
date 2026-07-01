@@ -638,15 +638,13 @@ function GamingIsolationPictogram({ alt, palette, timing }: RegisteredPictogramP
           }
 
           @keyframes ti-gaming-blocked-dot {
-            0%, 24%, 100% { opacity: 0; transform: scale(0.88); }
-            38%, 64% { opacity: 1; transform: scale(1.08); }
-            76% { opacity: 0.24; transform: scale(1); }
+            0%, 24%, 100% { opacity: 0; }
+            38%, 64% { opacity: 1; }
+            76% { opacity: 0.24; }
           }
         `}
       </style>
       <g transform="translate(160 160) scale(1.12) translate(-160 -160)">
-        <circle cx={72} cy={160} fill={palette.frame} r={46} stroke={gamingPalette.edge} strokeWidth={7} />
-        <circle cx={72} cy={160} fill="none" r={34} stroke={palette.accent} strokeDasharray="9 9" strokeLinecap="round" strokeWidth={5} />
         <rect fill={palette.frame} height={152} rx={10} stroke={gamingPalette.edge} strokeWidth={7} width={92} x={202} y={84} />
         <Line d="M 160 58 V 262" opacity={0.72} palette={gamingPalette} tone="muted" width={5} />
         <path
@@ -661,16 +659,16 @@ function GamingIsolationPictogram({ alt, palette, timing }: RegisteredPictogramP
 
         <g transform="translate(34 67) scale(0.47)">
           <path
-            d="M 28 164 C 34 132, 58 118, 88 124 L 102 128 H 118 L 132 124 C 162 118, 186 132, 192 164 L 205 196 C 214 222, 195 244, 170 238 C 154 234, 142 220, 132 204 L 124 190 H 96 L 88 204 C 78 220, 66 234, 50 238 C 25 244, 6 222, 15 196 Z"
+            d="M 24 170 C 31 136, 58 122, 88 128 C 98 130, 101 135, 106 135 H 114 C 119 135, 122 130, 132 128 C 162 122, 189 136, 196 170 L 207 200 C 216 228, 194 246, 170 236 C 154 230, 142 214, 132 198 L 125 187 H 95 L 88 198 C 78 214, 66 230, 50 236 C 26 246, 4 228, 13 200 Z"
             fill={palette.frame}
             stroke={gamingPalette.edge}
             strokeLinejoin="round"
             strokeWidth={7}
           />
           <Line d="M 52 176 H 86 M 69 159 V 193" opacity={0.9} palette={gamingPalette} tone="muted" width={7} />
-          <circle cx={148} cy={166} fill={gamingPalette.node} r={8} />
-          <circle cx={170} cy={184} fill={gamingPalette.muted} r={8} />
-          <circle cx={172} cy={146} fill="none" opacity={0.75} r={20} stroke={palette.accent} strokeWidth={6} />
+          <circle cx={151} cy={166} fill={gamingPalette.node} r={8} />
+          <circle cx={173} cy={184} fill={gamingPalette.muted} r={8} />
+          <circle cx={173} cy={148} fill={gamingPalette.muted} r={8} />
         </g>
         <Node palette={palette} tone="warning" x={102} y={136} />
 
