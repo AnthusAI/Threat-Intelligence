@@ -19,7 +19,7 @@ DEFAULT_VIDEOML_CLI = Path.home() / "Projects" / "VideoML" / "cli"
 DEFAULT_BABULUS_ROOT = Path.home() / "Projects" / "Babulus"
 TI_BROWSER_BUNDLE = PAPYRUS_ROOT / "public" / "videoml" / "ti-browser-bundle.js"
 TI_SEED_PROFILE = "threat-intelligence"
-TI_VIDEO_OUTPUT_DIR = PAPYRUS_ROOT / "publications" / "threat_intelligence" / "seed-art" / "videos"
+TI_VIDEO_OUTPUT_DIR = PAPYRUS_ROOT / "public" / "seed-art" / "threat-intelligence" / "videos"
 TI_SEED_CONTENT_PATH = (
     PAPYRUS_ROOT / "publications" / "threat_intelligence" / "seed" / "seed-edition-content.json"
 )
@@ -33,8 +33,52 @@ LEAD_VIDEO_SLUGS = (
     "how-to-play-games-securely",
 )
 
-# Matches Threat Intelligence blog dark mode (`app/globals.css` sand-dark + tomato accent).
-TI_SCENE_STYLES_DARK: dict[str, Any] = {
+# Video canvas rhythm: 24px rows on the 720px-tall frame (30 rows).
+TI_VIDEO_RHYTHM_UNIT = 6
+TI_VIDEO_COPY_ROW_MULTIPLE = 4
+TI_VIDEO_ROW_HEIGHT = TI_VIDEO_RHYTHM_UNIT * TI_VIDEO_COPY_ROW_MULTIPLE
+TI_VIDEO_PAINT_BUFFER = 3
+
+
+def ti_video_rows(rows: int) -> int:
+    return rows * TI_VIDEO_ROW_HEIGHT
+
+
+TI_VIDEO_LAYOUT = {
+    "padding": ti_video_rows(4),
+    "gap": ti_video_rows(1),
+    "column_gap": ti_video_rows(2),
+    "eyebrow_size": ti_video_rows(1),
+    "title_size": ti_video_rows(3),
+    "title_size_briefing": ti_video_rows(2),
+    "title_size_teaser": ti_video_rows(2),
+    "subtitle_size": ti_video_rows(1),
+    "subtitle_size_closing": ti_video_rows(2),
+    "closing_title_size": ti_video_rows(4),
+    "pictogram_size": ti_video_rows(18),
+    "pictogram_size_briefing": ti_video_rows(15),
+    "pictogram_size_edition": ti_video_rows(18),
+    "title_line_height": ti_video_rows(3),
+    "subtitle_line_height": ti_video_rows(2),
+}
+
+
+def ti_video_rhythm_vars() -> dict[str, str]:
+    return {
+        "--ti-rhythm": f"{TI_VIDEO_RHYTHM_UNIT}px",
+        "--ti-row-height": f"{TI_VIDEO_ROW_HEIGHT}px",
+        "--ti-paint-buffer": f"{TI_VIDEO_PAINT_BUFFER}px",
+        "--ti-paint-height": f"{TI_VIDEO_ROW_HEIGHT + TI_VIDEO_PAINT_BUFFER}px",
+    }
+
+
+def _merge_scene_style_vars(base: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    merged["vars"] = {**ti_video_rhythm_vars(), **dict(base.get("vars") or {})}
+    return merged
+
+
+TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
     "background": "#191918",
     "color": "#eeeeec",
     "vars": {
@@ -64,11 +108,11 @@ TI_SCENE_STYLES_DARK: dict[str, Any] = {
         "--grass-8": "#30a46c",
         "--amber-8": "#f59e0b",
         "--sand-8": "#9090a0",
-        "--font-headline": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
-        "--font-subhead": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
-        "--font-eyebrow": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     },
-}
+})
 
 TI_BACKGROUND_PROPS_DARK: dict[str, Any] = {
     "variant": "solid",
@@ -77,7 +121,7 @@ TI_BACKGROUND_PROPS_DARK: dict[str, Any] = {
 
 # Matches Threat Intelligence blog light mode (`app/globals.css` sand-light + tomato-11 accent).
 # Uses tomato-11 (#c54028) for WCAG-compliant contrast on sand-2 (#f9f9f8) paper.
-TI_SCENE_STYLES_LIGHT: dict[str, Any] = {
+TI_SCENE_STYLES_LIGHT: dict[str, Any] = _merge_scene_style_vars({
     "background": "#f9f9f8",
     "color": "#44403c",
     "vars": {
@@ -107,11 +151,11 @@ TI_SCENE_STYLES_LIGHT: dict[str, Any] = {
         "--grass-8": "#30a46c",
         "--amber-8": "#f59e0b",
         "--sand-8": "#9090a0",
-        "--font-headline": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
-        "--font-subhead": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
-        "--font-eyebrow": "Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
+        "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     },
-}
+})
 
 TI_BACKGROUND_PROPS_LIGHT: dict[str, Any] = {
     "variant": "solid",
@@ -131,6 +175,38 @@ def scene_styles_for_theme(theme: str) -> dict[str, Any]:
 
 def background_props_for_theme(theme: str) -> dict[str, Any]:
     return TI_BACKGROUND_PROPS_LIGHT if theme == "light" else TI_BACKGROUND_PROPS_DARK
+
+
+def retheme_vml_xml(dsl_xml: str, theme: str) -> str:
+    if theme == "dark":
+        return dsl_xml
+    updated = dsl_xml.replace(props_attr(TI_SCENE_STYLES_DARK), props_attr(TI_SCENE_STYLES_LIGHT))
+    updated = updated.replace(props_attr(TI_BACKGROUND_PROPS_DARK), props_attr(TI_BACKGROUND_PROPS_LIGHT))
+    if any(token in updated for token in ("#191918", "#111110", "#21201c")):
+        updated = _swap_ti_light_palette_tokens(updated)
+    return updated
+
+
+def _swap_ti_light_palette_tokens(dsl_xml: str) -> str:
+    replacements = (
+        ("rgba(251, 146, 60, 0.2)", "rgba(234, 88, 12, 0.18)"),
+        ("#191918", "#f9f9f8"),
+        ("#111110", "#fcfcfc"),
+        ("#21201c", "#fcfcfc"),
+        ("#2a2926", "#f2f2f0"),
+        ("#eeeeec", "#44403c"),
+        ("#b5b3ad", "#696964"),
+        ("#e54d2e", "#c54028"),
+        ("#7f7e77", "#8a8a83"),
+        ("#363a3f", "#889096"),
+        ("#2e3135", "#889096"),
+        ("#43484e", "#a8adb4"),
+        ("#ac4d39", "#d9542e"),
+    )
+    updated = dsl_xml
+    for dark_token, light_token in replacements:
+        updated = updated.replace(dark_token, light_token)
+    return updated
 
 TI_TAGLINE = "Practical advice for staying secure as the threat landscape shifts."
 
@@ -177,7 +253,9 @@ def edition_overview_output_mp4(*, output_dir: Path | None = None, theme: str = 
 
 def props_attr(value: dict[str, Any]) -> str:
     raw = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
-    return raw.replace("&", "&amp;")
+    # Emitted inside single-quoted XML attributes: escape the quote character
+    # (and angle brackets) or an apostrophe in content breaks the attribute.
+    return raw.replace("&", "&amp;").replace("'", "&#39;").replace("<", "&lt;")
 
 
 def truncate_display(text: str, max_len: int = 240) -> str:
@@ -226,23 +304,33 @@ def title_slide_layer(
     title: str | None = None,
     subtitle: str | None = None,
     horizontal_align: str = "left",
-    logo_size: int = 400,
-    title_size: int = 56,
-    subtitle_size: int = 26,
+    logo_size: int | None = None,
+    title_size: int | None = None,
+    subtitle_size: int | None = None,
     title_color: str | None = None,
     title_weight: int | None = None,
     eyebrow_weight: int | None = None,
     eyebrow_letter_spacing: float | None = None,
-    eyebrow_size: int = 14,
+    eyebrow_size: int | None = None,
     eyebrow_rule: bool = False,
+    padding: int | None = None,
+    gap: int | None = None,
+    column_gap: int | None = None,
+    title_line_height: int | None = None,
+    subtitle_line_height: int | None = None,
 ) -> str:
     props: dict[str, Any] = {
         "verticalAlign": "center",
         "horizontalAlign": horizontal_align,
         "entranceStartFrame": -999,
         "background": "transparent",
-        "titleSize": title_size,
-        "subtitleSize": subtitle_size,
+        "padding": padding if padding is not None else TI_VIDEO_LAYOUT["padding"],
+        "gap": gap if gap is not None else TI_VIDEO_LAYOUT["gap"],
+        "columnGap": column_gap if column_gap is not None else TI_VIDEO_LAYOUT["column_gap"],
+        "titleSize": title_size if title_size is not None else TI_VIDEO_LAYOUT["title_size"],
+        "subtitleSize": subtitle_size if subtitle_size is not None else TI_VIDEO_LAYOUT["subtitle_size"],
+        "titleLineHeight": title_line_height if title_line_height is not None else TI_VIDEO_LAYOUT["title_line_height"],
+        "subtitleLineHeight": subtitle_line_height if subtitle_line_height is not None else TI_VIDEO_LAYOUT["subtitle_line_height"],
     }
     if eyebrow:
         props["eyebrow"] = eyebrow
@@ -258,13 +346,14 @@ def title_slide_layer(
         props["eyebrowWeight"] = eyebrow_weight
     if eyebrow_letter_spacing is not None:
         props["eyebrowLetterSpacing"] = eyebrow_letter_spacing
-    if eyebrow_size != 14:
-        props["eyebrowSize"] = eyebrow_size
+    resolved_eyebrow_size = eyebrow_size if eyebrow_size is not None else TI_VIDEO_LAYOUT["eyebrow_size"]
+    if resolved_eyebrow_size != TI_VIDEO_LAYOUT["eyebrow_size"]:
+        props["eyebrowSize"] = resolved_eyebrow_size
     if eyebrow_rule:
         props["eyebrowRule"] = True
     if pictogram_slug:
         props["pictogramSlug"] = pictogram_slug
-        props["pictogramSize"] = logo_size
+        props["pictogramSize"] = logo_size if logo_size is not None else TI_VIDEO_LAYOUT["pictogram_size"]
     tag = "ti-title-slide" if (pictogram_slug or eyebrow_rule) else "title-slide"
     return f"""    <layer id="content" z="10">
       <{tag} props='{props_attr(props)}' />
@@ -273,7 +362,7 @@ def title_slide_layer(
 
 def quote_card_layer(*, quote: str, attribution: str, accent_color: str = "var(--ti-alarm-red)") -> str:
     return f"""    <layer id="content" z="10">
-      <quote-card props='{props_attr({"quote": quote, "attribution": attribution, "accentColor": accent_color})}' />
+      <ti-quote-card props='{props_attr({"quote": quote, "attribution": attribution, "accentColor": accent_color})}' />
     </layer>"""
 
 
@@ -283,8 +372,8 @@ def closing_cta_layer(*, slide_date: str) -> str:
         title="THREAT INTELLIGENCE",
         subtitle=TI_TAGLINE,
         horizontal_align="center",
-        title_size=96,
-        subtitle_size=28,
+        title_size=TI_VIDEO_LAYOUT["closing_title_size"],
+        subtitle_size=TI_VIDEO_LAYOUT["subtitle_size_closing"],
         title_color="var(--ti-alarm-red)",
         title_weight=900,
         eyebrow_weight=900,
@@ -355,9 +444,9 @@ def branded_title_slide_layer(
     title: str | None,
     subtitle: str | None,
     horizontal_align: str = "left",
-    logo_size: int = 400,
-    title_size: int = 56,
-    subtitle_size: int = 26,
+    logo_size: int | None = None,
+    title_size: int | None = None,
+    subtitle_size: int | None = None,
 ) -> str:
     return title_slide_layer(
         pictogram_slug=pictogram_slug,
@@ -431,9 +520,7 @@ def build_babulus_xml(
                 title=headline,
                 subtitle=deck or None,
                 horizontal_align="left",
-                logo_size=420,
-                title_size=56,
-                subtitle_size=26,
+                logo_size=TI_VIDEO_LAYOUT["pictogram_size"],
             ),
             title_cue,
         )
@@ -450,9 +537,8 @@ def build_babulus_xml(
                     title=headline,
                     subtitle=truncate_display(excerpt),
                     horizontal_align="left",
-                    logo_size=360,
-                    title_size=42,
-                    subtitle_size=24,
+                    logo_size=TI_VIDEO_LAYOUT["pictogram_size_briefing"],
+                    title_size=TI_VIDEO_LAYOUT["title_size_briefing"],
                 ),
                 f"""<cue id="body-excerpt-cue">
       <voice>{escape(excerpt)}</voice>
@@ -528,9 +614,23 @@ def build_edition_overview_xml(
     ]
     first_pictogram_slug = first_slug if first_slug in LEAD_VIDEO_SLUGS else None
 
+    video_meta = edition.get("video") if isinstance(edition.get("video"), dict) else {}
+    edition_hook = str((video_meta or {}).get("hook") or "").strip()
+
     scenes: list[str] = []
 
-    if first_pull_quotes:
+    if edition_hook:
+        scenes.append(
+            _scene(
+                "hook",
+                "Hook",
+                quote_card_layer(quote=edition_hook, attribution=title),
+                f"""<cue id="hook-cue">
+      <voice>{escape(edition_hook)}</voice>
+    </cue>""",
+            )
+        )
+    elif first_pull_quotes:
         hook_quote = first_pull_quotes[0]
         scenes.append(
             _scene(
@@ -553,9 +653,7 @@ def build_edition_overview_xml(
                 title=title,
                 subtitle=TI_TAGLINE,
                 horizontal_align="left",
-                logo_size=440,
-                title_size=56,
-                subtitle_size=26,
+                logo_size=TI_VIDEO_LAYOUT["pictogram_size_edition"],
             ),
             f"""<cue id="title-cue">
       <voice>{escape(title_voice)}</voice>
@@ -575,8 +673,7 @@ def build_edition_overview_xml(
                     220,
                 ),
                 horizontal_align="left",
-                title_size=48,
-                subtitle_size=24,
+                title_size=TI_VIDEO_LAYOUT["title_size_teaser"],
                 title_weight=900,
                 eyebrow_weight=900,
                 eyebrow_letter_spacing=0.09,
@@ -606,9 +703,8 @@ def build_edition_overview_xml(
                     title=headline,
                     subtitle=truncate_display(hook, 180) if hook else None,
                     horizontal_align="left",
-                    logo_size=400,
-                    title_size=42,
-                    subtitle_size=24,
+                    logo_size=TI_VIDEO_LAYOUT["pictogram_size"],
+                    title_size=TI_VIDEO_LAYOUT["title_size_briefing"],
                 ),
                 f"""<cue id="spotlight-{index}-cue">
       <voice>{escape(voice_line)}</voice>
@@ -781,8 +877,8 @@ def render_video(
     output_mp4: Path | None = None,
     work_dir: Path | None = None,
     theme: str = "dark",
+    from_article: bool = False,
 ) -> Path:
-    defaults = resolve_openai_tts_defaults()
     slug = str(article.get("slug") or "").strip()
     if not slug:
         raise ValueError("Article slug is required for video rendering.")
@@ -790,12 +886,13 @@ def render_video(
     target_mp4 = output_mp4 or article_output_mp4(article, theme=theme)
     project_dir = work_dir or (PAPYRUS_ROOT / "videoml-work" / slug)
     dsl_path = project_dir / f"{slug}-{theme}.babulus.xml"
-    dsl_xml = build_babulus_xml(
-        article,
-        voice=str(defaults["voice"]),
-        model=str(defaults["model"]),
-        publish_date=str(load_ti_seed_payload().get("publishDate") or "").strip() or None,
+    from publications.threat_intelligence.videoml.videos_dsl import resolve_videoml_dsl_for_render
+
+    dsl_xml = resolve_videoml_dsl_for_render(
+        target_slug=slug,
         theme=theme,
+        from_article=from_article,
+        article=article,
     )
     return render_dsl_to_mp4(
         dsl_path=dsl_path,
@@ -811,17 +908,19 @@ def render_edition_overview(
     output_mp4: Path | None = None,
     work_dir: Path | None = None,
     theme: str = "dark",
+    from_article: bool = False,
 ) -> Path:
-    defaults = resolve_openai_tts_defaults()
     edition = payload if payload is not None else load_ti_seed_payload()
     target_mp4 = output_mp4 or edition_overview_output_mp4(theme=theme)
     project_dir = work_dir or (PAPYRUS_ROOT / "videoml-work" / EDITION_OVERVIEW_SLUG)
     dsl_path = project_dir / f"{EDITION_OVERVIEW_SLUG}-{theme}.babulus.xml"
-    dsl_xml = build_edition_overview_xml(
-        edition,
-        voice=str(defaults["voice"]),
-        model=str(defaults["model"]),
+    from publications.threat_intelligence.videoml.videos_dsl import resolve_videoml_dsl_for_render
+
+    dsl_xml = resolve_videoml_dsl_for_render(
+        target_slug=EDITION_OVERVIEW_SLUG,
         theme=theme,
+        from_article=from_article,
+        edition_payload=edition,
     )
     return render_dsl_to_mp4(
         dsl_path=dsl_path,

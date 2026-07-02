@@ -55,6 +55,7 @@ export default async function DateScopedArticlePage({ params }: DateScopedArticl
       }}
       item={item}
       backHref={`${editionBasePath}#${item.slug}`}
+      videoScript={content.videoScripts?.[item.slug] ?? null}
     />
   );
 }

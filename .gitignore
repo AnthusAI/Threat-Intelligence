@@ -23,7 +23,8 @@ corpora/*
 videoml-work/
 .videoml/
 public/videoml/
-publications/threat_intelligence/seed-art/videos/*.mp4
+!public/videoml/ti-preview.html
+public/seed-art/threat-intelligence/videos/*.mp4
 AGENTS.local.md
 .amplify/
 amplify_outputs.json

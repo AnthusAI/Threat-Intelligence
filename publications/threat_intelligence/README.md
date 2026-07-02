@@ -19,9 +19,9 @@ All publication-specific code, assets, and configuration for Anthus Threat Intel
 
 ## Public URLs
 
-Static assets are web-served through symlinks under `public/`:
+Static assets are web-served directly from `public/`:
 
-- `public/seed-art/threat-intelligence` → `publications/threat_intelligence/seed-art`
+- Local rendered videos live under `public/seed-art/threat-intelligence/videos`
 - Seed JSON video `src` values use `/seed-art/threat-intelligence/videos/...` paths.
 
 ## Environment

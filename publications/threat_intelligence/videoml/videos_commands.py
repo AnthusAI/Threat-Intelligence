@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Callable
 
 from papyrus_content.env import load_dotenv
@@ -17,6 +18,12 @@ from publications.threat_intelligence.videoml.video_pipeline import (
     render_edition_overview,
     render_video,
     THEMES,
+)
+from publications.threat_intelligence.videoml.videos_dsl import (
+    generate_videoml_items_from_seed,
+    update_videoml_dsl,
+    upsert_videoml_records,
+    videoml_item_slug,
 )
 
 DEFAULT_RENDER_JOBS = 3
@@ -58,12 +65,64 @@ def _render_unit_sequential(
     return results
 
 
+def parse_from_article_option(value: object) -> bool:
+    return parse_boolean_option(value, False, "--from-article")
+
+
+def videos_generate_dsl(flags: list[str]) -> None:
+    options = parse_options(flags)
+    edition_overview = parse_boolean_option(options.get("edition-overview"), False, "--edition-overview")
+    slug = normalize_string(options.get("article"))
+    records = generate_videoml_items_from_seed()
+
+    if edition_overview:
+        records = [record for record in records if record["expected"]["slug"] == videoml_item_slug("edition-overview")]
+    elif slug:
+        records = [record for record in records if record["expected"]["slug"] == videoml_item_slug(slug)]
+        if not records:
+            raise ValueError(f"Article '{slug}' is not a lead video article in the Threat Intelligence seed edition.")
+
+    summary = upsert_videoml_records(records)
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "count": len(records) // 2,
+                "slugs": sorted({record["expected"]["slug"] for record in records if record["modelName"] == "Item"}),
+                "changes": summary,
+            },
+            indent=2,
+        )
+    )
+
+
+def videos_edit_dsl(flags: list[str]) -> None:
+    options = parse_options(flags)
+    slug = normalize_string(options.get("slug") or options.get("article"))
+    dsl_file = normalize_string(options.get("dsl-file"))
+    if not slug:
+        raise ValueError("videos edit-dsl requires --slug <target-slug> (article slug or edition-overview).")
+    if not dsl_file:
+        raise ValueError("videos edit-dsl requires --dsl-file <path-to.babulus.xml>.")
+
+    dsl_path = Path(dsl_file)
+    if not dsl_path.exists():
+        raise ValueError(f"DSL file not found: {dsl_path}")
+    dsl = dsl_path.read_text(encoding="utf-8").strip()
+    if not dsl:
+        raise ValueError(f"DSL file is empty: {dsl_path}")
+
+    result = update_videoml_dsl(slug, dsl)
+    print(json.dumps(result, indent=2))
+
+
 def videos_render(flags: list[str]) -> None:
     options = parse_options(flags)
     slug = normalize_string(options.get("article"))
     edition_overview = parse_boolean_option(options.get("edition-overview"), False, "--edition-overview")
     theme_option = parse_theme_option(options.get("theme"))
     themes = resolve_themes(theme_option)
+    from_article = parse_from_article_option(options.get("from-article"))
     if edition_overview:
         probe = parse_boolean_option(options.get("probe-only"), False, "--probe-only")
         if probe:
@@ -72,7 +131,7 @@ def videos_render(flags: list[str]) -> None:
         probe_openai_key()
         rendered: list[dict[str, str]] = []
         for theme in themes:
-            output = render_edition_overview(theme=theme)
+            output = render_edition_overview(theme=theme, from_article=from_article)
             rendered.append({"slug": "edition-overview", "theme": theme, "output": str(output)})
         print(json.dumps({"ok": True, "videos": rendered}, indent=2))
         return
@@ -93,7 +152,7 @@ def videos_render(flags: list[str]) -> None:
     probe_openai_key()
     rendered: list[dict[str, str]] = []
     for theme in themes:
-        output = render_video(article, theme=theme)
+        output = render_video(article, theme=theme, from_article=from_article)
         rendered.append({"slug": slug, "theme": theme, "output": str(output)})
     print(json.dumps({"ok": True, "videos": rendered}, indent=2))
 
@@ -108,6 +167,7 @@ def videos_seed(flags: list[str]) -> None:
     theme_option = parse_theme_option(options.get("theme"))
     themes = resolve_themes(theme_option)
     jobs = parse_jobs_option(options.get("jobs"))
+    from_article = parse_from_article_option(options.get("from-article"))
     probe_openai_key()
     payload = load_ti_seed_payload()
 
@@ -115,12 +175,14 @@ def videos_seed(flags: list[str]) -> None:
     # Each unit renders its themes sequentially (dark before light for TTS cache reuse),
     # but different units run in parallel via ThreadPoolExecutor.
     units: list[tuple[str, Callable[[str], Any]]] = [
-        ("edition-overview", lambda theme: render_edition_overview(payload=payload, theme=theme)),
+        ("edition-overview", lambda theme: render_edition_overview(payload=payload, theme=theme, from_article=from_article)),
     ]
     for article in lead_video_articles():
         article_slug = str(article.get("slug", "")).strip()
         article_copy = article
-        units.append((article_slug, lambda theme, a=article_copy: render_video(a, theme=theme)))
+        units.append(
+            (article_slug, lambda theme, a=article_copy: render_video(a, theme=theme, from_article=from_article)),
+        )
 
     print(f"Rendering {len(units)} videos x {len(themes)} theme(s) with {jobs} parallel jobs", flush=True)
 

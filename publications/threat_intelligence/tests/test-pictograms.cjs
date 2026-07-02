@@ -30,7 +30,8 @@ for (const slug of [
 }
 
 assert(slugSource.includes("PICTOGRAM_CYCLE_MS = 20_000"), "Expected shared 20-second pictogram cycle");
-assert(presentationSource.includes("PictogramFigure"), "Presentation shell should render lead media through PictogramFigure");
+assert(presentationSource.includes("frameHeight"), "Presentation shell should pass solver-owned pictogram frame height");
+assert(presentationSource.includes("solveFeaturedItem"), "Presentation shell should solve featured blog items with Pretext");
 assert(articleSource.includes("PictogramFigure"), "Article page should render lead media through PictogramFigure");
 assert(artSource.includes("THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY"), "Pictogram art registry should export slug map");
 assert(backgroundSource.includes('from "../pictograms/registry"'), "Hero background should import shared pictogram timing");

@@ -209,7 +209,9 @@ function getDefaultScenarioSeed(): {
     description: threatIntelligenceSeedContent.description,
     articles: threatIntelligenceSeedContent.articles as Article[],
     suppressNewsDeskAppendix: threatIntelligenceSeedContent.suppressNewsDeskAppendix === true,
-    editionVideo: threatIntelligenceSeedContent.video as ArticleVideoAsset | undefined,
+    editionVideo: threatIntelligenceSeedContent.video
+      ? { type: "video", ...threatIntelligenceSeedContent.video }
+      : undefined,
     newsDeskAppendix: null,
   };
 }

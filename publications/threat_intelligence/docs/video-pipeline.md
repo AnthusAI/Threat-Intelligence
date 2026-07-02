@@ -77,11 +77,11 @@ poetry run papyrus videos render --article the-balance-of-power-is-shifting
 Output MP4s are written to:
 
 ```text
-publications/threat_intelligence/seed-art/videos/edition-overview.mp4
-publications/threat_intelligence/seed-art/videos/<slug>.mp4
+public/seed-art/threat-intelligence/videos/edition-overview.mp4
+public/seed-art/threat-intelligence/videos/<slug>.mp4
 ```
 
-Reader URLs use `/seed-art/threat-intelligence/videos/...` via the `public/seed-art/threat-intelligence` symlink.
+Reader URLs use `/seed-art/threat-intelligence/videos/...` directly from `public/`.
 
 ## Seeding videos to Amplify
 

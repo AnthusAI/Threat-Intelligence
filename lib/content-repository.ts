@@ -28,6 +28,9 @@ export const contentRepository: ContentRepository = {
   listArticleSlugs() {
     return graphqlContentRepository.listArticleSlugs();
   },
+  loadVideoScript(targetSlug: string) {
+    return graphqlContentRepository.loadVideoScript(targetSlug);
+  },
 };
 
 export function getScenarioIdParam(scenario: string | string[] | null | undefined): string | null {

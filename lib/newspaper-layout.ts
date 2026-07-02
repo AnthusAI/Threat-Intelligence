@@ -28,6 +28,18 @@ import {
   getPublicationItemText,
 } from "./publication-items";
 import {
+  clampRhythmHeight,
+  createVerticalRhythm,
+  getLineStackHeight,
+  reserveRhythmRows,
+  snapDownToRhythm,
+  snapPreferredHeightToRhythm,
+  snapPreservedImageHeightToRhythm,
+  snapToNearestRhythm,
+  snapUpToRhythm,
+  type VerticalRhythm,
+} from "./blog-rhythm";
+import {
   layoutNextLine,
   layoutTextLines,
   prepareWithSegments,
@@ -275,11 +287,7 @@ export type NewspaperLayout = {
   textRanges: PlacedTextRange[];
 };
 
-export type VerticalRhythm = {
-  rowHeight: number;
-  paintHeight: number;
-  paintBuffer: number;
-};
+export type { VerticalRhythm };
 
 export type PageChromeMetrics = {
   pagePaddingTop: number;
@@ -522,56 +530,6 @@ const KICKER_BASE_ROW_HEIGHT = 19;
 
 function getKickerFontSize(rhythmRowHeight: number): number {
   return Math.round((KICKER_BASE_FONT_SIZE * rhythmRowHeight / KICKER_BASE_ROW_HEIGHT) * 10) / 10;
-}
-
-function createVerticalRhythm(rowHeight: number): VerticalRhythm {
-  const paintHeight = rowHeight + 4;
-  return {
-    rowHeight,
-    paintHeight,
-    paintBuffer: paintHeight - rowHeight,
-  };
-}
-
-function snapUpToRhythm(value: number, rhythm: VerticalRhythm): number {
-  if (value <= 0) return 0;
-  return Math.ceil(value / rhythm.rowHeight) * rhythm.rowHeight;
-}
-
-function snapDownToRhythm(value: number, rhythm: VerticalRhythm): number {
-  if (value <= 0) return 0;
-  return Math.floor(value / rhythm.rowHeight) * rhythm.rowHeight;
-}
-
-function snapToNearestRhythm(value: number, rhythm: VerticalRhythm): number {
-  if (value <= 0) return 0;
-  return Math.round(value / rhythm.rowHeight) * rhythm.rowHeight;
-}
-
-function reserveRhythmRows(value: number, rhythm: VerticalRhythm): number {
-  return snapUpToRhythm(value, rhythm);
-}
-
-function clampRhythmHeight(value: number, minimum: number, maximum: number, rhythm: VerticalRhythm): number {
-  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
-  const snappedMaximum = Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm));
-  return clamp(reserveRhythmRows(value, rhythm), snappedMinimum, snappedMaximum);
-}
-
-function snapPreferredHeightToRhythm(value: number, rhythm: VerticalRhythm, minimum = rhythm.rowHeight, maximum = Number.POSITIVE_INFINITY): number {
-  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
-  const snappedMaximum = Number.isFinite(maximum) ? Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm)) : Number.POSITIVE_INFINITY;
-  const down = snapDownToRhythm(value, rhythm);
-  const up = reserveRhythmRows(value, rhythm);
-  const candidates = [down, up].filter((candidate) => candidate >= snappedMinimum && candidate <= snappedMaximum);
-  if (candidates.length === 0) return snappedMinimum;
-  return candidates.sort((left, right) => Math.abs(left - value) - Math.abs(right - value) || left - right)[0];
-}
-
-function snapPreservedImageHeightToRhythm(value: number, rhythm: VerticalRhythm, minimum = rhythm.rowHeight, maximum = Number.POSITIVE_INFINITY): number {
-  const snappedMinimum = reserveRhythmRows(minimum, rhythm);
-  const snappedMaximum = Number.isFinite(maximum) ? Math.max(snappedMinimum, snapDownToRhythm(maximum, rhythm)) : Number.POSITIVE_INFINITY;
-  return clamp(reserveRhythmRows(value, rhythm), snappedMinimum, snappedMaximum);
 }
 
 function getMinimumTextFrameHeight(config: LayoutConfig): number {
@@ -2848,11 +2806,6 @@ function parseEmValue(value: string): number {
 
 function emToPx(value: number, fontSize: number): number {
   return value * fontSize;
-}
-
-function getLineStackHeight(lineCount: number, lineHeight: number, paintHeight: number): number {
-  if (lineCount <= 0) return 0;
-  return Math.ceil((lineCount - 1) * lineHeight + paintHeight);
 }
 
 function getStoryChromeHeight(chrome: StoryChromeMetrics): number {

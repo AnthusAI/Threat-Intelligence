@@ -1,33 +1,101 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ArticleVideoAsset } from "@/lib/articles";
 import { resolveThemedVideoSrc } from "@/lib/themed-image";
 import { useResolvedPapyrusTheme } from "@/components/use-resolved-papyrus-theme";
+import { normalizeDevPreviewDsl, type VideoScriptRef } from "@/lib/video-script";
 
 type ArticleVideoFigureProps = {
   video: ArticleVideoAsset;
   slug: string;
   figureClassName?: string;
   priority?: boolean;
+  videoScript?: VideoScriptRef | null;
 };
 
-export function ArticleVideoFigure({ video, slug, figureClassName = "article-photo article-video" }: ArticleVideoFigureProps) {
+const IS_DEV_PREVIEW = process.env.NODE_ENV === "development";
+
+export function ArticleVideoFigure({
+  video,
+  slug,
+  figureClassName = "article-photo article-video",
+  videoScript = null,
+}: ArticleVideoFigureProps) {
   const theme = useResolvedPapyrusTheme();
   const [hasHydrated, setHasHydrated] = useState(false);
   const [frameReady, setFrameReady] = useState(Boolean(video.posterSrc));
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [previewReady, setPreviewReady] = useState(false);
 
   useEffect(() => {
     setHasHydrated(true);
   }, []);
 
-  // Match SSR to the default dark MP4 in `video.src` until after hydration.
-  const resolvedTheme = hasHydrated ? theme : "dark";
+  const resolvedTheme = theme;
   const src = resolveThemedVideoSrc(video.src, video.themeVariants, resolvedTheme);
+  const usePreview = IS_DEV_PREVIEW && Boolean(videoScript?.dsl);
+  const previewStorageKey = `ti-preview:${slug}`;
+  const previewSrc = src
+    ? `/videoml/ti-preview.html?target=${encodeURIComponent(slug)}&theme=${resolvedTheme}&audio=${encodeURIComponent(src)}`
+    : `/videoml/ti-preview.html?target=${encodeURIComponent(slug)}&theme=${resolvedTheme}`;
+
+  const previewDsl = videoScript?.dsl ? normalizeDevPreviewDsl(videoScript.dsl) : null;
+
+  if (usePreview && previewDsl && typeof window !== "undefined") {
+    sessionStorage.setItem(previewStorageKey, previewDsl);
+  }
 
   useEffect(() => {
+    if (!usePreview || !previewDsl) return;
+    sessionStorage.setItem(previewStorageKey, previewDsl);
+  }, [previewDsl, previewStorageKey, usePreview]);
+
+  useEffect(() => {
+    setPreviewReady(false);
+  }, [previewSrc, slug, usePreview]);
+
+  useEffect(() => {
+    if (!usePreview || !previewReady) return;
+    iframeRef.current?.contentWindow?.postMessage(
+      {
+        kind: "ti-preview-refresh",
+        target: slug,
+        theme: resolvedTheme,
+        audio: src || undefined,
+      },
+      "*",
+    );
+  }, [previewReady, resolvedTheme, slug, src, usePreview]);
+
+  useEffect(() => {
+    if (usePreview) return;
     setFrameReady(Boolean(video.posterSrc));
-  }, [video.posterSrc, src]);
+  }, [usePreview, video.posterSrc, src]);
+
+  if (usePreview && videoScript) {
+    return (
+      <figure
+        className={`${figureClassName} article-video--preview`}
+        data-media-type="videoml-preview"
+        data-video-theme={resolvedTheme}
+      >
+        {hasHydrated ? (
+          <iframe
+            key={`${slug}-${resolvedTheme}-${src}`}
+            ref={iframeRef}
+            className="article-video__preview-frame"
+            src={previewSrc}
+            title={video.alt}
+            onLoad={() => setPreviewReady(true)}
+          />
+        ) : null}
+        <span className="sr-only" data-video-slug={slug}>
+          {video.alt}
+        </span>
+      </figure>
+    );
+  }
 
   return (
     <figure className={figureClassName} data-media-type="video" data-video-theme={resolvedTheme}>

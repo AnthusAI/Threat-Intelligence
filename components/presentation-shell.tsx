@@ -6,7 +6,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
 import { getEditionSectionPath } from "../lib/edition-routes";
 import { buildPresentationFooterEntries, type PresentationFooterEntry } from "../lib/presentation-footer";
-import { createThreatIntelligenceRhythm } from "../lib/blog-rhythm";
+import {
+  createThreatIntelligenceBlogTextStyle,
+  createThreatIntelligenceRhythm,
+  getMeasuredTextHeight,
+  TI_COPY_ROW_MULTIPLE,
+} from "../lib/blog-rhythm";
+import {
+  solveFeaturedItem,
+} from "../lib/blog-feature-solver";
 import { layoutAllTextLines, prepareWithSegments, type TextLine } from "../lib/pretext-layout";
 import { truncateWords } from "../lib/excerpts";
 import {
@@ -16,6 +24,7 @@ import {
 } from "../lib/publication-items";
 import type { EditionContent, EditionPresentationFormat, EditionSection } from "../lib/content-types";
 import type { ArticleVideoAsset } from "../lib/articles";
+import type { VideoScriptRef } from "../lib/video-script";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { ArticleVideoFigure } from "./article-video";
 import { BlogPageBackground } from "../publications/threat_intelligence/blog-defense/page-background";
@@ -23,6 +32,7 @@ import { Newspaper } from "./newspaper";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
+import { useRhythmOverlay } from "./use-rhythm-overlay";
 
 type PresentationShellProps = {
   content: EditionContent;
@@ -38,12 +48,7 @@ export type PresentationTarget =
   | { kind: "section"; sectionKey: string };
 
 const PRESENTATION_TEXT_FONT = SITE_BRAND.textFont;
-const BLOG_TEXT_STYLE = {
-  fontSize: 18,
-  lineHeight: 28,
-  linePaintHeight: 24,
-  fontFamily: PRESENTATION_TEXT_FONT,
-};
+const BLOG_TEXT_STYLE = createThreatIntelligenceBlogTextStyle(PRESENTATION_TEXT_FONT);
 const BLOG_RHYTHM = createThreatIntelligenceRhythm();
 const MAGAZINE_TEXT_STYLE = {
   fontSize: 17,
@@ -128,10 +133,22 @@ function BlogPresentation({
   const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
   const contentRef = useRef<HTMLDivElement | null>(null);
   const pageRef = useRef<HTMLElement | null>(null);
+  const showRhythmOverlay = useRhythmOverlay();
   const headerObstacles = useBlogHeaderObstacles(pageRef);
   usePresentationTargetScroll(targetSection);
   return (
-    <main className="presentation-page presentation-page--blog" data-presentation-engine="blog" ref={pageRef}>
+    <main
+      className="presentation-page presentation-page--blog blog-rhythm-shell"
+      data-presentation-engine="blog"
+      data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
+      ref={pageRef}
+      style={{
+        "--ti-rhythm": `${BLOG_RHYTHM.rowHeight / TI_COPY_ROW_MULTIPLE}px`,
+        "--ti-row-height": `${BLOG_RHYTHM.rowHeight}px`,
+        "--ti-paint-buffer": `${BLOG_RHYTHM.paintBuffer}px`,
+        "--ti-paint-height": `${BLOG_RHYTHM.paintHeight}px`,
+      } as CSSProperties}
+    >
       <BlogPageBackground headerObstacles={headerObstacles} pageRef={pageRef} rhythm={BLOG_RHYTHM} />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
@@ -139,7 +156,10 @@ function BlogPresentation({
         {sections.map((section, sectionIndex) => (
           <section className="blog-section" data-edition-section={section.key} id={getSectionAnchorId(section.key)} key={section.key}>
             {sectionIndex === 0 && content.editionVideo ? (
-              <EditionOverviewVideo editionVideo={content.editionVideo} />
+              <EditionOverviewVideo
+                editionVideo={content.editionVideo}
+                videoScript={content.videoScripts?.["edition-overview"] ?? null}
+              />
             ) : null}
             <header className="presentation-section-header">
               <div className="presentation-section-header__band">
@@ -154,6 +174,7 @@ function BlogPresentation({
                 item={item}
                 key={item.slug}
                 mode="blog"
+                videoScript={content.videoScripts?.[item.slug] ?? null}
               />
             ))}
           </section>
@@ -213,13 +234,20 @@ function MagazinePresentation({
   );
 }
 
-function EditionOverviewVideo({ editionVideo }: { editionVideo: ArticleVideoAsset }) {
+function EditionOverviewVideo({
+  editionVideo,
+  videoScript,
+}: {
+  editionVideo: ArticleVideoAsset;
+  videoScript?: VideoScriptRef | null;
+}) {
   return (
     <section className="presentation-edition-video" aria-label={editionVideo.alt}>
       <ArticleVideoFigure
         figureClassName="presentation-edition-video__figure article-video"
         slug="edition-overview"
         video={editionVideo}
+        videoScript={videoScript}
       />
     </section>
   );
@@ -228,27 +256,52 @@ function EditionOverviewVideo({ editionVideo }: { editionVideo: ArticleVideoAsse
 function PresentationHeader({ content }: { content: EditionContent }) {
   const title = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadTitle : content.title;
   const subtitle = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadSubtitle : content.description;
+  const eyebrow = SITE_BRAND.mastheadEyebrow ?? null;
   const tagline = SITE_BRAND.mastheadTagline ?? null;
   const displayDate = SITE_BRAND.mastheadDateFormat === "formatted"
     ? formatMastheadDate(content.editionDate)
     : content.editionDate;
 
+  // Split the eyebrow into a leading word (rendered in the foreground color)
+  // and the remaining words (rendered in the muted foreground-subtle color).
+  // e.g. "Anthus AI Solutions" -> "Anthus" + "AI Solutions".
+  const eyebrowParts = eyebrow ? splitEyebrow(eyebrow) : null;
+
   return (
     <header className="presentation-header">
       <div className="presentation-header__copy-stack">
+        {eyebrowParts ? (
+          <span className="presentation-header__eyebrow">
+            <span className="presentation-header__eyebrow-strong">{eyebrowParts.lead}</span>
+            {eyebrowParts.rest ? (
+              <span className="presentation-header__eyebrow-muted">{eyebrowParts.rest}</span>
+            ) : null}
+          </span>
+        ) : null}
         <h1>
           {SITE_BRAND.mastheadWordSplit
-            ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
+            ? title.split(/\s+/).map((word) => (
+                <span className="presentation-header__word" key={word}>
+                  <span className="presentation-header__word-text">{word}</span>
+                </span>
+              ))
             : title}
         </h1>
         <div className="presentation-header__meta">
-          {subtitle ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
+          {subtitle && !eyebrow ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
           <p className="presentation-header__date">{displayDate}</p>
         </div>
-        {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
       </div>
+      {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
     </header>
   );
+}
+
+function splitEyebrow(text: string): { lead: string; rest: string } {
+  const trimmed = text.trim();
+  const firstSpace = trimmed.indexOf(" ");
+  if (firstSpace === -1) return { lead: trimmed, rest: "" };
+  return { lead: trimmed.slice(0, firstSpace), rest: trimmed.slice(firstSpace + 1) };
 }
 
 function SectionNavigation({ content, editionBasePath }: { content: EditionContent; editionBasePath?: string }) {
@@ -268,33 +321,64 @@ function PresentationItem({
   index,
   item,
   mode,
+  videoScript = null,
 }: {
   editionBasePath?: string;
   index?: number;
   item: PublicationItem;
   mode: "blog" | "magazine" | "magazine-feature";
+  videoScript?: VideoScriptRef | null;
 }) {
+  const articleRef = useRef<HTMLElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const maxWidth = useMeasuredWidth(frameRef);
+  const containerWidth = useMeasuredWidth(articleRef);
+  const frameWidth = useMeasuredWidth(frameRef);
+  const viewportWidth = useViewportWidth();
   const image = getPublicationItemImageAssets(item)[0];
   const video = getPublicationItemVideoAsset(item);
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
   const itemRole = getPresentationItemRole(mode, index);
+  const isFeaturedBlogLead = mode === "blog" && index === 0 && Boolean(image);
+  const featuredLayout = useMemo(() => {
+    if (!isFeaturedBlogLead || !containerWidth || !image) return null;
+    return solveFeaturedItem({
+      text,
+      containerWidth,
+      viewportWidth,
+      rhythm: BLOG_RHYTHM,
+      textStyle,
+      imageAsset: image,
+      itemIndex: index,
+    });
+  }, [containerWidth, image, index, isFeaturedBlogLead, text, textStyle, viewportWidth]);
   const lines = useMemo(() => {
+    if (featuredLayout) return featuredLayout.textLines;
+    const maxWidth = frameWidth || containerWidth;
     if (!maxWidth || !text.trim()) return [];
     return layoutAllTextLines({
-      prepared: prepareWithSegments(text, `${textStyle.fontSize}px ${textStyle.fontFamily}`),
+      prepared: prepareWithSegments(text, `${textStyle.fontSize}px ${textStyle.fontFamily}`, { whiteSpace: "pre-wrap" }),
       maxWidth,
       ...textStyle,
     });
-  }, [maxWidth, text, textStyle]);
-  const textHeight = getMeasuredTextHeight(lines);
+  }, [containerWidth, featuredLayout, frameWidth, text, textStyle]);
+  const textHeight = featuredLayout?.textFrameHeight ?? getMeasuredTextHeight(lines);
+  const layoutMode = featuredLayout?.mode ?? "stacked";
   const directHref = editionBasePath ? `${editionBasePath}/${encodeURIComponent(item.slug)}` : `/articles/${encodeURIComponent(item.slug)}`;
+  const itemStyle = featuredLayout
+    ? ({
+        "--feature-copy-width": `${featuredLayout.copyWidth}px`,
+        "--feature-image-width": `${featuredLayout.imageWidth}px`,
+        "--feature-image-height": `${featuredLayout.imageHeight}px`,
+        "--feature-text-frame-height": `${featuredLayout.textFrameHeight}px`,
+        "--feature-layout-gap": `${featuredLayout.gap}px`,
+      } as CSSProperties)
+    : undefined;
 
   return (
     <article
       className={`presentation-item presentation-item--${mode}`}
+      data-feature-layout={isFeaturedBlogLead ? layoutMode : undefined}
       data-item-id={item.slug}
       data-item-index={index}
       data-item-role={itemRole}
@@ -302,6 +386,8 @@ function PresentationItem({
       data-has-image={image ? "true" : "false"}
       data-has-video={video ? "true" : "false"}
       id={item.slug}
+      ref={articleRef}
+      style={itemStyle}
     >
       <div className="presentation-item__copy">
         <header className="presentation-item__header">
@@ -313,7 +399,12 @@ function PresentationItem({
         </header>
         {mode === "blog" ? (
           <div className="presentation-item__body">
-            <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
+            <div
+              className="presentation-item__text-frame"
+              data-layout-mode={layoutMode}
+              ref={frameRef}
+              style={{ height: textHeight }}
+            >
               <MeasuredPresentationLines lines={lines} />
             </div>
             <Link className="presentation-item__cta" href={directHref}>
@@ -333,13 +424,13 @@ function PresentationItem({
             caption={image.caption}
             credit={image.credit}
             figureClassName="presentation-item__image"
-            height={760}
+            frameHeight={featuredLayout?.imageHeight}
+            frameWidth={featuredLayout?.imageWidth}
             layout={image.layout}
             sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
             slug={item.slug}
             src={image.src}
             themeVariants={image.themeVariants}
-            width={1200}
           />
         </div>
       ) : null}
@@ -349,6 +440,7 @@ function PresentationItem({
             figureClassName="presentation-item__video-figure article-video"
             slug={item.slug}
             video={video}
+            videoScript={videoScript}
           />
         </div>
       ) : null}
@@ -385,6 +477,35 @@ function MeasuredPresentationLines({ lines }: { lines: TextLine[] }) {
   );
 }
 
+function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => setWidth(Math.max(1, Math.floor(node.getBoundingClientRect().width)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ref]);
+  return width;
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const update = () => setWidth(Math.max(1, Math.floor(window.innerWidth)));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return width;
+}
+
 type BlogHeaderObstacle = {
   x: number;
   y: number;
@@ -400,6 +521,7 @@ function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHea
     if (!page) return;
 
     const update = () => {
+      const pageRect = page.getBoundingClientRect();
       const background = page.querySelector<HTMLElement>(".blog-page-background");
       const backgroundRect = background?.getBoundingClientRect();
       if (!backgroundRect) return;
@@ -412,6 +534,10 @@ function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHea
         ".presentation-header__tagline",
         ".presentation-section-nav a",
       ];
+      // Block-level header elements span the full page width even when their
+      // text ends mid-line, and a full-width obstacle would sever the margin
+      // rails of the defense graph. Measure the rendered content instead of
+      // the element box so obstacles stay as tight as the visible text.
       const measureObstacleRect = (element: HTMLElement): DOMRect => {
         const range = document.createRange();
         range.selectNodeContents(element);
@@ -458,24 +584,6 @@ function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHea
   return obstacles;
 }
 
-function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const update = () => setWidth(Math.max(1, Math.floor(node.getBoundingClientRect().width)));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    window.addEventListener("resize", update);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [ref]);
-  return width;
-}
-
 function usePresentationTargetScroll(targetSection: EditionSection | undefined) {
   useEffect(() => {
     const scrollToCurrentTarget = () => {
@@ -502,11 +610,6 @@ function getSectionHref(content: EditionContent, section: EditionSection, editio
 
 function getSectionAnchorId(sectionKey: string): string {
   return `section-${sectionKey}`;
-}
-
-function getMeasuredTextHeight(lines: TextLine[]): number {
-  const last = lines[lines.length - 1];
-  return last ? last.y + last.paintHeight : 0;
 }
 
 function getPresentationTitle(item: PublicationItem): string {

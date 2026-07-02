@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { ArticlePageView } from "../../../components/article-page";
-import { getCachedArticle } from "../../../lib/cached-content-repository";
+import { getCachedArticle, getCachedVideoScript } from "../../../lib/cached-content-repository";
 import { generateArticleStaticParams } from "../../../lib/reader-static-params";
 import { SITE_BRAND } from "../../../lib/site-brand";
 
@@ -27,8 +27,8 @@ export async function generateMetadata({ params }: ArticlePageProps) {
 
 export default async function ArticlePage({ params }: ArticlePageProps) {
   const { slug } = await params;
-  const article = await getCachedArticle(slug);
+  const [article, videoScript] = await Promise.all([getCachedArticle(slug), getCachedVideoScript(slug)]);
   if (!article) notFound();
 
-  return <ArticlePageView article={article} backHref="/" />;
+  return <ArticlePageView article={article} backHref="/" videoScript={videoScript} />;
 }

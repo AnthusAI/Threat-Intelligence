@@ -207,11 +207,11 @@ poetry run papyrus videos render --article the-balance-of-power-is-shifting
 Outputs (gitignored):
 
 ```text
-publications/threat_intelligence/seed-art/videos/edition-overview.mp4
-publications/threat_intelligence/seed-art/videos/<slug>.mp4
+public/seed-art/threat-intelligence/videos/edition-overview.mp4
+public/seed-art/threat-intelligence/videos/<slug>.mp4
 ```
 
-Reader URLs: `/seed-art/threat-intelligence/videos/...` (symlinked from `public/`).
+Reader URLs: `/seed-art/threat-intelligence/videos/...` (served directly from `public/`).
 
 Upload during Amplify seed: `PAPYRUS_SEED_VIDEOS=1 npm run seed:amplify`
 

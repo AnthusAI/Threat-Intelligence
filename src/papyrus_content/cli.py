@@ -196,7 +196,13 @@ from .steering import (
     resolve_classifier_for_corpus,
     selected_corpus_configs,
 )
-from publications.threat_intelligence.videoml.videos_commands import videos_attach, videos_render, videos_seed
+from publications.threat_intelligence.videoml.videos_commands import (
+    videos_attach,
+    videos_edit_dsl,
+    videos_generate_dsl,
+    videos_render,
+    videos_seed,
+)
 
 
 PORTED_COMMANDS = frozenset(
@@ -347,6 +353,8 @@ PORTED_COMMANDS = frozenset(
         "videos:render",
         "videos:seed",
         "videos:attach",
+        "videos:generate-dsl",
+        "videos:edit-dsl",
     }
 )
 
@@ -692,6 +700,10 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         videos_seed(flags)
     elif route == "videos:attach":
         videos_attach(flags)
+    elif route == "videos:generate-dsl":
+        videos_generate_dsl(flags)
+    elif route == "videos:edit-dsl":
+        videos_edit_dsl(flags)
     else:
         raise ValueError(f"Unsupported papyrus command: {group} {command}")
 

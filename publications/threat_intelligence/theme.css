@@ -41,6 +41,7 @@
   --foreground: var(--sand-11);
   --foreground-strong: var(--sand-12);
   --foreground-muted: var(--sand-10);
+  --foreground-subtle: var(--sand-9);
   --card: var(--sand-1);
   --card-foreground: var(--sand-11);
   --popover: var(--sand-1);
@@ -76,25 +77,41 @@
   --ti-section-rule: var(--ti-alarm-red);
   --ti-footer-control: var(--sand-11);
   --ti-footer-control-selected: var(--sand-12);
-  --ti-rhythm: 7px;
+  --ti-rhythm: 4px;
+  --ti-row-height: calc(var(--ti-rhythm) * 4);
+  --ti-paint-buffer: 4px;
+  --ti-paint-height: calc(var(--ti-row-height) + var(--ti-paint-buffer));
   --ti-copy-font-size: 18px;
-  --ti-copy-line-height: calc(var(--ti-rhythm) * 4);
+  --ti-copy-line-height: var(--ti-row-height);
   --ti-meta-font-size: 12px;
-  --ti-meta-line-height: calc(var(--ti-rhythm) * 2);
+  --ti-meta-line-height: var(--ti-row-height);
   --ti-meta-letter-spacing: 0.09em;
-  --ti-deck-font-size: clamp(18px, 1.35vw, 20px);
+  --ti-deck-font-size: calc(var(--ti-rhythm) * 3);
   --ti-deck-line-height: var(--ti-copy-line-height);
   --ti-secondary-headline-line-box: calc(var(--ti-rhythm) * 6);
-  --ti-secondary-headline-font-size: clamp(34px, 2.65vw, 42px);
+  --ti-secondary-headline-font-size: calc(var(--ti-rhythm) * 6);
   --ti-lead-headline-line-box: calc(var(--ti-rhythm) * 8);
-  --ti-lead-headline-font-size: clamp(42px, 4.2vw, 56px);
+  --ti-lead-headline-font-size: calc(var(--ti-rhythm) * 8);
   --ti-section-band-height: var(--ti-secondary-headline-line-box);
   --ti-section-label-scale: 1.34;
   --ti-section-label-scale-trimmed: 1.48;
-  --ti-masthead-word-line-box: clamp(calc(var(--ti-rhythm) * 8), 7.1vw, calc(var(--ti-rhythm) * 13));
-  --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) * 1.42);
+  --ti-masthead-word-line-box: calc(var(--ti-row-height) * 4);
+  /* Painted cap height / em for Inter 900 uppercase (masthead font). Measured from canvas ink. */
+  --ti-masthead-cap-em-ratio: 0.73;
+  --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) / var(--ti-masthead-cap-em-ratio));
+  /* fontBoundingBoxDescent / em for Inter 900 uppercase. */
+  --ti-masthead-descent-em-ratio: 0.24;
+  /* INTELLIGENCE width / em at the masthead font (measured from rendered
+     INTELLIGENCE word box across all masthead row breakpoints). Used to
+     derive the H1 width so the tagline max-width can track it. */
+  --ti-masthead-fit-chars: 7.28;
+  /* Wide content rail so the blog body keeps growing with the viewport.
+     At ~1800px the masthead "THREAT INTELLIGENCE" fits on one horizontal
+     line within this width. */
+  --ti-blog-rail-max-width: calc(var(--ti-rhythm) * 360);
   --ti-stack-gap: var(--ti-rhythm);
-  --ti-section-nav-gap: var(--ti-rhythm);
+  /* One blank rhythm row between wrapped section-nav flex lines. */
+  --ti-section-nav-gap: var(--ti-row-height);
   --ti-section-content-gap: calc(var(--ti-rhythm) * 7);
   --ti-section-stack-gap: calc(var(--ti-rhythm) * 12);
   --ti-footer-card-min-height: calc(var(--ti-rhythm) * 20);
@@ -127,11 +144,11 @@
   --paper-page-background-size: 100% 100%;
   --paper-drop-shadow: 0 18px 44px -34px rgb(15 23 42 / 0.38);
   --site-body-font:
-    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
   --site-display-font:
-    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
   --site-ui-font:
-    var(--font-sans), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -141,6 +158,7 @@
     --foreground: var(--sand-11);
     --foreground-strong: var(--sand-12);
     --foreground-muted: var(--sand-10);
+    --foreground-subtle: var(--sand-9);
     --card: var(--sand-1);
     --card-foreground: var(--sand-11);
     --popover: var(--sand-1);
@@ -201,6 +219,7 @@
   --foreground: var(--sand-11);
   --foreground-strong: var(--sand-12);
   --foreground-muted: var(--sand-10);
+  --foreground-subtle: var(--sand-9);
   --card: var(--sand-1);
   --card-foreground: var(--sand-11);
   --popover: var(--sand-1);
@@ -262,22 +281,28 @@
 }
 
 :root[data-site-brand="threat-intelligence"] body {
-  --ti-body-page-padding-x: clamp(18px, 4vw, 56px);
-  --ti-blog-rail-max-width: 1180px;
+  --ti-body-page-padding-x: calc(var(--ti-rhythm) * 3);
+  /* Wide content rail so the blog body keeps growing with the viewport.
+     At ~1800px the masthead "THREAT INTELLIGENCE" fits on one horizontal
+     line within this width. */
+  --ti-blog-rail-max-width: calc(var(--ti-rhythm) * 360);
   --ti-body-rail-width: min(
     calc(100vw - (var(--ti-body-page-padding-x) * 2)),
-    var(--ti-blog-rail-max-width),
-    calc(var(--ti-masthead-font-size) * 9.55)
+    var(--ti-blog-rail-max-width)
   );
   --ti-body-rail-margin: max(0px, calc((100vw - var(--ti-body-rail-width)) * 0.5));
-  --ti-body-background-mark-size: clamp(300px, 33vw, 470px);
-  --ti-body-background-mark-right: calc(var(--ti-body-rail-margin) - (var(--ti-body-background-mark-size) * 0.3));
-  --ti-body-background-mark-top: clamp(-180px, -9vw, -112px);
+  --ti-body-background-mark-size: calc(var(--ti-rhythm) * 64);
+  --ti-body-background-mark-right: calc(var(--ti-body-rail-margin) - calc(var(--ti-rhythm) * 2));
+  --ti-body-background-mark-top: calc(var(--ti-rhythm) * -16);
 
   background: var(--background);
+  /* Clip only the horizontal axis so the pictogram/background cannot introduce
+     horizontal scroll. Do NOT use `overflow: clip` here: when the root element
+     has overflow: visible, the body's overflow propagates to the viewport, and
+     `overflow: clip` would clip the viewport's vertical axis and break page
+     scrolling. `overflow-x: hidden` leaves overflow-y as visible, which the
+     spec computes to `auto` (scrollable) — preserving vertical scroll. */
   overflow-x: hidden;
-  overflow-x: clip;
-  overflow-y: visible;
   position: relative;
 }
 
@@ -324,56 +349,109 @@
   font-family: var(--site-ui-font);
 }
 
-:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header {
-  --threat-intelligence-masthead-rhythm: var(--ti-stack-gap);
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog.blog-rhythm-shell {
+  --paper-rhythm: var(--ti-row-height);
+  position: relative;
+}
 
-  align-content: center;
-  align-items: end;
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog.blog-rhythm-shell[data-rhythm-overlay="true"]::before {
+  --rhythm-overlay-blue-rgb: 18 52 118;
+  --rhythm-overlay-blue-alpha: 0.045;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header {
+  --threat-intelligence-masthead-rhythm: var(--ti-row-height);
+
+  align-content: start;
+  align-items: start;
   border-bottom: 0;
   border-top: 0;
   display: grid;
   gap: 0;
-  grid-template-columns: minmax(0, 0.77fr) minmax(160px, 0.23fr);
+  grid-template-columns: minmax(0, 1fr);
   margin-left: auto;
   margin-right: auto;
-  margin-bottom: calc(var(--ti-rhythm) * 2);
+  margin-bottom: 0;
   max-width: var(--ti-blog-rail-width);
-  min-height: clamp(196px, 22vw, 308px);
-  padding: clamp(18px, 3vw, 40px) 0 clamp(18px, 2.8vw, 32px);
+  min-height: 0;
+  padding: 0 0 var(--ti-row-height);
   position: relative;
   width: var(--ti-blog-rail-width);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__copy-stack {
-  align-self: end;
+  align-self: start;
   display: grid;
   gap: var(--threat-intelligence-masthead-rhythm);
   grid-column: 1;
   grid-row: 1;
-  max-width: min(100%, 58rem);
+  max-width: 100%;
   min-width: 0;
-  width: min(100%, 58rem);
+  /* fit-content shrinks the copy-stack to the widest child (the longest
+     masthead word, e.g. INTELLIGENCE) so the meta row and date right-align
+     to the word's edge, not the full rail width. max-width: 100% still
+     allows wrapping if content exceeds the rail. */
+  width: fit-content;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 {
-  display: contents;
+  display: grid;
+  gap: var(--ti-row-height);
   margin: 0;
+  max-width: 100%;
+  width: fit-content;
 }
 
-:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 span {
-  color: var(--ti-alarm-red);
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__word {
   display: block;
-  font-family: var(--site-display-font);
+  height: auto;
+  max-width: 100%;
+  overflow: visible;
+  /* fit-content shrinks the box to the text width so the pictogram core has
+     room to the right, but with max-width: 100% the text still wraps when it
+     would overflow the rail. */
+  width: fit-content;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__word-text {
+  color: var(--ti-alarm-red);
+  font-family: var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  /* Fixed px font-size derived from the row height, so painted caps always fill
+     four rows and scale identically with browser zoom as the rhythm overlay.
+     Do NOT use container-query (cqw) units here: cqw shrinks the font when the
+     viewport zooms in, desynchronizing the caps from the fixed-px overlay rows.
+     Narrow viewports wrap instead of shrinking the font. */
   font-size: var(--ti-masthead-font-size);
   font-style: normal;
   font-weight: 900;
   letter-spacing: 0;
-  line-height: var(--ti-masthead-word-line-box);
-  max-width: 100%;
-  overflow-wrap: normal;
-  text-wrap: balance;
+  /* Each line box is five rows: four rows of cap ink plus one blank row of
+     leading, so wrapped lines separate by exactly one rhythm row. */
+  line-height: calc(var(--ti-row-height) * 5);
   text-transform: uppercase;
-  width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+@supports (text-box-trim: trim-end) {
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__word-text {
+    /* Trim the inline box to the cap-to-baseline distance so a single line is
+       exactly four rows tall (cap height), and wrapped lines stack with the
+       one-row leading from line-height. */
+    text-box-edge: cap alphabetic;
+    text-box-trim: trim-both;
+  }
+
+  /* Trim the text-bearing elements (not the flex containers) so each painted
+     line occupies exactly one rhythm row, matching the headline approach. */
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__date,
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__eyebrow-strong,
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__eyebrow-muted,
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav a {
+    text-box-edge: cap alphabetic;
+    text-box-trim: trim-both;
+  }
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__meta {
@@ -392,15 +470,22 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__date {
-  align-items: center;
   color: var(--ti-headline-color);
-  display: inline-flex;
-  font-size: var(--ti-meta-font-size);
+  display: inline-block;
+  /* Cap-compensated font-size so painted caps fill exactly one rhythm row,
+     matching the masthead headline's cap-height approach at single-row scale. */
+  font-size: calc(var(--ti-row-height) / var(--ti-masthead-cap-em-ratio));
   font-style: normal;
   font-weight: 900;
-  line-height: var(--ti-meta-line-height);
+  /* Two-row line box (one cap row + one leading row) so any wrapped lines
+     separate by a blank rhythm row, mirroring the headline's 4+1 pattern.
+     text-box-trim (below) trims the painted box to the one-row cap height. */
+  line-height: calc(var(--ti-row-height) * 2);
   letter-spacing: var(--ti-meta-letter-spacing);
   margin: 0;
+  /* Right-align the date to the rail/INTELLIGENCE right edge now that the
+     subtitle moved up to the eyebrow and the meta row holds only the date. */
+  margin-left: auto;
   text-transform: uppercase;
 }
 
@@ -412,70 +497,113 @@
   font-style: normal;
   font-weight: 900;
   line-height: var(--ti-meta-line-height);
-  max-width: 18rem;
+  max-width: calc(var(--ti-rhythm) * 36);
   letter-spacing: var(--ti-meta-letter-spacing);
   text-transform: uppercase;
 }
 
-:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__tagline {
-  color: var(--ti-body-color);
-  display: block;
-  font-size: var(--ti-deck-font-size);
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__eyebrow {
+  align-items: baseline;
+  color: var(--foreground);
+  display: inline-flex;
+  /* Cap-compensated font-size so painted caps fill exactly one rhythm row,
+     matching the masthead headline's cap-height approach at single-row scale. */
+  font-size: calc(var(--ti-row-height) / var(--ti-masthead-cap-em-ratio));
   font-style: normal;
-  font-weight: 650;
-  line-height: var(--ti-deck-line-height);
-  max-width: min(100%, 58rem);
+  font-weight: 900;
+  gap: 0.3em;
+  /* Two-row line box (one cap row + one leading row) so any wrapped lines
+     separate by a blank rhythm row, mirroring the headline's 4+1 pattern. */
+  line-height: calc(var(--ti-row-height) * 2);
+  letter-spacing: var(--ti-meta-letter-spacing);
+  margin: 0;
+  text-transform: uppercase;
+  width: fit-content;
+  max-width: 100%;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__eyebrow-strong {
+  color: var(--foreground);
+  font-style: normal;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__eyebrow-muted {
+  color: var(--foreground-subtle);
+  font-style: normal;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__tagline {
+  color: var(--foreground-subtle);
+  display: block;
+  font-size: calc(var(--ti-row-height) * 0.875);
+  font-style: normal;
+  font-weight: 600;
+  /* One-row line height so each line occupies exactly one rhythm row. */
+  line-height: var(--ti-row-height);
+  /* One blank rhythm row between the meta row and the tagline, matching the
+     copy-stack's internal gap. */
+  margin-top: var(--ti-row-height);
+  /* Fill the full header rail width. The tagline is a direct child of
+     .presentation-header (not the fit-content copy-stack) so 100% resolves
+     to the rail width. */
+  max-width: 100%;
   width: 100%;
   text-transform: none;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-edition-video {
   grid-column: 1 / -1;
-  margin: -1.5em auto calc(var(--ti-rhythm) * 6);
+  margin: calc(var(--ti-row-height) * 2) auto calc(var(--ti-row-height) * 6);
   max-width: var(--ti-blog-rail-width);
   width: var(--ti-blog-rail-width);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-edition-video__figure {
-  margin: 0 0 2em;
+  container-type: inline-size;
+  margin: 0 0 calc(var(--ti-row-height) * 2);
+  /* Snap the 16:9 height up to the next whole rhythm row so the figure
+     bottom lands on a grid line and downstream content stays aligned. */
+  height: round(up, calc(100cqw * 9 / 16), var(--ti-row-height));
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-edition-video__figure .article-video__player {
+  aspect-ratio: none;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 0;
+  height: 100%;
   max-height: none;
   object-fit: contain;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-edition-video__figure .article-video__preview-frame {
-  aspect-ratio: 16 / 9;
+  aspect-ratio: none;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 0;
+  height: 100%;
   max-height: none;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav {
+  align-items: baseline;
   border-bottom: 0;
   border-top: 0;
   gap: var(--ti-section-nav-gap) calc(var(--ti-rhythm) * 3);
   margin-left: auto;
   margin-right: auto;
-  margin-bottom: calc(var(--ti-rhythm) * 5);
+  margin-bottom: calc(var(--ti-row-height) * 2);
   max-width: var(--ti-blog-rail-width);
-  padding-bottom: var(--ti-rhythm);
+  padding-bottom: 0;
   width: var(--ti-blog-rail-width);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog {
-  --ti-blog-rail-max-width: 1180px;
-  --ti-blog-rail-width: min(100%, var(--ti-blog-rail-max-width), calc(var(--ti-masthead-font-size) * 9.55));
+  --ti-blog-rail-width: min(100%, var(--ti-blog-rail-max-width));
   --ti-blog-rail-margin: max(0px, calc((100% - var(--ti-blog-rail-width)) * 0.5));
 
   background: var(--background);
   isolation: isolate;
-  overflow-x: hidden;
-  overflow-x: clip;
-  overflow-y: visible;
+  overflow: clip;
+  padding: calc(var(--ti-row-height) * 4) var(--ti-body-page-padding-x) calc(var(--ti-row-height) * 20);
   position: relative;
 }
 
@@ -491,7 +619,7 @@
   --ti-pictogram-core-glow: var(--ti-alarm-red);
   --ti-pictogram-compromised: var(--ti-alarm-red);
   --ti-pictogram-compromised-stroke: var(--sand-1);
-  height: clamp(340px, 48vw, 760px);
+  height: calc(var(--ti-row-height) * 24);
   left: auto;
   opacity: 1;
   overflow: hidden;
@@ -527,21 +655,23 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav a {
-  border-bottom: 2px solid transparent;
-  color: var(--ti-headline-color);
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--ti-meta-font-size);
+  color: var(--foreground-subtle);
+  display: inline-block;
+  /* Cap-compensated font-size so painted caps fill exactly one rhythm row. */
+  font-size: calc(var(--ti-row-height) / var(--ti-masthead-cap-em-ratio));
   font-weight: 900;
   letter-spacing: var(--ti-meta-letter-spacing);
-  line-height: var(--ti-meta-line-height);
-  min-height: var(--ti-copy-line-height);
-  padding: 0 0 var(--ti-rhythm);
+  /* Two-row line box (one cap row + one leading row); text-box-trim trims to
+     the one-row cap height. */
+  line-height: calc(var(--ti-row-height) * 2);
+  padding: 0;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color 160ms ease;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav a:hover {
-  border-bottom-color: var(--ti-alarm-red);
-  color: var(--ti-headline-color);
+  color: var(--foreground);
   text-decoration: none;
 }
 
@@ -568,7 +698,7 @@
 
 @media (min-width: 1100px) {
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) {
-    column-gap: clamp(28px, 4vw, 52px);
+    column-gap: calc(var(--ti-row-height) * 2);
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -600,7 +730,7 @@
 
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="1"] .presentation-item__text-frame,
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="2"] .presentation-item__text-frame {
-    margin-bottom: 1em;
+    margin-bottom: calc(var(--ti-row-height) * 1);
   }
 
   :root[data-site-brand="threat-intelligence"] .blog-section:has(> .presentation-item[data-item-index="2"]) > .presentation-item[data-item-index="1"] .presentation-item__cta,
@@ -614,7 +744,7 @@
   --threat-intelligence-section-label-scale: var(--ti-section-label-scale);
   --threat-intelligence-section-label-scale-trimmed: var(--ti-section-label-scale-trimmed);
   --threat-intelligence-section-gap-x: var(--ti-rhythm);
-  --threat-intelligence-section-label-pad-x: 2px;
+  --threat-intelligence-section-label-pad-x: var(--ti-rhythm);
 
   align-items: stretch;
   border-bottom: 0;
@@ -666,7 +796,7 @@
   justify-content: center;
   justify-self: center;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: var(--ti-secondary-headline-line-box);
   margin: 0;
   padding: 0 var(--threat-intelligence-section-label-pad-x);
   text-transform: uppercase;
@@ -686,7 +816,7 @@
   color: var(--ti-body-color);
   font-size: var(--ti-copy-font-size);
   line-height: var(--ti-copy-line-height);
-  max-width: 52rem;
+  max-width: calc(var(--ti-rhythm) * 84);
   padding: 0;
   text-align: center;
   width: 100%;
@@ -709,7 +839,7 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__video-figure {
-  margin: 0 0 2em;
+  margin: 0 0 calc(var(--ti-row-height) * 2);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__video .article-video__player {
@@ -745,7 +875,7 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-has-image="true"] {
-  grid-template-columns: minmax(0, 0.72fr) minmax(240px, 0.28fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(calc(var(--ti-rhythm) * 34), 0.28fr);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] {
@@ -754,7 +884,30 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"][data-has-image="true"] {
-  grid-template-columns: minmax(0, 0.64fr) minmax(320px, 0.36fr);
+  grid-template-columns: minmax(0, 0.64fr) minmax(calc(var(--ti-rhythm) * 46), 0.36fr);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout="obstacle"][data-has-image="true"],
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout="float"][data-has-image="true"] {
+  gap: var(--feature-layout-gap);
+  grid-template-columns: minmax(0, 1fr) var(--feature-image-width);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout] .presentation-item__text-frame {
+  height: var(--feature-text-frame-height);
+  max-width: var(--feature-copy-width);
+  overflow: hidden;
+  width: var(--feature-copy-width);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout] .presentation-item__media,
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout] .pictogram-figure__frame {
+  height: var(--feature-image-height);
+  width: var(--feature-image-width);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item[data-feature-layout] .pictogram-figure__frame {
+  aspect-ratio: auto;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"][data-has-image="true"] .presentation-item__copy {
@@ -836,24 +989,22 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__image img {
-  aspect-ratio: 16 / 11;
   background: var(--background);
   border: 1px solid var(--sand-a5);
+  height: 100%;
   object-fit: contain;
+  width: 100%;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .pictogram-figure__frame {
-  aspect-ratio: 16 / 11;
+  aspect-ratio: auto;
   background: var(--background);
   border: 1px solid var(--sand-a5);
 }
 
-:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .presentation-item__image img {
-  aspect-ratio: 1 / 1;
-}
-
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .presentation-item__image img,
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .pictogram-figure__frame {
-  aspect-ratio: 1 / 1;
+  aspect-ratio: auto;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__text-frame {
@@ -960,7 +1111,7 @@
   gap: calc(var(--ti-rhythm) * 2);
   grid-column: 1;
   grid-row: 2;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ti-rhythm) * 22), 1fr));
   grid-template-rows: none;
 }
 
@@ -1000,7 +1151,7 @@
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell--edition) .front-footer--presentation .front-footer__section-title {
   color: inherit;
   font-family: var(--site-display-font);
-  font-size: clamp(22px, 1.7vw, 28px);
+  font-size: calc(var(--ti-rhythm) * 4);
   font-style: normal;
   font-weight: 900;
   letter-spacing: 0;
@@ -1060,8 +1211,8 @@
 
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell--edition) .front-footer--presentation .front-footer__theme-control .reader-theme-control__button {
   color: inherit;
-  height: calc(var(--ti-rhythm) * 6 - 2px);
-  width: calc(var(--ti-rhythm) * 6 - 2px);
+  height: calc(var(--ti-rhythm) * 6);
+  width: calc(var(--ti-rhythm) * 6);
 }
 
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell--edition) .front-footer--presentation .front-footer__theme-control .reader-theme-control__button + .reader-theme-control__button {
@@ -1080,19 +1231,15 @@
 @media (max-width: 1024px) {
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header {
     grid-template-columns: 1fr;
-    min-height: clamp(210px, 38vw, 300px);
-    padding-top: clamp(22px, 5vw, 38px);
-  }
-
-  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 {
-    max-width: min(100%, 42rem);
+    min-height: 0;
+    padding-top: 0;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__copy-stack {
     grid-column: 1;
     grid-row: 1;
-    max-width: min(85vw, 36rem);
-    width: min(85vw, 36rem);
+    max-width: 100%;
+    width: 100%;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__meta {
@@ -1100,17 +1247,16 @@
     border-left: 0;
     border-top: 0;
     flex-direction: column;
-    gap: calc(var(--ti-rhythm) * 0.75);
+    gap: var(--ti-rhythm);
     justify-content: flex-start;
-    max-width: min(85vw, 36rem);
+    max-width: min(85vw, calc(var(--ti-rhythm) * 60));
     padding-left: 0;
     padding-top: 0;
-    width: min(85vw, 36rem);
+    width: min(85vw, calc(var(--ti-rhythm) * 60));
   }
 
-  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__subtitle,
-  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__tagline {
-    max-width: min(85vw, 36rem);
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__subtitle {
+    max-width: min(85vw, calc(var(--ti-rhythm) * 60));
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__date {
@@ -1118,7 +1264,7 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .blog-page-background {
-    height: clamp(300px, 62vw, 520px);
+    height: calc(var(--ti-row-height) * 18);
     left: auto;
     opacity: 1;
     right: 0;
@@ -1127,8 +1273,8 @@
   }
 
   :root[data-site-brand="threat-intelligence"] body {
-    --ti-body-background-mark-size: clamp(280px, 58vw, 420px);
-    --ti-body-background-mark-top: clamp(-92px, -8vw, -42px);
+    --ti-body-background-mark-size: calc(var(--ti-rhythm) * 48);
+    --ti-body-background-mark-top: calc(var(--ti-row-height) * -4);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog,
@@ -1139,7 +1285,7 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] .presentation-item__image img {
-    aspect-ratio: 16 / 10;
+    aspect-ratio: auto;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__image {
@@ -1159,7 +1305,7 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"][data-has-image="true"] .presentation-item__body .presentation-item__text-frame {
-    margin-top: 18px;
+    margin-top: calc(var(--ti-row-height) * 1);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__header span,
@@ -1223,42 +1369,43 @@
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 599px) {
   :root[data-site-brand="threat-intelligence"] .presentation-page {
-    padding-left: 18px;
-    padding-right: 18px;
+    padding-left: var(--ti-body-page-padding-x);
+    padding-right: var(--ti-body-page-padding-x);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog {
-    --ti-masthead-word-line-box: calc(var(--ti-rhythm) * 7);
-    --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) * 1.06);
-    --ti-blog-rail-width: calc(100vw - 36px);
+    --ti-masthead-word-line-box: calc(var(--ti-row-height) * 2);
+    /* Recompute the masthead font-size here (not :root) so the mobile 2-row
+       word-line-box actually produces a 2-row cap font. --ti-masthead-font-size
+       is inherited pre-computed from :root, so it must be overridden on the
+       same element that changes word-line-box. */
+    --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) / var(--ti-masthead-cap-em-ratio));
+    --ti-blog-rail-width: calc(100vw - calc(var(--ti-rhythm) * 6));
     --ti-blog-rail-margin: 0px;
+    padding-left: var(--ti-body-page-padding-x);
+    padding-right: var(--ti-body-page-padding-x);
   }
 
   :root[data-site-brand="threat-intelligence"] body {
-    --ti-body-page-padding-x: 18px;
-    --ti-masthead-word-line-box: calc(var(--ti-rhythm) * 7);
-    --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) * 1.06);
-    --ti-body-rail-width: calc(100vw - 36px);
-    --ti-body-rail-margin: 18px;
-    --ti-body-background-mark-size: 300px;
-    --ti-body-background-mark-top: -72px;
+    --ti-body-page-padding-x: calc(var(--ti-rhythm) * 3);
+    --ti-masthead-word-line-box: calc(var(--ti-row-height) * 2);
+    --ti-body-rail-width: calc(100vw - calc(var(--ti-rhythm) * 6));
+    --ti-body-rail-margin: calc(var(--ti-rhythm) * 3);
+    --ti-body-background-mark-size: calc(var(--ti-rhythm) * 42);
+    --ti-body-background-mark-top: calc(var(--ti-row-height) * -3);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header {
-    margin-bottom: calc(var(--ti-rhythm) * 2);
-    min-height: 220px;
-    padding-bottom: calc(var(--ti-rhythm) * 3);
+    margin-bottom: 0;
+    min-height: 0;
+    padding-bottom: var(--ti-row-height);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__copy-stack {
-    max-width: 85vw;
-  }
-
-  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 span {
-    font-size: min(var(--ti-masthead-font-size), 13vw);
-    max-width: 85vw;
+    max-width: 100%;
+    width: 100%;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__meta {
@@ -1268,14 +1415,13 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav {
-    gap: var(--ti-rhythm) calc(var(--ti-rhythm) * 2);
-    margin-bottom: calc(var(--ti-rhythm) * 6);
-    padding-bottom: calc(var(--ti-rhythm) * 2);
+    gap: var(--ti-row-height) calc(var(--ti-rhythm) * 2);
+    margin-bottom: calc(var(--ti-row-height) * 2);
+    padding-bottom: 0;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-nav a {
-    font-size: var(--ti-meta-font-size);
-    padding-bottom: var(--ti-rhythm);
+    padding-bottom: 0;
   }
 
   :root[data-site-brand="threat-intelligence"] .blog-sections {
@@ -1302,12 +1448,12 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .blog-page-background {
-    height: clamp(260px, 72vw, 360px);
+    height: calc(var(--ti-row-height) * 12);
     left: auto;
     opacity: 0.9;
     right: 0;
     top: 0;
-    width: min(64%, 300px);
+    width: min(64%, calc(var(--ti-rhythm) * 42));
   }
 
   :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell--edition) .front-footer--presentation {
@@ -1348,17 +1494,62 @@
   }
 }
 
+/* 400-767px: masthead occupies 3 rows (between phone and tablet portrait).
+   Below 400px the 2-row mobile breakpoint above applies; at 768px+ the
+   4-row default from :root applies. */
+@media (min-width: 600px) and (max-width: 1199px) {
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog {
+    --ti-masthead-word-line-box: calc(var(--ti-row-height) * 3);
+    --ti-masthead-font-size: calc(var(--ti-masthead-word-line-box) / var(--ti-masthead-cap-em-ratio));
+  }
+
+  :root[data-site-brand="threat-intelligence"] body {
+    --ti-masthead-word-line-box: calc(var(--ti-row-height) * 3);
+  }
+}
+
 @media (max-width: 1000px) {
   :root[data-site-brand="threat-intelligence"] .blog-page-background {
     left: auto;
     right: 0;
     top: 0;
-    width: min(60%, 480px);
+    width: min(60%, calc(var(--ti-rhythm) * 68));
   }
 
   :root[data-site-brand="threat-intelligence"] body {
-    --ti-body-background-mark-top: calc(-80px + clamp(0px, (1000px - 100vw) * 0.2, 130px));
+    --ti-body-background-mark-top: calc(var(--ti-row-height) * -3);
   }
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .blog-section {
+  scroll-margin-top: calc(var(--ti-row-height) * 2);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item {
+  scroll-margin-top: calc(var(--ti-row-height) * 2);
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__text-frame {
+  margin-top: 0;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__image img {
+  aspect-ratio: auto;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .article-video__player {
+  aspect-ratio: auto;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .article-video__preview-frame {
+  aspect-ratio: 16 / 9;
+  max-height: none;
+}
+
+:root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__image figcaption {
+  font-size: var(--ti-meta-font-size);
+  line-height: var(--ti-meta-line-height);
+  margin-top: var(--ti-rhythm);
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-item__header span,
@@ -1386,7 +1577,7 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .article-shell--edition {
-  --ti-article-body-rail-width: min(calc(100vw - 60px), 88ch);
+  --ti-article-body-rail-width: min(calc(100vw - calc(var(--ti-rhythm) * 9)), calc(var(--ti-rhythm) * 88));
   --ti-blog-rail-width: var(--ti-article-body-rail-width);
 }
 
@@ -1410,7 +1601,7 @@
   background: transparent;
   background-size: auto;
   margin: 0 auto;
-  max-width: calc(88ch + 60px);
+  max-width: calc(calc(var(--ti-rhythm) * 88) + calc(var(--ti-rhythm) * 9));
   min-height: auto;
 }
 
@@ -1512,4 +1703,20 @@
   font-family: var(--site-display-font);
   font-weight: 900;
   letter-spacing: 0;
+}
+
+/* At very wide viewports the masthead words sit on one horizontal line
+   instead of stacking vertically. The 4-row cap height is preserved; only
+   the layout direction changes from a vertical grid to a horizontal flex. */
+@media (min-width: 1800px) {
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header h1 {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: calc(var(--ti-row-height) * 1.5);
+  }
+
+  :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-header__word {
+    display: inline-block;
+  }
 }

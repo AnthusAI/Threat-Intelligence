@@ -9,6 +9,7 @@ export type SiteBrand = {
   appDescription: string;
   mastheadTitle: string;
   mastheadSubtitle: string;
+  mastheadEyebrow?: string;
   mastheadTagline?: string;
   backToHomeLabel: string;
   articleTitleSuffix: string;

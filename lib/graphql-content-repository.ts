@@ -15,6 +15,7 @@ import {
   type PublicationItemType,
 } from "./publication-items";
 import { SITE_BRAND } from "./site-brand";
+import { parseVideoScriptRef, videomlItemSlug, type VideoScriptRef } from "./video-script";
 
 const AUTH_MODE = "apiKey";
 const DEFAULT_EDITION_SLUG = "current";
@@ -186,6 +187,13 @@ export const graphqlContentRepository: ContentRepository = {
       .map((item) => item.slug)
       .sort();
   },
+
+  async loadVideoScript(targetSlug: string) {
+    if (process.env.NODE_ENV !== "development") return null;
+    const item = await getItemBySlug(videomlItemSlug(targetSlug));
+    if (!item || item.type !== "videoml" || item.status !== "published") return null;
+    return parseVideoScriptRef(item);
+  },
 };
 
 function getClient(): DataClient {
@@ -316,6 +324,9 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
   const sanitizedLayoutPlan = pruneLayoutPlanUnavailableItems(layoutPlan, availableItemSlugs, edition.id);
   validateEditionLayoutPlanForItems(sanitizedLayoutPlan, items, `PublishedEdition(${edition.id}).layoutPlan`);
 
+  const editionVideo = await normalizeEditionVideoAsset(editionMetadata?.editionVideo);
+  const videoScripts = await loadEditionVideoScripts(items, editionVideo);
+
   return {
     id: edition.id,
     source: "graphql",
@@ -326,8 +337,34 @@ async function loadEditionContentFromEdition(edition: GraphQLEdition): Promise<E
     items,
     sections: createEditionSectionPlan(items, edition.metadata),
     suppressNewsDeskAppendix: editionMetadata?.suppressNewsDeskAppendix === true,
-    editionVideo: await normalizeEditionVideoAsset(editionMetadata?.editionVideo),
+    editionVideo,
+    videoScripts,
   };
+}
+
+async function loadEditionVideoScripts(
+  items: PublicationItem[],
+  editionVideo: ArticleVideoAsset | null,
+): Promise<Record<string, VideoScriptRef> | undefined> {
+  if (process.env.NODE_ENV !== "development") return undefined;
+
+  const targets = new Set<string>();
+  if (editionVideo) targets.add("edition-overview");
+  for (const item of items) {
+    if (item.video) targets.add(item.slug);
+  }
+
+  const entries = await Promise.all(
+    [...targets].map(async (targetSlug) => {
+      const item = await getItemBySlug(videomlItemSlug(targetSlug));
+      if (!item || item.type !== "videoml" || item.status !== "published") return null;
+      const script = parseVideoScriptRef(item);
+      return script ? ([targetSlug, script] as const) : null;
+    }),
+  );
+
+  const videoScripts = Object.fromEntries(entries.filter((entry): entry is [string, VideoScriptRef] => entry !== null));
+  return Object.keys(videoScripts).length > 0 ? videoScripts : undefined;
 }
 
 async function normalizeEditionVideoAsset(value: unknown): Promise<ArticleVideoAsset | null> {

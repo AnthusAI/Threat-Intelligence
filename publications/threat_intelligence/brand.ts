@@ -6,6 +6,7 @@ export const threatIntelligenceBrand: SiteBrand = {
   appDescription: "ANTHUS THREAT INTELLIGENCE from Anthus AI Solutions.",
   mastheadTitle: "THREAT INTELLIGENCE",
   mastheadSubtitle: "from Anthus AI Solutions",
+  mastheadEyebrow: "Anthus AI Solutions",
   mastheadTagline: "Practical advice for staying secure as the threat landscape shifts.",
   backToHomeLabel: "Back to Threat Intelligence",
   articleTitleSuffix: "Threat Intelligence",

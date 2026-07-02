@@ -60,13 +60,23 @@ export function usePictogramMotion(phaseOffsetMs: number): PictogramMotion {
 
 export function PictogramFrame({
   aspectRatio = 1,
+  frameHeight,
+  frameWidth,
   children,
 }: {
   aspectRatio?: number;
+  frameHeight?: number;
+  frameWidth?: number;
   children: ReactNode;
 }) {
+  const style = frameHeight
+    ? ({
+        height: frameHeight,
+        width: frameWidth ?? "100%",
+      } as CSSProperties)
+    : ({ "--pictogram-aspect-ratio": String(aspectRatio) } as CSSProperties);
   return (
-    <div className="pictogram-figure__frame" style={{ "--pictogram-aspect-ratio": String(aspectRatio) } as CSSProperties}>
+    <div className="pictogram-figure__frame" style={style}>
       {children}
     </div>
   );

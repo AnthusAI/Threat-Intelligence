@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import type { Article } from "../lib/articles";
+import { createThreatIntelligenceRhythm, reserveRhythmRows } from "../lib/blog-rhythm";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { getPublicationItemVideoAsset } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
+import type { VideoScriptRef } from "../lib/video-script";
 import { ArticleVideoFigure } from "./article-video";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
@@ -23,9 +25,17 @@ type ArticlePageViewProps = {
   backLabel?: string;
   editionFooter?: ArticlePageEditionFooter;
   editionDate?: string;
+  videoScript?: VideoScriptRef | null;
 };
 
-export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.backToHomeLabel, editionFooter, editionDate }: ArticlePageViewProps) {
+export function ArticlePageView({
+  article,
+  backHref,
+  backLabel = SITE_BRAND.backToHomeLabel,
+  editionFooter,
+  editionDate,
+  videoScript = null,
+}: ArticlePageViewProps) {
   const articleDate = editionDate ? formatArticleDate(editionDate) : null;
 
   return (
@@ -37,7 +47,7 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
       <article className="article-page">
         {article.video ? (
           <div className="article-page__hero-video">
-            <ArticleVideoFigure slug={article.slug} video={article.video} />
+            <ArticleVideoFigure slug={article.slug} video={article.video} videoScript={videoScript} />
           </div>
         ) : null}
         <header>
@@ -68,11 +78,28 @@ type ItemPageViewProps = {
   backLabel?: string;
   editionFooter?: ArticlePageEditionFooter;
   editionDate?: string;
+  videoScript?: VideoScriptRef | null;
 };
 
-export function ItemPageView({ item, backHref, backLabel = "Back to edition", editionFooter, editionDate }: ItemPageViewProps) {
+export function ItemPageView({
+  item,
+  backHref,
+  backLabel = "Back to edition",
+  editionFooter,
+  editionDate,
+  videoScript = null,
+}: ItemPageViewProps) {
   if (item.type === "article") {
-    return <ArticlePageView article={item} backHref={backHref} backLabel={backLabel} editionFooter={editionFooter} editionDate={editionDate} />;
+    return (
+      <ArticlePageView
+        article={item}
+        backHref={backHref}
+        backLabel={backLabel}
+        editionFooter={editionFooter}
+        editionDate={editionDate}
+        videoScript={videoScript}
+      />
+    );
   }
 
   const itemDate = editionDate ? formatArticleDate(editionDate) : null;
@@ -87,7 +114,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
       <article className="article-page" data-item-type={item.type}>
         {itemVideo ? (
           <div className="article-page__hero-video">
-            <ArticleVideoFigure slug={item.slug} video={itemVideo} />
+            <ArticleVideoFigure slug={item.slug} video={itemVideo} videoScript={videoScript} />
           </div>
         ) : null}
         <header>
@@ -112,6 +139,10 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
   );
 }
 
+const ARTICLE_PICTOGRAM_RHYTHM = createThreatIntelligenceRhythm();
+const ARTICLE_PICTOGRAM_HEIGHT = reserveRhythmRows(ARTICLE_PICTOGRAM_RHYTHM.rowHeight * 24, ARTICLE_PICTOGRAM_RHYTHM);
+const ARTICLE_PICTOGRAM_WIDTH = reserveRhythmRows(ARTICLE_PICTOGRAM_RHYTHM.rowHeight * 42, ARTICLE_PICTOGRAM_RHYTHM);
+
 function ArticleLeadPictogram({ article }: { article: Article }) {
   if (!article.image) return null;
   return (
@@ -120,14 +151,14 @@ function ArticleLeadPictogram({ article }: { article: Article }) {
       caption={article.image.caption}
       credit={article.image.credit}
       figureClassName="article-photo"
-      height={680}
+      frameHeight={ARTICLE_PICTOGRAM_HEIGHT}
+      frameWidth={ARTICLE_PICTOGRAM_WIDTH}
       layout={article.image.layout}
       priority
       sizes="(max-width: 980px) 100vw, 900px"
       slug={article.slug}
       src={article.image.src}
       themeVariants={article.image.themeVariants}
-      width={1200}
     />
   );
 }
@@ -141,14 +172,14 @@ function ItemLeadPictogram({ item }: { item: PublicationItem }) {
       caption={image.caption}
       credit={image.credit}
       figureClassName="article-photo"
-      height={680}
+      frameHeight={ARTICLE_PICTOGRAM_HEIGHT}
+      frameWidth={ARTICLE_PICTOGRAM_WIDTH}
       layout={image.layout}
       priority
       sizes="(max-width: 980px) 100vw, 900px"
       slug={item.slug}
       src={image.src}
       themeVariants={image.themeVariants}
-      width={1200}
     />
   );
 }

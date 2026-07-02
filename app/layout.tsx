@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import Script from "next/script";
 import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
@@ -16,6 +16,12 @@ const playfairDisplay = Playfair_Display({
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
   variable: "--font-sans",
+});
+
+const mastheadFont = Inter({
+  subsets: ["latin"],
+  weight: ["400", "600", "700", "900"],
+  variable: "--font-masthead",
 });
 
 const faviconVersion = "20260517-1";
@@ -38,7 +44,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html
       lang="en"
-      className="light light-theme"
+      className={`light light-theme ${mastheadFont.variable}`}
       data-papyrus-theme={defaultTheme}
       data-site-brand={SITE_BRAND.id}
       data-default-presentation={SITE_BRAND.defaultPresentation}
@@ -46,7 +52,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       {...(SITE_BRAND.forcedPresentation ? { "data-forced-presentation": SITE_BRAND.forcedPresentation } : {})}
       suppressHydrationWarning
     >
-      <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable}`}>
+      <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable} ${mastheadFont.variable}`}>
         <Script id="papyrus-favicon-color-scheme" strategy="beforeInteractive">
           {`(() => {
   const version = "${faviconVersion}";

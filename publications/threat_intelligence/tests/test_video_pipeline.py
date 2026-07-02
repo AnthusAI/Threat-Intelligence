@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from xml.sax.saxutils import escape
 
 
 class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
@@ -31,7 +33,7 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertIn("<ti-title-slide", xml)
         self.assertIn("pictogramSlug", xml)
         self.assertIn("the-balance-of-power-is-shifting", xml)
-        self.assertIn("<quote-card", xml)
+        self.assertIn("<ti-quote-card", xml)
         self.assertIn("<video-background", xml)
         self.assertNotIn("data:image/svg+xml;base64,", xml)
         self.assertIn("eyebrowRule", xml)
@@ -51,6 +53,21 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         hook_index = xml.index('id="hook"')
         title_index = xml.index('id="title"')
         self.assertLess(hook_index, title_index)
+
+    def test_build_edition_overview_xml_uses_edition_hook_with_fallback(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
+
+        payload = load_ti_seed_payload()
+        payload["video"] = dict(payload.get("video") or {})
+        payload["video"]["hook"] = "Sample edition hook, isn't it."
+        xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn("Sample edition hook, isn&#39;t it.", xml)
+
+        payload["video"].pop("hook")
+        fallback_xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        first_lead_quote = str(payload["articles"][0]["pullQuotes"][0])
+        self.assertNotIn("Sample edition hook", fallback_xml)
+        self.assertIn(escape(first_lead_quote), fallback_xml)
 
     def test_build_edition_overview_xml_includes_spotlights(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
@@ -111,9 +128,44 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertEqual(light_vars["--ti-alarm-red"], "#c54028")
         self.assertEqual(dark_vars["--ti-pictogram-edge"], "#363a3f")
         self.assertEqual(light_vars["--ti-pictogram-edge"], "#889096")
+        self.assertEqual(dark_vars["--ti-row-height"], "24px")
+        self.assertEqual(light_vars["--ti-row-height"], "24px")
+
+    def test_title_slide_layer_uses_rhythm_sizes(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import (
+            TI_VIDEO_LAYOUT,
+            build_babulus_xml,
+            title_slide_layer,
+        )
+
+        layer = title_slide_layer(title="Sample", eyebrow="Mission", eyebrow_rule=True)
+        self.assertIn(f'"padding":{TI_VIDEO_LAYOUT["padding"]}', layer)
+        self.assertIn(f'"titleSize":{TI_VIDEO_LAYOUT["title_size"]}', layer)
+        self.assertIn(f'"subtitleSize":{TI_VIDEO_LAYOUT["subtitle_size"]}', layer)
+
+        xml = build_babulus_xml(
+            {
+                "slug": "the-balance-of-power-is-shifting",
+                "headline": "Sample Headline",
+                "deck": "Sample deck",
+                "excerpt": "Sample excerpt.",
+                "section": "Mission",
+                "pullQuotes": ["Quote one."],
+            },
+            voice="alloy",
+            model="gpt-4o-mini-tts",
+        )
+        self.assertIn(f'"pictogramSize":{TI_VIDEO_LAYOUT["pictogram_size"]}', xml)
+        self.assertIn(f'"titleSize":{TI_VIDEO_LAYOUT["title_size_briefing"]}', xml)
+        self.assertIn(f'"titleSize":{TI_VIDEO_LAYOUT["closing_title_size"]}', xml)
 
     def test_article_output_mp4_light_suffix(self) -> None:
-        from publications.threat_intelligence.videoml.video_pipeline import article_output_mp4, edition_overview_output_mp4
+        from papyrus_content.env import PAPYRUS_ROOT
+        from publications.threat_intelligence.videoml.video_pipeline import (
+            TI_VIDEO_OUTPUT_DIR,
+            article_output_mp4,
+            edition_overview_output_mp4,
+        )
 
         dark_article = article_output_mp4({"slug": "test-slug"}, theme="dark")
         light_article = article_output_mp4({"slug": "test-slug"}, theme="light")
@@ -121,6 +173,11 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertEqual(dark_article.name, "test-slug.mp4")
         self.assertEqual(light_article.name, "test-slug-light.mp4")
         self.assertEqual(default_article.name, "test-slug.mp4")
+        self.assertEqual(
+            TI_VIDEO_OUTPUT_DIR,
+            PAPYRUS_ROOT / "public" / "seed-art" / "threat-intelligence" / "videos",
+        )
+        self.assertEqual(default_article.parent, TI_VIDEO_OUTPUT_DIR)
 
         dark_overview = edition_overview_output_mp4(theme="dark")
         light_overview = edition_overview_output_mp4(theme="light")
@@ -128,6 +185,7 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertEqual(dark_overview.name, "edition-overview.mp4")
         self.assertEqual(light_overview.name, "edition-overview-light.mp4")
         self.assertEqual(default_overview.name, "edition-overview.mp4")
+        self.assertEqual(default_overview.parent, TI_VIDEO_OUTPUT_DIR)
 
     def test_build_babulus_xml_light_theme_uses_light_palette(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import build_babulus_xml
@@ -182,6 +240,112 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
             parse_jobs_option("0")
         with self.assertRaises(ValueError):
             parse_jobs_option("-1")
+
+
+class ThreatIntelligenceVideoDslTests(unittest.TestCase):
+    def test_videoml_item_slug_and_id_conventions(self) -> None:
+        from publications.threat_intelligence.videoml.videos_dsl import videoml_item_id, videoml_item_slug
+
+        self.assertEqual(videoml_item_slug("edition-overview"), "edition-overview--videoml")
+        self.assertEqual(videoml_item_id("the-balance-of-power-is-shifting"), "item-videoml-the-balance-of-power-is-shifting")
+
+    def test_build_videoml_item_records_shape(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_babulus_xml
+        from publications.threat_intelligence.videoml.videos_dsl import build_videoml_item_records
+
+        article = {
+            "slug": "the-balance-of-power-is-shifting",
+            "headline": "The Balance of Power Is Shifting",
+            "section": "Mission",
+            "deck": "Sample deck",
+            "excerpt": "Sample excerpt.",
+            "pullQuotes": ["Quote one."],
+        }
+        dsl = build_babulus_xml(article, voice="alloy", model="gpt-4o-mini-tts")
+        records = build_videoml_item_records(
+            target_slug="the-balance-of-power-is-shifting",
+            target_kind="article",
+            dsl=dsl,
+            headline="The Balance of Power Is Shifting",
+            section="Mission",
+            published_at="2026-07-04T12:00:00.000Z",
+            edition_date="2026-07-04",
+        )
+        self.assertEqual(len(records), 2)
+        item = records[0]["expected"]
+        published = records[1]["expected"]
+        self.assertEqual(records[0]["modelName"], "Item")
+        self.assertEqual(records[1]["modelName"], "PublishedItem")
+        self.assertEqual(item["type"], "videoml")
+        self.assertEqual(item["slug"], "the-balance-of-power-is-shifting--videoml")
+        editorial = json.loads(item["editorial"])
+        self.assertIn("videoScript", editorial)
+        self.assertIn("<vml ", editorial["videoScript"]["dsl"])
+        self.assertEqual(editorial["videoScript"]["target"]["articleSlug"], "the-balance-of-power-is-shifting")
+        self.assertEqual(published["slug"], item["slug"])
+
+    def test_resolve_videoml_dsl_for_render_prefers_item_dsl(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_babulus_xml, retheme_vml_xml
+        from publications.threat_intelligence.videoml.videos_dsl import resolve_videoml_dsl_for_render
+
+        article = {
+            "slug": "the-balance-of-power-is-shifting",
+            "headline": "Stored Headline",
+            "deck": "Stored deck",
+            "excerpt": "Stored excerpt.",
+            "section": "Mission",
+            "pullQuotes": ["Stored quote."],
+        }
+        stored = build_babulus_xml(article, voice="alloy", model="gpt-4o-mini-tts", theme="dark")
+
+        class FakeClient:
+            def get_record(self, model_name: str, record_id: str):
+                if model_name == "Item" and record_id.endswith("the-balance-of-power-is-shifting"):
+                    return {
+                        "id": record_id,
+                        "editorial": json.dumps({"videoScript": {"dsl": stored, "target": {"kind": "article"}}}),
+                    }
+                return None
+
+        from unittest.mock import patch
+
+        with patch(
+            "publications.threat_intelligence.videoml.videos_dsl.create_authoring_client",
+            return_value=(FakeClient(), {}),
+        ):
+            resolved = resolve_videoml_dsl_for_render(
+                target_slug="the-balance-of-power-is-shifting",
+                theme="light",
+                from_article=False,
+                article=article,
+            )
+        self.assertEqual(resolved, retheme_vml_xml(stored, "light"))
+        self.assertIn("Stored Headline", resolved)
+
+    def test_retheme_vml_xml_swaps_light_palette(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import (
+            TI_SCENE_STYLES_DARK,
+            TI_SCENE_STYLES_LIGHT,
+            build_babulus_xml,
+            props_attr,
+            retheme_vml_xml,
+        )
+
+        xml = build_babulus_xml(
+            {
+                "slug": "the-balance-of-power-is-shifting",
+                "headline": "Sample",
+                "deck": "Deck",
+                "excerpt": "Excerpt.",
+                "section": "Mission",
+            },
+            voice="alloy",
+            model="gpt-4o-mini-tts",
+            theme="dark",
+        )
+        light = retheme_vml_xml(xml, "light")
+        self.assertIn(props_attr(TI_SCENE_STYLES_LIGHT), light)
+        self.assertNotIn(props_attr(TI_SCENE_STYLES_DARK), light)
 
 
 if __name__ == "__main__":

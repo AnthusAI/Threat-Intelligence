@@ -1,6 +1,7 @@
 import type { Article, ArticleVideoAsset } from "./articles";
 import type { EditionLayoutPlan } from "./layout-plan";
 import type { PublicationItem } from "./publication-items";
+import type { VideoScriptRef } from "./video-script";
 
 export type ContentSource = "scenario" | "graphql";
 
@@ -54,6 +55,7 @@ export type EditionContent = {
   scenarioId?: string;
   description?: string;
   editionVideo?: ArticleVideoAsset | null;
+  videoScripts?: Record<string, VideoScriptRef>;
 };
 
 export type EditionRouteSummary = {
@@ -100,4 +102,5 @@ export type ContentRepository = {
   getEditionArticle(options: GetEditionArticleOptions): Article | undefined | Promise<Article | undefined>;
   getEditionItem(options: GetEditionItemOptions): PublicationItem | undefined | Promise<PublicationItem | undefined>;
   listArticleSlugs(): string[] | Promise<string[]>;
+  loadVideoScript(targetSlug: string): VideoScriptRef | null | Promise<VideoScriptRef | null>;
 };
