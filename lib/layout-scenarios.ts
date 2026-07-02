@@ -1,4 +1,4 @@
-import { type Article, articles, editionDate } from "./articles";
+import { type Article, type ArticleVideoAsset, articles, editionDate } from "./articles";
 import type { EditionContent, NewsDeskAppendix } from "./content-types";
 import { createEditionSectionPlan } from "./edition-sections";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
@@ -30,6 +30,7 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
     layoutPlan: createDefaultEditionLayoutPlan(defaultScenarioSeed.articles.map((article) => article.slug)),
     items: cloneArticles(defaultScenarioSeed.articles).map(articleToPublicationItem),
     suppressNewsDeskAppendix: defaultScenarioSeed.suppressNewsDeskAppendix,
+    editionVideo: defaultScenarioSeed.editionVideo,
     newsDeskAppendix: defaultScenarioSeed.newsDeskAppendix,
   },
   {
@@ -179,6 +180,7 @@ function getDefaultScenarioSeed(): {
   description: string;
   articles: Article[];
   suppressNewsDeskAppendix?: boolean;
+  editionVideo?: ArticleVideoAsset;
   newsDeskAppendix?: NewsDeskAppendix | null;
 } {
   if (SITE_BRAND.id !== "threat-intelligence") {
@@ -197,6 +199,7 @@ function getDefaultScenarioSeed(): {
     description: threatIntelligenceSeedContent.description,
     articles: threatIntelligenceSeedContent.articles as Article[],
     suppressNewsDeskAppendix: threatIntelligenceSeedContent.suppressNewsDeskAppendix === true,
+    editionVideo: threatIntelligenceSeedContent.video as ArticleVideoAsset | undefined,
     newsDeskAppendix: null,
   };
 }

@@ -20,6 +20,9 @@ corpora/*
 !corpora/papyrus-required-procedures.json
 .papyrus-runs/
 .papyrus/
+.videoml/
+public/videoml/
+public/seed-art/threat-intelligence/videos/*.mp4
 AGENTS.local.md
 .amplify/
 amplify_outputs.json

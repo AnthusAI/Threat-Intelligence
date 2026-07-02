@@ -10,6 +10,8 @@ import yaml
 from .env import PAPYRUS_ROOT
 
 DEFAULT_PAPYRUS_CONFIG = ".papyrus/config.yaml"
+DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+DEFAULT_OPENAI_TTS_VOICE = "alloy"
 DEFAULT_PUBLIC_SITE_BASE_URL = "https://p.apyr.us"
 DEFAULT_NEWSROOM_REFERENCE_WEB_PATH_PREFIX = "/newsroom/references"
 DEFAULT_STEERING_CONFIG_PATH = "corpora/papyrus-steering.yml"
@@ -77,6 +79,10 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
     if reader_cache is not None and not isinstance(reader_cache, dict):
         raise ValueError("Papyrus config readerCache must be an object.")
     reader_cache = reader_cache if isinstance(reader_cache, dict) else {}
+    openai = raw_config.get("openai") or {}
+    if openai is not None and not isinstance(openai, dict):
+        raise ValueError("Papyrus config openai must be an object.")
+    openai = openai if isinstance(openai, dict) else {}
     return {
         "configPath": config_path,
         "schemaVersion": 1,
@@ -90,6 +96,12 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
         },
         "readerCache": {
             "revalidateSecret": _optional_string(reader_cache.get("revalidateSecret")),
+        },
+        "openai": {
+            "apiKey": _optional_string(openai.get("api_key")),
+            "model": _optional_string(openai.get("model")) or DEFAULT_OPENAI_TTS_MODEL,
+            "voice": _optional_string(openai.get("voice")) or DEFAULT_OPENAI_TTS_VOICE,
+            "baseUrl": _optional_string(openai.get("baseUrl")),
         },
     }
 
@@ -148,6 +160,31 @@ def resolve_reader_cache_revalidate_secret() -> str | None:
         if configured:
             return configured
     return None
+
+
+def resolve_openai_api_key() -> str | None:
+    env_value = str(os.environ.get("OPENAI_API_KEY") or "").strip()
+    if env_value:
+        return env_value
+    config = load_papyrus_config()
+    if config:
+        configured = str((config.get("openai") or {}).get("apiKey") or "").strip()
+        if configured:
+            return configured
+    return None
+
+
+def resolve_openai_tts_defaults() -> dict[str, str | None]:
+    env_model = str(os.environ.get("OPENAI_TTS_MODEL") or "").strip()
+    env_voice = str(os.environ.get("OPENAI_TTS_VOICE") or "").strip()
+    env_base_url = str(os.environ.get("OPENAI_BASE_URL") or "").strip()
+    config = load_papyrus_config()
+    openai = (config or {}).get("openai") or {}
+    return {
+        "model": env_model or str(openai.get("model") or DEFAULT_OPENAI_TTS_MODEL),
+        "voice": env_voice or str(openai.get("voice") or DEFAULT_OPENAI_TTS_VOICE),
+        "baseUrl": env_base_url or str(openai.get("baseUrl") or "").strip() or None,
+    }
 
 
 def resolve_reader_revalidation_base_url() -> str:

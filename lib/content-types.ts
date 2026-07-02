@@ -1,4 +1,4 @@
-import type { Article } from "./articles";
+import type { Article, ArticleVideoAsset } from "./articles";
 import type { EditionLayoutPlan } from "./layout-plan";
 import type { PublicationItem } from "./publication-items";
 
@@ -53,6 +53,7 @@ export type EditionContent = {
   newsDeskAppendix?: NewsDeskAppendix | null;
   scenarioId?: string;
   description?: string;
+  editionVideo?: ArticleVideoAsset | null;
 };
 
 export type EditionRouteSummary = {

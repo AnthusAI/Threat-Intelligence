@@ -6,6 +6,13 @@
   "description": "AI/ML security analysis from Anthus AI Solutions: how attacker capability is shifting, and what defenders should do about it.",
   "publishDate": "2026-07-04",
   "suppressNewsDeskAppendix": true,
+  "video": {
+    "src": "/seed-art/threat-intelligence/videos/edition-overview.mp4",
+    "alt": "Edition overview video for Anthus Threat Intelligence",
+    "caption": "Teaser for the latest Anthus Threat Intelligence edition.",
+    "credit": "Anthus Threat Intelligence video",
+    "durationSeconds": 65
+  },
   "articles": [
     {
       "slug": "the-balance-of-power-is-shifting",
@@ -17,12 +24,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "image": {
-        "src": "/seed-art/threat-intelligence/balance-shift.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/balance-shift-dark.svg"
-          }
-        },
         "alt": "A tilted balance beam showing many smaller attacker nodes outweighing a single larger capability source.",
         "caption": "Capability is becoming less scarce, changing who defenders must plan for.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -34,6 +35,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/the-balance-of-power-is-shifting.mp4",
+        "alt": "Video summary of The Balance of Power Is Shifting",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The scarce resource was never malice. It was capability.",
@@ -115,12 +123,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline-dark.svg"
-          }
-        },
         "alt": "A continuous newsroom pipeline connecting expert steering, AI research loops, a knowledge graph, and practical security guidance.",
         "caption": "A continuous intelligence pipeline turns research signals into practical defensive guidance.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -132,6 +134,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/how-our-newsroom-learns.mp4",
+        "alt": "Video summary of How Our Newsroom Learns",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "If attackers get tireless automation, defenders need tireless analysis.",
@@ -209,12 +218,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "image": {
-        "src": "/seed-art/threat-intelligence/s3-exposure-map.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/s3-exposure-map-dark.svg"
-          }
-        },
         "alt": "A storage map with bucket icons, red sensitivity hotspots, and an exposure path.",
         "caption": "Sensitive-data discovery turns an S3 inventory into an exposure map.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -226,6 +229,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/audit-aws-exposure-before-attackers-do.mp4",
+        "alt": "Video summary of Correlate AWS Exposure Signals Before They Chain",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity.",
@@ -308,12 +318,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
       "image": {
-        "src": "/seed-art/threat-intelligence/azure-exposure-map.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/azure-exposure-map-dark.svg"
-          }
-        },
         "alt": "An Azure exposure map showing Entra identities, subscriptions, sensitive data, and an attacker path crossing privilege boundaries.",
         "caption": "Azure blast radius starts with identity paths, privilege, data, and reachability.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -325,6 +329,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/audit-azure-blast-radius-before-attackers-do.mp4",
+        "alt": "Video summary of Map Azure Attack Paths Through Identity",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "In Azure, the path often starts with identity and ends at data.",
@@ -407,12 +418,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
       "image": {
-        "src": "/seed-art/threat-intelligence/openai-account-control-plane.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/openai-account-control-plane-dark.svg"
-          }
-        },
         "alt": "An OpenAI account control plane connected to projects, API keys, service accounts, files, connectors, and audit signals.",
         "caption": "AI accounts become control planes when they connect identity, data, tools, and automation.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -424,6 +429,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure.mp4",
+        "alt": "Video summary of Govern OpenAI Workspaces Like Access Boundaries",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The AI boundary is made of accounts, projects, keys, apps, files, and connectors.",
@@ -505,12 +517,6 @@
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "image": {
-        "src": "/seed-art/threat-intelligence/secure-gaming-isolation.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/secure-gaming-isolation-dark.svg"
-          }
-        },
         "alt": "A game controller inside a protected zone separated from finance and work systems.",
         "caption": "A gaming setup is safer when it has its own blast radius.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -522,6 +528,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/how-to-play-games-securely.mp4",
+        "alt": "Video summary of How to Play Games Securely",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The most practical gaming security control is separation.",

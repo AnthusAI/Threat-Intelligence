@@ -177,6 +177,7 @@ def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "source": "fixture-seed",
             "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
+            **({"editionVideo": payload["video"]} if isinstance(payload.get("video"), dict) else {}),
         },
         "articleOrder": item_ids,
         "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(payload["articles"]), payload.get("houseAds")),
@@ -369,6 +370,38 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
                 },
             )
         )
+
+    video_asset = article_video_asset(article)
+    if video_asset:
+        video_index = len(list(article_image_assets(article)))
+        media_id = f"media-{article['slug']}-video"
+        media_sort_key = f"{video_index + 1:03d}#{article['slug']}-lead-video"
+        video_common = {
+            "type": "video",
+            "role": "lead",
+            "sortKey": media_sort_key,
+            "storagePath": seed_video_upload_metadata(article, video_asset)["storagePath"],
+            "externalUrl": video_asset.get("src"),
+            "alt": video_asset.get("alt"),
+            "caption": video_asset.get("caption") or video_asset.get("credit"),
+            "credit": video_asset.get("credit"),
+            "aspectRatio": 16 / 9,
+            "metadata": to_aws_json(video_media_metadata(video_asset)),
+        }
+        records.append(record("MediaAsset", {"id": media_id, "itemId": item_id, **video_common}))
+        records.append(
+            record(
+                "PublishedMediaAsset",
+                {
+                    "id": f"published-{media_id}",
+                    "sourceMediaAssetId": media_id,
+                    "publishedItemId": published_item_id(item_id),
+                    "sourceItemId": item_id,
+                    "itemLineageId": item_id,
+                    **video_common,
+                },
+            )
+        )
     return records
 
 
@@ -444,6 +477,12 @@ def upload_seed_media(payload: dict[str, Any], *, bucket: str) -> None:
     for article in payload["articles"]:
         for asset_index, asset in enumerate(article_image_assets(article)):
             upload_seed_image(article, asset, asset_index, bucket=bucket)
+        video_asset = article_video_asset(article)
+        if video_asset and should_seed_video_uploads():
+            upload_seed_video(article, video_asset, bucket=bucket)
+    edition_video = payload.get("video")
+    if isinstance(edition_video, dict) and should_seed_video_uploads():
+        upload_seed_edition_video(payload, edition_video, bucket=bucket)
 
 
 def upload_seed_image(article: dict[str, Any], asset: dict[str, Any], index: int, *, bucket: str) -> None:
@@ -547,6 +586,76 @@ def article_image_assets(article: dict[str, Any]) -> list[dict[str, Any]]:
             "roles": ["lead", "continuation", "continuationInset"],
         }
     ]
+
+
+def article_video_asset(article: dict[str, Any]) -> dict[str, Any] | None:
+    video = article.get("video")
+    if not isinstance(video, dict):
+        return None
+    if not normalize_string(video.get("src")):
+        return None
+    return video
+
+
+def should_seed_video_uploads() -> bool:
+    return os.environ.get("PAPYRUS_SEED_VIDEOS") == "1"
+
+
+def seed_video_upload_metadata(article: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "storagePath": f"media/articles/{article['slug']}/video-{article['slug']}.mp4",
+        "contentType": "video/mp4",
+    }
+
+
+def seed_edition_video_upload_metadata(payload: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
+    edition_slug = str(payload.get("slug") or payload.get("id") or "edition").strip()
+    return {
+        "storagePath": f"media/editions/{edition_slug}/edition-overview.mp4",
+        "contentType": "video/mp4",
+    }
+
+
+def upload_seed_video(article: dict[str, Any], asset: dict[str, Any], *, bucket: str) -> None:
+    metadata = seed_video_upload_metadata(article, asset)
+    source = seed_video_source_path(asset["src"])
+    if source is None or not source.exists():
+        raise ValueError(
+            f"Seed video file not found for {article['slug']}: {asset['src']}. "
+            "Run `poetry run papyrus videos seed` first."
+        )
+    aws_s3_cp(str(source), bucket, metadata["storagePath"], metadata["contentType"])
+
+
+def upload_seed_edition_video(payload: dict[str, Any], asset: dict[str, Any], *, bucket: str) -> None:
+    metadata = seed_edition_video_upload_metadata(payload, asset)
+    source = seed_video_source_path(asset["src"])
+    if source is None or not source.exists():
+        raise ValueError(
+            f"Seed edition video file not found: {asset['src']}. "
+            "Run `poetry run papyrus videos seed` first."
+        )
+    aws_s3_cp(str(source), bucket, metadata["storagePath"], metadata["contentType"])
+
+
+def seed_video_source_path(src: str) -> Path | None:
+    if re.match(r"^https?://", src):
+        return None
+    path = Path(src)
+    if path.is_absolute() and path.exists():
+        return path
+    return PAPYRUS_ROOT / (Path("public") / src.lstrip("/") if src.startswith("/") else Path(src))
+
+
+def video_media_metadata(asset: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"sourceUrl": asset.get("src")}
+    poster = normalize_string(asset.get("posterSrc"))
+    if poster:
+        metadata["posterSrc"] = poster
+    duration = asset.get("durationSeconds")
+    if isinstance(duration, (int, float)):
+        metadata["durationSeconds"] = duration
+    return metadata
 
 
 def seed_image_source_path(src: str) -> Path | None:

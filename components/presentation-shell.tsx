@@ -10,10 +10,13 @@ import { layoutAllTextLines, prepareWithSegments, type TextLine } from "../lib/p
 import { truncateWords } from "../lib/excerpts";
 import {
   getPublicationItemImageAssets,
+  getPublicationItemVideoAsset,
   type PublicationItem,
 } from "../lib/publication-items";
 import type { EditionContent, EditionPresentationFormat, EditionSection } from "../lib/content-types";
+import type { ArticleVideoAsset } from "../lib/articles";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
+import { ArticleVideoFigure } from "./article-video";
 import { BlogPageBackground } from "./blog-page-background";
 import { Newspaper } from "./newspaper";
 import { PictogramFigure } from "./pictograms/pictogram-figure";
@@ -130,6 +133,9 @@ function BlogPresentation({
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog" ref={pageRef}>
       <BlogPageBackground pageRef={pageRef} />
       <PresentationHeader content={content} />
+      {content.editionVideo ? (
+        <EditionOverviewVideo editionVideo={content.editionVideo} />
+      ) : null}
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
       <div className="blog-sections" ref={contentRef}>
         {sections.map((section) => (
@@ -204,6 +210,18 @@ function MagazinePresentation({
   );
 }
 
+function EditionOverviewVideo({ editionVideo }: { editionVideo: ArticleVideoAsset }) {
+  return (
+    <section className="presentation-edition-video" aria-label={editionVideo.alt}>
+      <ArticleVideoFigure
+        figureClassName="presentation-edition-video__figure article-video"
+        slug="edition-overview"
+        video={editionVideo}
+      />
+    </section>
+  );
+}
+
 function PresentationHeader({ content }: { content: EditionContent }) {
   const title = SITE_BRAND.id === "papyrus" ? content.title : SITE_BRAND.mastheadTitle;
   const subtitle = SITE_BRAND.id === "papyrus" ? content.description : SITE_BRAND.mastheadSubtitle;
@@ -256,6 +274,7 @@ function PresentationItem({
   const frameRef = useRef<HTMLDivElement | null>(null);
   const maxWidth = useMeasuredWidth(frameRef);
   const image = getPublicationItemImageAssets(item)[0];
+  const video = getPublicationItemVideoAsset(item);
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
   const itemRole = getPresentationItemRole(mode, index);
@@ -278,6 +297,7 @@ function PresentationItem({
       data-item-role={itemRole}
       data-item-type={item.type}
       data-has-image={image ? "true" : "false"}
+      data-has-video={video ? "true" : "false"}
       id={item.slug}
     >
       <div className="presentation-item__copy">
@@ -298,19 +318,22 @@ function PresentationItem({
         ) : null}
       </div>
       {image ? (
-        <PictogramFigure
-          alt={image.alt}
-          caption={image.caption}
-          credit={image.credit}
-          figureClassName="presentation-item__image"
-          height={760}
-          layout={image.layout}
-          sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
-          slug={item.slug}
-          src={image.src}
-          themeVariants={image.themeVariants}
-          width={1200}
-        />
+        <div className={`presentation-item__media${video ? " presentation-item__media--has-video" : ""}`}>
+          <PictogramFigure
+            alt={image.alt}
+            caption={image.caption}
+            credit={image.credit}
+            figureClassName="presentation-item__image"
+            height={760}
+            layout={image.layout}
+            sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+            slug={item.slug}
+            src={image.src}
+            themeVariants={image.themeVariants}
+            width={1200}
+          />
+          {video ? <span className="video-play-badge" aria-hidden="true">▶</span> : null}
+        </div>
       ) : null}
     </article>
   );

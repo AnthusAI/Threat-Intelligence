@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Article } from "../../lib/articles";
+import type { Article, ArticleVideoAsset } from "../../lib/articles";
 
 const DEFAULT_SEED_PROFILE = "default";
 const SEED_PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
@@ -19,6 +19,7 @@ export type SeedEditionContent = {
   description: string;
   publishDate: string;
   suppressNewsDeskAppendix?: boolean;
+  video?: ArticleVideoAsset;
   houseAds?: SeedHouseAd[];
   articles: Article[];
 };

@@ -278,6 +278,110 @@ class PapyrusContentTests(unittest.TestCase):
                 finally:
                     os.environ.pop("PAPYRUS_CONFIG", None)
 
+    def test_normalize_papyrus_config_openai_block(self) -> None:
+        from papyrus_content.papyrus_config import normalize_papyrus_config
+
+        config = normalize_papyrus_config(
+            {
+                "schemaVersion": 1,
+                "openai": {
+                    "api_key": "test-key",
+                    "model": "gpt-4o-mini-tts",
+                    "voice": "alloy",
+                },
+            },
+            "/tmp/config.yaml",
+        )
+        self.assertEqual(config["openai"]["apiKey"], "test-key")
+        self.assertEqual(config["openai"]["model"], "gpt-4o-mini-tts")
+        self.assertEqual(config["openai"]["voice"], "alloy")
+
+    def test_resolve_openai_api_key_env_overrides_config(self) -> None:
+        from papyrus_content.papyrus_config import resolve_openai_api_key
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = pathlib.Path(tmp) / "config.yaml"
+            config_path.write_text(
+                "schemaVersion: 1\nopenai:\n  api_key: from-config\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"PAPYRUS_CONFIG": str(config_path), "OPENAI_API_KEY": "from-env"},
+                clear=False,
+            ):
+                self.assertEqual(resolve_openai_api_key(), "from-env")
+
+    def test_build_babulus_xml_includes_voiceover(self) -> None:
+        from papyrus_content.video_pipeline import build_babulus_xml
+
+        xml = build_babulus_xml(
+            {
+                "slug": "the-balance-of-power-is-shifting",
+                "headline": "Sample Headline",
+                "deck": "Sample deck",
+                "excerpt": "Sample excerpt.",
+                "section": "Mission",
+                "byline": "Anthus AI Solutions",
+                "pullQuotes": ["Quote one."],
+                "image": {
+                    "alt": "Sample pictogram",
+                    "credit": "Anthus Threat Intelligence diagram",
+                },
+            },
+            voice="alloy",
+            model="gpt-4o-mini-tts",
+        )
+        self.assertIn('provider="openai"', xml)
+        self.assertIn("Sample Headline", xml)
+        self.assertIn("Sample excerpt.", xml)
+        self.assertIn("<layer id=\"background\"", xml)
+        self.assertIn("<ti-title-slide", xml)
+        self.assertIn("pictogramSlug", xml)
+        self.assertIn("the-balance-of-power-is-shifting", xml)
+        self.assertIn("<quote-card", xml)
+        self.assertIn("<video-background", xml)
+        self.assertNotIn("data:image/svg+xml;base64,", xml)
+        self.assertIn("eyebrowRule", xml)
+        self.assertIn("--ti-alarm-red", xml)
+        self.assertIn("THREAT INTELLIGENCE", xml)
+        self.assertIn("Learn more", xml)
+        self.assertIn("July 4, 2026", xml)
+        self.assertNotIn("This briefing is from", xml)
+        self.assertIn('"variant":"solid"', xml)
+        self.assertNotIn('"gradient"', xml)
+        hook_index = xml.index('id="hook"')
+        title_index = xml.index('id="title"')
+        self.assertLess(hook_index, title_index)
+
+    def test_build_edition_overview_xml_includes_spotlights(self) -> None:
+        from papyrus_content.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
+
+        xml = build_edition_overview_xml(
+            load_ti_seed_payload(),
+            voice="alloy",
+            model="gpt-4o-mini-tts",
+        )
+        self.assertIn("edition-teaser", xml)
+        self.assertNotIn('id="intro"', xml)
+        hook_index = xml.index('id="hook"')
+        title_index = xml.index('id="title"')
+        teaser_index = xml.index("edition-teaser")
+        self.assertLess(hook_index, title_index)
+        self.assertLess(title_index, teaser_index)
+        self.assertLess(teaser_index, xml.index("spotlight-1"))
+        self.assertIn("spotlight-1", xml)
+        self.assertIn("spotlight-6", xml)
+        self.assertIn("Practical advice for staying secure", xml)
+        self.assertIn("THREAT INTELLIGENCE", xml)
+        self.assertIn("Learn more", xml)
+        self.assertIn("July 4, 2026", xml)
+        self.assertIn("To learn more, check out the July 4, 2026 edition", xml)
+        self.assertIn('"variant":"solid"', xml)
+        self.assertNotIn('"gradient"', xml)
+        self.assertIn("pictogramSlug", xml)
+        self.assertIn("the-balance-of-power-is-shifting", xml)
+
 
 if __name__ == "__main__":
     unittest.main()

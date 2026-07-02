@@ -708,6 +708,16 @@ To change rendering:
 - Keep direct article routes in `app/articles/[slug]/page.tsx` working.
 - Keep the one-page flipper behavior.
 
+## Video pipeline
+
+- Read [.agents/skills/produce-video/SKILL.md](.agents/skills/produce-video/SKILL.md) before generating or changing Threat Intelligence videos. It defines branding, pictogram policy, content voice, and edition-overview requirements.
+- Threat Intelligence seed videos are generated with `poetry run papyrus videos seed` (Python orchestration) and VideoML `vml pipeline` (Node subprocess via Babulus `packages/videoml-cli` when `~/Projects/Babulus` is present). See [docs/video-pipeline.md](docs/video-pipeline.md).
+- The OpenAI key for TTS is sourced from `.papyrus/config.yaml` `openai.api_key` or `OPENAI_API_KEY` via [src/papyrus_content/papyrus_config.py](src/papyrus_content/papyrus_config.py). Never commit keys; `.papyrus/` stays gitignored.
+- Article briefings are `MediaAsset(type="video")` rows linked to article `Item` records. Edition overview teasers live in `Edition.metadata.editionVideo` (also seeded from the fixture top-level `video` block). No separate `VideoAsset` model.
+- Sandbox seed video S3 upload is gated by `PAPYRUS_SEED_VIDEOS=1`. Default seed still writes video metadata with local `externalUrl` paths.
+- Worktrees without `.papyrus/config.yaml` should set `PAPYRUS_CONFIG` to the main clone config path before running the video pipeline.
+- Threat Intelligence videos use **flat solid background colors** matching the blog dark-mode paper (`#191918`). Do not use gradient backgrounds in `TI_BACKGROUND_PROPS` or scene styles — the TI brand language is flat color, not SaaS-style gradients. Pictogram frames, quote cards, and CTA slides all sit on the same flat paper.
+
 ## Verification Checklist
 
 Run these after changes:

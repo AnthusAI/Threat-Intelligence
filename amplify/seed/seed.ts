@@ -8,7 +8,7 @@ import { signOut } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
 import YAML from "yaml";
 import type { Schema } from "../data/resource";
-import type { Article, ArticleImageAsset } from "../../lib/articles";
+import type { Article, ArticleImageAsset, ArticleVideoAsset } from "../../lib/articles";
 import { getSeedEditionConfig, getSeedEditionProfileInfo, seedEditionArticles } from "./seed-edition-content";
 
 const EDITOR_GROUP = "editor";
@@ -414,6 +414,11 @@ async function main() {
       await seedArticle(article, index, editionConfig);
     }
 
+    const editionVideo = getSeedEditionContentSource().content.video;
+    if (editionVideo && shouldSeedVideoUploads()) {
+      await uploadSeedEditionVideo(editionConfig.slug, editionVideo);
+    }
+
     console.log(`Seeded ${orderedArticles.length} articles into Amplify Data and Storage.`);
   } finally {
     await signOut();
@@ -680,7 +685,10 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
+      metadata: toAwsJson({
+        ...getMediaMetadata(asset, uploaded.themeVariants),
+        ...(!asset.src ? { pictogramSlug: article.slug } : {}),
+      }),
     });
     await upsert("PublishedMediaAsset", {
       id: `published-${mediaId}`,
@@ -706,7 +714,48 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
       maxHeight: asset.layout?.maxHeight,
       crop: asset.layout?.crop,
       wrapsText: asset.layout?.wrapsText,
-      metadata: toAwsJson(getMediaMetadata(asset, uploaded.themeVariants)),
+      metadata: toAwsJson({
+        ...getMediaMetadata(asset, uploaded.themeVariants),
+        ...(!asset.src ? { pictogramSlug: article.slug } : {}),
+      }),
+    });
+  }
+
+  const videoAsset = getSeedArticleVideoAsset(article);
+  if (videoAsset) {
+    const videoIndex = imageAssets.length;
+    const mediaId = `media-${article.slug}-video`;
+    const mediaSortKey = `${String(videoIndex + 1).padStart(3, "0")}#${article.slug}-lead-video`;
+    let storagePath: string | undefined;
+    if (shouldSeedVideoUploads()) {
+      const uploaded = await uploadSeedVideo(article, videoAsset);
+      storagePath = uploaded.storagePath;
+    }
+    const videoMetadata = getVideoMediaMetadata(videoAsset);
+    const commonVideo = {
+      type: "video" as const,
+      role: "lead",
+      sortKey: mediaSortKey,
+      storagePath,
+      externalUrl: videoAsset.src,
+      alt: videoAsset.alt,
+      caption: videoAsset.caption ?? videoAsset.credit,
+      credit: videoAsset.credit,
+      aspectRatio: 16 / 9,
+      metadata: toAwsJson(videoMetadata),
+    };
+    await upsert("MediaAsset", {
+      id: mediaId,
+      itemId,
+      ...commonVideo,
+    });
+    await upsert("PublishedMediaAsset", {
+      id: `published-${mediaId}`,
+      sourceMediaAssetId: mediaId,
+      publishedItemId: publishedItemId(itemId),
+      sourceItemId: itemId,
+      itemLineageId: itemId,
+      ...commonVideo,
     });
   }
 }
@@ -961,6 +1010,15 @@ function positiveInteger(value: unknown, fallback: number): number {
 }
 
 async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index: number) {
+  if (!asset.src) {
+    return {
+      storagePath: "",
+      width: asset.layout ? Math.round(asset.layout.aspectRatio * asset.layout.preferredHeight) : undefined,
+      height: asset.layout?.preferredHeight,
+      themeVariants: undefined,
+    };
+  }
+
   const payload = await loadImagePayload(asset.src);
   const extension = getImageExtension(payload.contentType, asset.src);
   const storagePath = `media/articles/${article.slug}/${String(index + 1).padStart(2, "0")}-${asset.id}.${extension}`;
@@ -992,15 +1050,78 @@ async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index
 function getSeedArticleImageAssets(article: Article): ArticleImageAsset[] {
   const imageAssets = article.assets?.filter((asset) => asset.type === "image") ?? [];
   if (imageAssets.length > 0) return imageAssets;
-  if (!article.image?.src) return [];
+  if (!article.image) return [];
   return [
     {
       ...article.image,
+      src: article.image.src ?? "",
       id: `${article.slug}-primary-image`,
       type: "image",
       roles: ["lead", "continuation", "continuationInset"],
     },
   ];
+}
+
+function getSeedArticleVideoAsset(article: Article): ArticleVideoAsset | undefined {
+  return article.video;
+}
+
+function shouldSeedVideoUploads(): boolean {
+  return process.env.PAPYRUS_SEED_VIDEOS === "1";
+}
+
+async function uploadSeedEditionVideo(editionSlug: string, asset: ArticleVideoAsset) {
+  const payload = await loadVideoPayload(asset.src);
+  const storagePath = `media/editions/${editionSlug}/edition-overview.mp4`;
+
+  await uploadData({
+    path: storagePath,
+    data: payload.data,
+    options: {
+      contentType: payload.contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+  }).result;
+
+  return { storagePath };
+}
+
+async function uploadSeedVideo(article: Article, asset: ArticleVideoAsset) {
+  const payload = await loadVideoPayload(asset.src);
+  const storagePath = `media/articles/${article.slug}/video-${article.slug}.mp4`;
+
+  await uploadData({
+    path: storagePath,
+    data: payload.data,
+    options: {
+      contentType: payload.contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+  }).result;
+
+  return { storagePath };
+}
+
+async function loadVideoPayload(src: string): Promise<{ data: Uint8Array; contentType: string }> {
+  const filepath =
+    path.isAbsolute(src) && fs.existsSync(src)
+      ? src
+      : path.join(process.cwd(), src.startsWith("/") ? path.join("public", src.slice(1)) : src);
+  if (!fs.existsSync(filepath)) {
+    throw new Error(`Seed video file not found: ${filepath}. Run 'poetry run papyrus videos seed' first.`);
+  }
+  return {
+    data: fs.readFileSync(filepath),
+    contentType: "video/mp4",
+  };
+}
+
+function getVideoMediaMetadata(asset: ArticleVideoAsset): Record<string, unknown> {
+  return {
+    sourceUrl: asset.src,
+    ...(asset.posterSrc ? { posterSrc: asset.posterSrc } : {}),
+    ...(asset.durationSeconds ? { durationSeconds: asset.durationSeconds } : {}),
+  };
 }
 
 async function uploadSeedImageVariant(
@@ -1312,7 +1433,7 @@ function getMediaMetadata(asset: ArticleImageAsset, uploadedThemeVariants?: Uplo
         }
       : undefined;
   return {
-    sourceUrl: asset.src,
+    ...(asset.src ? { sourceUrl: asset.src } : {}),
     ...(asset.layout?.inlineFloat ? { inlineFloat: asset.layout.inlineFloat } : {}),
     ...(themeVariants ? { themeVariants } : {}),
   };
