@@ -83,8 +83,8 @@ class PapyrusContentTests(unittest.TestCase):
         sections = config["metadata"]["sections"]
         self.assertEqual(len(sections), 6)
         by_key = {section["key"]: section for section in sections}
-        self.assertEqual(create_section_key("Gaming & Consumer"), "gaming-and-consumer")
-        self.assertIn("gaming-and-consumer", by_key)
+        self.assertEqual(create_section_key("Gaming"), "gaming")
+        self.assertIn("gaming", by_key)
         mission = by_key["mission"]
         self.assertEqual(mission["label"], "Mission")
         self.assertIn("attacker capability", mission["description"])

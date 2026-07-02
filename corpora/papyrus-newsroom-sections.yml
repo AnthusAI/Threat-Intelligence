@@ -77,8 +77,8 @@ sections:
     enabled: true
     sortOrder: 7
 
-  - id: gaming-consumer
-    title: Gaming & Consumer
+  - id: gaming
+    title: Gaming
     shortTitle: Personal Blast Radius
     type: rotating
     editorialMission: Cover personal and consumer security where AI/ML intersects with gaming, launchers, mods, anti-cheat, and everyday software trust boundaries.

@@ -120,6 +120,6 @@ PYTHONPATH=src python -m papyrus.cli knowledge vector-index --action sync
 | `incidents-research` | Incidents & Research |
 | `controls-checks` | Controls & Checks |
 | `supply-chain` | Supply Chain |
-| `gaming-consumer` | Gaming & Consumer |
+| `gaming` | Gaming |
 
 See also: [`docs/new-publication-from-corpus.md`](new-publication-from-corpus.md), [`skills/publication-bootstrap/SKILL.md`](../skills/publication-bootstrap/SKILL.md).

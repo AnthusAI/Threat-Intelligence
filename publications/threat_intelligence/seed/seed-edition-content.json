@@ -23,7 +23,7 @@
     "Cloud": "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
     "Azure": "Microsoft identity and data paths—and the controls that keep admin access temporary and visible.",
     "AI": "OpenAI workspaces, keys, connectors, and actions treated as production access boundaries.",
-    "Gaming & Consumer": "Personal blast-radius separation when games, mods, and launchers are software from strangers."
+    "Gaming": "Personal blast-radius separation when games, mods, and launchers are software from strangers."
   },
   "articles": [
     {
@@ -537,7 +537,7 @@
     {
       "slug": "how-to-play-games-securely",
       "shortSlug": "GAME",
-      "section": "Gaming & Consumer",
+      "section": "Gaming",
       "headline": "How to Play Games Securely",
       "deck": "Games, mods, launchers, and anti-cheat drivers are software from strangers. Give them their own blast radius, away from banking, work, and recovery accounts.",
       "excerpt": "You do not have to trust every mod and experimental build — you just have to make sure the machine running them can afford to lose the bet.",
@@ -585,7 +585,7 @@
     {
       "slug": "separate-game-accounts-from-real-life",
       "shortSlug": "ACCTS",
-      "section": "Gaming & Consumer",
+      "section": "Gaming",
       "headline": "Separate Game Accounts From Real Life",
       "deck": "Store accounts, Discord identities, recovery email, and payment methods can become paths from a compromised game account back into real life.",
       "excerpt": "Skins and save files are what an attacker takes first. The recovery inbox, the saved card, and the reused password are why they stay.",
@@ -611,7 +611,7 @@
     {
       "slug": "treat-mods-and-launchers-like-untrusted-code",
       "shortSlug": "MODS",
-      "section": "Gaming & Consumer",
+      "section": "Gaming",
       "headline": "Treat Mods and Launchers Like Untrusted Code",
       "deck": "Mod loaders, overlays, trainers, and private-server patches are supply chain decisions. Install them only where you are willing to rebuild.",
       "excerpt": "The official game came through a store, a review, and a signing process. The mod loader came from a forum post. Guess which one asks for more access.",
