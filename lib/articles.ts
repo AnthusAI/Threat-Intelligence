@@ -26,7 +26,7 @@ export type ArticleImageThemeVariants = {
 };
 
 export type ArticleImage = {
-  src?: string;
+  src: string;
   alt: string;
   caption?: string;
   credit: string;
