@@ -61,8 +61,6 @@ export function ArticleVideoFigure({ video, slug, figureClassName = "article-pho
       >
         <source src={src} type="video/mp4" />
       </video>
-      {video.caption ? <figcaption>{video.caption}</figcaption> : null}
-      {video.credit ? <p className="article-video__credit">{video.credit}</p> : null}
       <span className="sr-only" data-video-slug={slug}>
         {video.alt}
       </span>

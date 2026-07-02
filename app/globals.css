@@ -2268,6 +2268,10 @@ img {
   position: relative;
 }
 
+figure.article-video {
+  margin-bottom: 2em;
+}
+
 .article-video__player {
   aspect-ratio: 16 / 9;
   background: rgb(var(--ink-solid-rgb) / 0.08);
