@@ -15,6 +15,7 @@ type ArticleVideoFigureProps = {
 export function ArticleVideoFigure({ video, slug, figureClassName = "article-photo article-video" }: ArticleVideoFigureProps) {
   const theme = useResolvedPapyrusTheme();
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [frameReady, setFrameReady] = useState(Boolean(video.posterSrc));
 
   useEffect(() => {
     setHasHydrated(true);
@@ -24,16 +25,39 @@ export function ArticleVideoFigure({ video, slug, figureClassName = "article-pho
   const resolvedTheme = hasHydrated ? theme : "dark";
   const src = resolveThemedVideoSrc(video.src, video.themeVariants, resolvedTheme);
 
+  useEffect(() => {
+    setFrameReady(Boolean(video.posterSrc));
+  }, [video.posterSrc, src]);
+
   return (
     <figure className={figureClassName} data-media-type="video" data-video-theme={resolvedTheme}>
       <video
         controls
         playsInline
-        preload="metadata"
+        preload="auto"
         poster={video.posterSrc}
         aria-label={video.alt}
-        className="article-video__player"
-        key={hasHydrated ? src : "ssr"}
+        className={`article-video__player${frameReady ? " article-video__player--ready" : ""}`}
+        key={src}
+        src={src}
+        onLoadedData={(event) => {
+          const element = event.currentTarget;
+          if (element.videoWidth > 0) {
+            setFrameReady(true);
+            return;
+          }
+          element.currentTime = 0.001;
+        }}
+        onLoadedMetadata={(event) => {
+          if (event.currentTarget.duration > 0) {
+            setFrameReady(true);
+          }
+        }}
+        onSeeked={(event) => {
+          if (event.currentTarget.videoWidth > 0) {
+            setFrameReady(true);
+          }
+        }}
       >
         <source src={src} type="video/mp4" />
       </video>

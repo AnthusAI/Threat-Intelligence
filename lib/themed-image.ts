@@ -18,7 +18,7 @@ export function resolveThemedVideoSrc(
   theme: ResolvedTheme,
 ): string {
   if (theme === "light" && themeVariants?.light?.src) return themeVariants.light.src;
-  if (theme === "dark" && themeVariants?.dark?.src) return themeVariants.dark.src;
+  // Canonical video `src` is the dark-theme render. Only light has a separate variant file.
   return src;
 }
 

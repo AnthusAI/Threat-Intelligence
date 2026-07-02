@@ -2278,6 +2278,10 @@ img {
   width: 100%;
 }
 
+.article-video__player--ready {
+  background: transparent;
+}
+
 .article-video__credit {
   color: rgb(var(--ink-solid-rgb) / 0.62);
   font-size: 0.82rem;

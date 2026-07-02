@@ -721,19 +721,17 @@ def build_video_theme_variants_metadata(
 
     dark = theme_variants.get("dark")
     dark_src = normalize_string(dark.get("src")) if isinstance(dark, dict) else None
-    dark_storage_path = (
-        article_video_dark_storage_path(article_slug)
-        if article_slug
-        else edition_video_dark_storage_path(edition_slug or "current")
-        if edition_slug
-        else None
-    )
-    if dark_src or dark_storage_path:
-        entry = {}
+    if dark_src:
+        dark_storage_path = (
+            article_video_dark_storage_path(article_slug)
+            if article_slug
+            else edition_video_dark_storage_path(edition_slug or "current")
+            if edition_slug
+            else None
+        )
+        entry: dict[str, Any] = {"sourceUrl": dark_src}
         if dark_storage_path:
             entry["storagePath"] = dark_storage_path
-        if dark_src:
-            entry["sourceUrl"] = dark_src
         variants["dark"] = entry
 
     return variants or None

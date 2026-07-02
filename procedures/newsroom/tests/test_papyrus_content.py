@@ -22,7 +22,13 @@ from papyrus_content.papyrus_config import (
     resolve_public_site_base_url,
     resolve_topics_ignore_terms,
 )
-from papyrus_content.seed_edition import build_seed_edition_records, create_section_key, load_seed_payload, seed_edition_config
+from papyrus_content.seed_edition import (
+    build_seed_edition_records,
+    build_video_theme_variants_metadata,
+    create_section_key,
+    load_seed_payload,
+    seed_edition_config,
+)
 from papyrus_content.source_readiness import reference_source_readiness
 from papyrus_content.steering import load_steering_config, require_corpus_config, resolve_corpus_local_path
 
@@ -105,6 +111,19 @@ class PapyrusContentTests(unittest.TestCase):
         self.assertEqual(metadata["pictogramSlug"], "the-balance-of-power-is-shifting")
         self.assertNotIn("sourceUrl", metadata)
         self.assertNotIn("storagePath", pictogram_media[0])
+
+    def test_video_theme_variants_only_include_dark_when_seed_declares_dark_src(self) -> None:
+        asset = {
+            "src": "/seed-art/threat-intelligence/videos/edition-overview.mp4",
+            "themeVariants": {
+                "light": {"src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4"},
+            },
+        }
+        variants = build_video_theme_variants_metadata(asset, edition_slug="current")
+        self.assertIsNotNone(variants)
+        assert variants is not None
+        self.assertIn("light", variants)
+        self.assertNotIn("dark", variants)
 
     def test_analysis_profiles_load(self) -> None:
         from papyrus_content.analysis_profiles import load_analysis_profiles, summarize_analysis_profiles
