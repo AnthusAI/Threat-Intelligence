@@ -134,7 +134,7 @@ Do not ship scenes with `<voice>` cues only.
 
 **Article briefings:** hook (cold-open pull quote, if present) → title (pictogram + section eyebrow + headline + deck) → briefing excerpt → second pull quote (if present) → closing CTA.
 
-**Edition overview:** hook (first lead article's `pullQuotes[0]`) → title (edition title + first lead pictogram + tagline) → edition teaser (date + "In this edition" + headline list) → six spotlights → closing CTA.
+**Edition overview:** hook (edition `video.hook`; falls back to first lead article's `pullQuotes[0]`) → title (edition title + first lead pictogram + tagline) → edition teaser (date + "In this edition" + headline list) → six spotlights → closing CTA.
 
 **Reader placement:** edition overview video on the blog index just above the first section header; article videos on index cards below excerpt/pictogram; article pages show video above title/deck with pictogram in body.
 
@@ -146,7 +146,7 @@ Every narrated word comes from seed JSON fields. Scene → source:
 
 | Scene | Voice source |
 |-------|--------------|
-| Hook (cold open) | `pullQuotes[0]` |
+| Hook (cold open) | article videos: `pullQuotes[0]`; edition overview: edition `video.hook` (fallback: first lead's `pullQuotes[0]`) |
 | Title | `headline` + pause + `deck` |
 | Briefing (article videos) | full `excerpt` |
 | Overview spotlight | `headline` + **first sentence** of `excerpt` (fallback: `deck`) |
@@ -163,6 +163,8 @@ Rules that follow from this:
 - **Adjacent-scene echo rule.** The hook quote and the deck are spoken ~10 seconds apart; do not let them share distinctive phrasing (a hook of "tireless automation / tireless analysis" followed by a deck opening "Attackers bring tireless automation" reads fine on the page and grates when spoken). Likewise the overview opens tagline → `description` → fixed "practical checks" line back-to-back: keep "practical" (and other tagline words) out of `description`.
 - **Deck = claim, excerpt = hook** — same division of labor as the edition index. The deck states the thesis in one or two tight sentences; the excerpt carries stakes, a question, or a scenario, and must not restate the deck (the title scene and briefing scene would then say the same thing twice in a row).
 - **Pull quotes are verbatim body sentences.** `pullQuotes` are narrated cold opens and must occur verbatim in the article body; video-lead articles require `pullQuotes[0]`. Not every article needs a pull quote — drop a weak one rather than keeping a paraphrase. When weaving, never leave the quote adjacent to the sentence that used to paraphrase it.
+- **Scene 1 is the poster.** Embedded videos render their first frame on the index, so `pullQuotes[0]` (and the edition `video.hook`) is display copy at headline size. Poster-grade means two short sentences, roughly 12 words each, no clause-piles or service lists — "Four ordinary findings. One path." over "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity." The echo rule applies doubly here: the poster sits on the same card as the headline and deck.
+- **Edition hook (`video.hook`).** One edition-wide line that opens the overview video and its poster, so the edition video and the first lead article's video do not show the same quote card twice on one page. Write it in the "before → now with AI" register when it fits, and end on an invitation to press play.
 
 ### Pre-render script check
 

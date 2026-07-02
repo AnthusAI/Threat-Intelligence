@@ -11,6 +11,7 @@
     "alt": "Edition overview video for Anthus Threat Intelligence",
     "caption": "Teaser for the latest Anthus Threat Intelligence edition.",
     "credit": "Anthus Threat Intelligence video",
+    "hook": "The attackers have changed. Your assumptions haven't. Start here.",
     "durationSeconds": 65,
     "themeVariants": {
       "light": { "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4" }
@@ -58,12 +59,12 @@
         }
       },
       "pullQuotes": [
-        "Attackers could never target everyone, and few could afford to keep trying. AI removes both limits.",
+        "Attackers used to run out of time, skill, and patience. With AI, they don't.",
         "Controls built for casual attackers cannot be treated as boundaries anymore."
       ],
       "body": [
         "Every security program rests on an assumption it rarely writes down: most attackers will give up. Not because they lack malice — the internet has never lacked malice — but because capability has always been scarce. Time, language skill, infrastructure, tooling, reverse-engineering patience, the discipline to keep trying after the first easy attempt fails: all of it was expensive, so most attackers stopped early — and even the well-funded ones had to pick their targets.",
-        "Attackers could never target everyone, and few could afford to keep trying. AI removes both limits. It does not make every attacker brilliant, and it does not hand every criminal crew the full intelligence apparatus of a nation-state. What it does is make pieces of that apparatus cheaper, faster, and easier to repeat. Reconnaissance can be automated. Variants can be generated. Phishing copy, translation, log analysis, target profiling, and persistence planning can be assisted at a scale that used to require a much larger team.",
+        "Attackers used to run out of time, skill, and patience. With AI, they don't. That does not make every attacker brilliant, and it does not hand every criminal crew the full intelligence apparatus of a nation-state. What it does is make pieces of that apparatus cheaper, faster, and easier to repeat. Reconnaissance can be automated. Variants can be generated. Phishing copy, translation, log analysis, target profiling, and persistence planning can be assisted at a scale that used to require a much larger team.",
         "Consider an ordinary example: an internal reporting tool protected mostly by the fact that nobody outside the company knows its URL. For years that was a reasonable bet. The people who might stumble onto it lacked the patience to map an unfamiliar workflow. Automated reconnaissance does not lack patience. It maps everything it touches, and it does not get bored.",
         "Many defenses were built around a quiet bargain: known to be limited, but good enough against casual attackers. They stopped opportunistic snooping, lazy credential reuse, a hurried bot. Against a patient, well-resourced adversary, everyone understood they could fail — and that was acceptable, because such adversaries were rare and had better things to do.",
         "Call it little-sister encryption: protection that keeps out a curious sibling, a casual coworker, or a low-effort intruder, but was never a real boundary against someone determined. It is not useless. It reduces everyday risk. The mistake is asking it to carry a threat model it was never designed to carry.",
@@ -258,7 +259,7 @@
         }
       },
       "pullQuotes": [
-        "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity.",
+        "Four ordinary findings. One path.",
         "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards."
       ],
       "body": [
@@ -464,7 +465,7 @@
         }
       },
       "pullQuotes": [
-        "The AI boundary is made of accounts, projects, keys, apps, files, and connectors.",
+        "AI access is quiet. That is the problem.",
         "Prompt security does not matter much if workspace access is unmanaged."
       ],
       "body": [
@@ -475,7 +476,7 @@
         "SSO and SCIM matter because informal lifecycle does not scale. If people join and leave through manual invitations, stale accounts and accidental admins become normal. Managed lifecycle keeps the workspace aligned with the real organization.",
         "Project structure matters on the API side. Production, development, experimentation, and client work should not share the same keys, service accounts, budgets, or access assumptions.",
         "Connectors and apps move the data boundary. A workspace that can reach drives, repositories, tickets, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface the mess.",
-        "Auditability matters because AI access is quiet. Review admin events, key creation, app and connector changes, unusual usage, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing.",
+        "AI access is quiet. That is the problem. Review admin events, key creation, app and connector changes, unusual usage, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing.",
         "What to check now: workspace owners, admin roles, SSO and SCIM, MFA or passkey adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, and retention settings.",
         "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become organization-wide exposure."
       ]
