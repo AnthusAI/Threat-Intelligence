@@ -34,6 +34,25 @@ export type VisibleAttackPath = {
 
 export const BLOG_DEFENSE_CORE_NODE_ID = "core";
 
+const STOCHASTIC = {
+  improvingOnlyChance: 0.55,
+  improvingBiasBase: 2.6,
+  improvingBiasSlope: 0.85,
+  lateralBias: 1.8,
+  backtrackBias: 0.55,
+  coreNeighborMultiplier: 1.35,
+  revisitPenaltySlope: 0.95,
+  euclideanBiasSlope: 0.006,
+  maxStepsFloor: 22,
+  maxStepsCeiling: 52,
+  perimeterImprovingScale: 0.35,
+  perimeterLateralScale: 3.0,
+  weightJitter: 0.45,
+  completionWanderSteps: 24,
+  completionImprovingScale: 0.45,
+  completionLateralScale: 2.2,
+};
+
 export const BLOG_DEFENSE_NODES: BlogDefenseNode[] = [
   { id: "core", x: 770, y: 175, radius: 12, role: "core", zone: "core" },
   { id: "halo_n", x: 770, y: 32, radius: 7, role: "perimeter", zone: "core" },
@@ -479,68 +498,139 @@ function chooseWeightedIndex(weights: number[]): number {
   return Math.max(0, weights.length - 1);
 }
 
+function isPerimeterExplorationNode(node: BlogDefenseNode | undefined): boolean {
+  if (!node) return false;
+  return node.zone === "core" || node.role === "perimeter" || node.role === "interior";
+}
+
+function stochasticWeightJitter(): number {
+  return 1 - STOCHASTIC.weightJitter / 2 + Math.random() * STOCHASTIC.weightJitter;
+}
+
+type StochasticWalkInput = {
+  current: string;
+  coreId: string;
+  coreNeighbors: Set<string>;
+  nodeById: Map<string, BlogDefenseNode>;
+  adjacency: Map<string, string[]>;
+  distances: Map<string, number>;
+  visitCounts: Map<string, number>;
+  improvingOnlyScale?: number;
+  lateralScale?: number;
+};
+
+function chooseStochasticNeighbor(input: StochasticWalkInput): string | null {
+  const {
+    current,
+    coreId,
+    coreNeighbors,
+    nodeById,
+    adjacency,
+    distances,
+    visitCounts,
+    improvingOnlyScale = 1,
+    lateralScale = 1,
+  } = input;
+
+  const neighbors = (adjacency.get(current) ?? []).filter((neighbor) => distances.has(neighbor));
+  if (!neighbors.length) return null;
+
+  const currentNode = nodeById.get(current);
+  const exploring = isPerimeterExplorationNode(currentNode);
+  const improvingOnlyChance = (exploring
+    ? STOCHASTIC.improvingOnlyChance * STOCHASTIC.perimeterImprovingScale
+    : STOCHASTIC.improvingOnlyChance) * improvingOnlyScale;
+
+  const currentHop = distances.get(current) ?? Number.POSITIVE_INFINITY;
+  const improving = neighbors.filter((neighbor) => (distances.get(neighbor) ?? Number.POSITIVE_INFINITY) < currentHop);
+  const candidatePool = improving.length && Math.random() < improvingOnlyChance ? improving : neighbors;
+
+  const coreNode = nodeById.get(coreId);
+  const weights = candidatePool.map((neighbor) => {
+    const neighborHop = distances.get(neighbor) ?? Number.POSITIVE_INFINITY;
+    const hopDelta = currentHop - neighborHop;
+    const revisitPenalty = 1 / (1 + (visitCounts.get(neighbor) ?? 0) * STOCHASTIC.revisitPenaltySlope);
+    const neighborNode = nodeById.get(neighbor);
+    const euclideanBias = coreNode && neighborNode
+      ? 1 / (1 + Math.hypot(neighborNode.x - coreNode.x, neighborNode.y - coreNode.y) * STOCHASTIC.euclideanBiasSlope)
+      : 1;
+
+    const lateralBias = (exploring
+      ? STOCHASTIC.lateralBias * STOCHASTIC.perimeterLateralScale
+      : STOCHASTIC.lateralBias) * lateralScale;
+
+    let bias = 1;
+    if (hopDelta > 0) bias = STOCHASTIC.improvingBiasBase + hopDelta * STOCHASTIC.improvingBiasSlope;
+    else if (hopDelta === 0) bias = lateralBias;
+    else bias = STOCHASTIC.backtrackBias;
+    if (coreNeighbors.has(neighbor)) bias *= STOCHASTIC.coreNeighborMultiplier;
+
+    return Math.max(0.01, bias * revisitPenalty * euclideanBias * stochasticWeightJitter());
+  });
+
+  return candidatePool[chooseWeightedIndex(weights)] ?? null;
+}
+
 function buildStochasticInwardPath(
   startId: string,
   coreId: string,
   nodeById: Map<string, BlogDefenseNode>,
   adjacency: Map<string, string[]>,
 ): string[] {
-  const approachCandidates = resolveCoreApproachCandidates(startId, coreId, nodeById, adjacency);
-  const preferredApproachId = approachCandidates[0];
-  if (!preferredApproachId) {
-    return shortestPathWithTieBreak(startId, coreId, nodeById, adjacency);
-  }
-
-  const distances = hopDistanceToCore(preferredApproachId, adjacency, new Set([coreId]));
+  const distances = hopDistanceToCore(coreId, adjacency);
   if (!distances.has(startId)) return [];
-  if (startId === preferredApproachId) return [preferredApproachId, coreId];
 
-  const maxSteps = Math.max(10, Math.min(40, nodeById.size + 6));
+  const coreNeighbors = new Set(adjacency.get(coreId) ?? []);
+  const maxSteps = Math.max(
+    STOCHASTIC.maxStepsFloor,
+    Math.min(STOCHASTIC.maxStepsCeiling, nodeById.size + 8),
+  );
   const path = [startId];
   const visitCounts = new Map<string, number>([[startId, 1]]);
   let current = startId;
 
-  for (let step = 0; step < maxSteps && current !== preferredApproachId; step += 1) {
-    const neighbors = (adjacency.get(current) ?? []).filter((neighbor) => distances.has(neighbor));
-    if (!neighbors.length) break;
+  const finishAtCore = (): boolean => {
+    if (!coreNeighbors.has(current)) return false;
+    path.push(coreId);
+    return true;
+  };
 
-    const currentHop = distances.get(current) ?? Number.POSITIVE_INFINITY;
-    const improving = neighbors.filter((neighbor) => (distances.get(neighbor) ?? Number.POSITIVE_INFINITY) < currentHop);
-    const candidatePool = improving.length && Math.random() < 0.82 ? improving : neighbors;
+  const wander = (steps: number, improvingOnlyScale = 1, lateralScale = 1): void => {
+    for (let step = 0; step < steps; step += 1) {
+      if (finishAtCore()) return;
 
-    const weights = candidatePool.map((neighbor) => {
-      const neighborHop = distances.get(neighbor) ?? Number.POSITIVE_INFINITY;
-      const hopDelta = currentHop - neighborHop;
-      const revisitPenalty = 1 / (1 + (visitCounts.get(neighbor) ?? 0) * 1.8);
-      const core = nodeById.get(preferredApproachId);
-      const neighborNode = nodeById.get(neighbor);
-      const euclideanBias = core && neighborNode
-        ? 1 / (1 + Math.hypot(neighborNode.x - core.x, neighborNode.y - core.y) * 0.015)
-        : 1;
+      const next = chooseStochasticNeighbor({
+        current,
+        coreId,
+        coreNeighbors,
+        nodeById,
+        adjacency,
+        distances,
+        visitCounts,
+        improvingOnlyScale,
+        lateralScale,
+      });
+      if (!next) break;
 
-      let bias = 1;
-      if (hopDelta > 0) bias = 5 + hopDelta * 1.8;
-      else if (hopDelta === 0) bias = 0.9;
-      else bias = 0.18;
-      if (neighbor === preferredApproachId) bias *= 4;
+      path.push(next);
+      visitCounts.set(next, (visitCounts.get(next) ?? 0) + 1);
+      current = next;
+    }
+  };
 
-      return Math.max(0.01, bias * revisitPenalty * euclideanBias);
-    });
+  wander(maxSteps);
+  if (finishAtCore() || path[path.length - 1] === coreId) return path;
 
-    const next = candidatePool[chooseWeightedIndex(weights)];
-    path.push(next);
-    visitCounts.set(next, (visitCounts.get(next) ?? 0) + 1);
-    current = next;
+  wander(
+    STOCHASTIC.completionWanderSteps,
+    STOCHASTIC.completionImprovingScale,
+    STOCHASTIC.completionLateralScale,
+  );
+  if (finishAtCore() || path[path.length - 1] === coreId) return path;
 
-    if (current === preferredApproachId) return [...path, coreId];
-  }
-
-  if (current !== preferredApproachId) {
-    const completion = shortestPathWithTieBreak(current, preferredApproachId, nodeById, adjacency, new Set([coreId]));
-    if (completion.length > 1) path.push(...completion.slice(1));
-  }
-
-  return path[path.length - 1] === preferredApproachId ? [...path, coreId] : [];
+  const completion = shortestPathWithTieBreak(current, coreId, nodeById, adjacency);
+  if (completion.length > 1) path.push(...completion.slice(1));
+  return path[path.length - 1] === coreId ? path : [];
 }
 
 export function buildVisibleAttackPath(input: VisibleAttackPathInput): VisibleAttackPath {

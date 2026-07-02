@@ -269,7 +269,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
   const [colors, setColors] = useState<PictogramColors>(FALLBACK_COLORS[resolvedTheme]);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const [obstacles, setObstacles] = useState<ObstacleRect[]>([]);
-  const [enableStochasticPath, setEnableStochasticPath] = useState(false);
+  const [enableStochasticPath] = useState(true);
   const [attackCycle, setAttackCycle] = useState(0);
   const [compromisedNodes, setCompromisedNodes] = useState<Set<string>>(() => new Set());
   const [compromisedEdges, setCompromisedEdges] = useState<Set<string>>(() => new Set());
@@ -375,10 +375,6 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
       window.removeEventListener("resize", update);
     };
   }, [pageRef]);
-
-  useEffect(() => {
-    setEnableStochasticPath(true);
-  }, []);
 
   useEffect(() => {
     if (!enableStochasticPath) return;

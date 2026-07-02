@@ -461,6 +461,27 @@ assert.equal(sequence[0].kind, "node");
 assert.equal(sequence.at(-1).kind, "node");
 assert.equal(sequence.at(-1).nodeId, BLOG_DEFENSE_CORE_NODE_ID);
 
+const stochasticPaths = new Set();
+const stochasticApproaches = new Set();
+for (let index = 0; index < 80; index += 1) {
+  const stochasticPath = buildVisibleAttackPath({
+    nodes: desktopLayout.nodes,
+    edges: desktopLayout.edges.map((edge) => ({ id: edge.id, from: edge.from, to: edge.to })),
+    coreId: BLOG_DEFENSE_CORE_NODE_ID,
+    stochastic: true,
+  });
+  stochasticPaths.add(stochasticPath.nodeIds.join(">"));
+  stochasticApproaches.add(stochasticPath.nodeIds.at(-2));
+}
+assert.ok(
+  stochasticPaths.size >= 12,
+  `stochastic attack paths should vary across cycles, got ${stochasticPaths.size} unique paths`,
+);
+assert.ok(
+  stochasticApproaches.size >= 2,
+  `stochastic attack paths should reach multiple core approaches, got ${[...stochasticApproaches].join(", ")}`,
+);
+
 const pathEdgeIds = new Set(visiblePath.edgeIds);
 for (const edgeId of pathEdgeIds) {
   assert.ok(desktopLayout.edges.some((edge) => edge.id === edgeId), "visible path must use visible edges only");
