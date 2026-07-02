@@ -94,7 +94,28 @@ const PROCEDURE_SEED_BY_KEY: Record<string, ProcedureSeed> = {
       },
     },
     defaults: {
-      corpusKey: "AI-ML-research",
+      corpusKey: "threat-intelligence",
+    },
+  },
+  "submissions.email.process": {
+    key: "submissions.email.process",
+    title: "Email Submission Processor",
+    category: "ingestion",
+    description: "Processes inbound submission emails into reference create/find/process intake for direct citations.",
+    versionLabel: "starter",
+    tactusSource: loadProcedureSeedSource("email_submission_processor.tac"),
+    parameterSchema: {
+      type: "object",
+      required: ["message_id"],
+      properties: {
+        message_id: { type: "string" },
+        corpus_key: { type: "string" },
+        apply: { type: "boolean" },
+      },
+    },
+    defaults: {
+      corpus_key: "threat-intelligence",
+      apply: true,
     },
   },
   "newsroom.research.explorer": {

@@ -162,7 +162,7 @@ class PapyrusContentTests(unittest.TestCase):
     def test_resolve_corpus_local_path_ignores_process_cwd(self) -> None:
         steering_config = load_steering_config("corpora/papyrus-steering.yml")
         self.assertIsNotNone(steering_config)
-        corpus_config = require_corpus_config(steering_config, "AI-ML-research", "--corpus-key")
+        corpus_config = require_corpus_config(steering_config, "threat-intelligence", "--corpus-key")
         with tempfile.TemporaryDirectory() as temp_dir:
             previous_cwd = pathlib.Path.cwd()
             try:
@@ -171,7 +171,7 @@ class PapyrusContentTests(unittest.TestCase):
             finally:
                 os.chdir(previous_cwd)
         self.assertTrue(resolved.exists())
-        self.assertIn("AI-ML-research", resolved.as_posix())
+        self.assertIn("threat-intelligence", resolved.as_posix())
         self.assertNotIn(temp_dir, resolved.as_posix())
 
     @mock.patch("papyrus_content.accession.subprocess.Popen")

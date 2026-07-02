@@ -52,17 +52,10 @@ rendering contracts.
   Use JavaScript/TypeScript only for the Next.js/React frontend and
   frontend-specific test harnesses.
 - Do not add backward-compatibility fallbacks for old schema, GraphQL, content,
-  layout-plan, or CLI shapes. Fallback read queries, dual-shape normalizers,
-  silent compatibility branches, and long-lived migration shims are technical
-  debt. Treat required-field/schema mismatches as data or deployment errors:
-  fix the production data with a targeted backfill, deploy the current schema
-  or code, and remove any one-time repair path after use.
-- Only create a temporary compatibility repair when the user explicitly approves
-  it to restore production immediately. Keep it narrow, document exactly why it
-  exists, and remove it from normal read, authoring, repository, and solver
-  paths as soon as the data or deployment is corrected.
-- Default to clean breaks. Do not add fallback behavior, compatibility shims, or
-  multi-path read/write logic unless the user explicitly requests that fallback.
+  layout-plan, or CLI shapes. See
+  [Schema and API alignment (no compatibility shims)](#schema-and-api-alignment-no-compatibility-shims).
+- Default to clean breaks. Do not add fallback behavior unless the user
+  explicitly requests it.
 - Keep the current one-page React flipper. Do not reintroduce Turn.js, jQuery,
   or DOM-mutating layout loops.
 - Do not make React measure rendered DOM to decide layout. The solver should
@@ -284,6 +277,68 @@ rendering contracts.
   `poetry run papyrus ops categories export-lexical-steering --output <lexical-steering.json>`.
   Do not assume Biblicus consumes that export until the Biblicus agent confirms
   the command contract.
+
+## Schema and API alignment (no compatibility shims)
+
+Local application code and the deployed GraphQL API must describe the same contract.
+When CLI or Lambda code fails because a field, model, or input type is missing on
+AppSync, that is a **deployment error** — not a signal to add adaptation logic in
+Python or TypeScript.
+
+**Do not fix schema drift in code. Fix the deployment.**
+
+### Forbidden (unless the user explicitly approves a temporary emergency repair)
+
+- Runtime schema introspection that **filters** queries or mutations to match
+  whatever the remote API currently exposes (for example: dropping undeployed
+  fields from `listReferences`, or stripping keys from `CreateReferenceInput`
+  before send).
+- Fallback read queries with reduced field sets for "older" APIs.
+- Dual-shape normalizers that accept both old and new schema shapes.
+- Silent `try/except` branches that continue with partial or degraded behavior
+  when the API contract does not match code.
+- Any logic whose purpose is "make the CLI work against a sandbox that hasn't
+  caught up yet." That sandbox will catch up once; the shim stays forever.
+
+These patterns look small at first. They become permanent branches every agent
+and every future feature must reason about. **One hour of deployment lag is not
+worth years of compatibility debt.**
+
+### Required response when code and deployed schema disagree
+
+1. Confirm local schema in [`amplify/data/resource.ts`](amplify/data/resource.ts)
+   (or the relevant Amplify resource) is what code expects.
+2. Deploy it to the target environment:
+   - **Sandbox:** `npx ampx sandbox` (wait for deploy to finish), then
+     `npm run outputs:sandbox` if needed.
+   - **Production:** use the normal pipeline; do not patch around prod drift
+     from local agents.
+3. Re-run the failing CLI command. It should succeed against the updated API or
+   fail with a real data/logic error — not a field-undefined validation error.
+
+Do **not** weaken the CLI client, GraphQL authoring layer, or newsroom tools to
+paper over an outdated AppSync schema.
+
+### Temporary emergency repairs
+
+Only when the user **explicitly approves** restoring production immediately:
+
+- Keep the repair as narrow as possible (one command, one model, one migration).
+- Document exactly why it exists and when it must be removed.
+- Remove it from normal read, authoring, repository, and solver paths as soon
+  as deployment or data is corrected.
+
+Default is **clean breaks**: fail loudly, deploy schema, move on.
+
+### Concrete anti-pattern (do not repeat)
+
+During Threat Intelligence bootstrap, sandbox AppSync was missing
+`Reference.inboundCitationCount`, `Reference.reviewedFeedKey`, and related
+fields that already existed in local schema. The wrong fix was adding
+`_resolved_fields()` and runtime mutation input filtering in
+`src/papyrus_content/graphql_authoring.py`. The right fix was deploying sandbox
+schema, then re-running `references create-from-catalog`.
+
 ## Solver vs. Renderer Boundary
 
 The newspaper pages are not browser-flow layouts. They are solved layouts that
@@ -414,6 +469,9 @@ GraphQL (or `?scenario=<id>` fixture overrides for tests/debug only).
 - The CLI is GraphQL authoring and inspection.
 - `src/papyrus_content/graphql_authoring.py` owns GraphQL authoring calls: JWT
   when run from the CLI; IAM automatically when `AWS_LAMBDA_FUNCTION_NAME` is set.
+- `graphql_authoring.py` uses **fixed** query field lists and explicit input
+  shaping. Do not add runtime schema introspection to adapt to undeployed fields.
+  See [Schema and API alignment (no compatibility shims)](#schema-and-api-alignment-no-compatibility-shims).
 - `content inspect`, `content list`, and `content delete all --yes` are the
   stable deployed-API operations. `content diff` and `content sync` are
   source-driven publishing commands; do not use them as a production runbook
