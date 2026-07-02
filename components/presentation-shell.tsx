@@ -139,7 +139,9 @@ function BlogPresentation({
               <EditionOverviewVideo editionVideo={content.editionVideo} />
             ) : null}
             <header className="presentation-section-header">
-              <p>{section.label}</p>
+              <div className="presentation-section-header__band">
+                <p>{section.label}</p>
+              </div>
               {section.description ? <span>{section.description}</span> : null}
             </header>
             {getEditionSectionItems(section, content.items).map((item, index) => (
@@ -306,14 +308,20 @@ function PresentationItem({
           </h2>
           {item.deck ? <span>{item.deck}</span> : null}
         </header>
-        <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
-          <MeasuredPresentationLines lines={lines} />
-        </div>
         {mode === "blog" ? (
-          <Link className="presentation-item__cta" href={directHref}>
-            Read Article
-          </Link>
-        ) : null}
+          <div className="presentation-item__body">
+            <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
+              <MeasuredPresentationLines lines={lines} />
+            </div>
+            <Link className="presentation-item__cta" href={directHref}>
+              Read Article
+            </Link>
+          </div>
+        ) : (
+          <div className="presentation-item__text-frame" ref={frameRef} style={{ height: textHeight }}>
+            <MeasuredPresentationLines lines={lines} />
+          </div>
+        )}
       </div>
       {image ? (
         <div className="presentation-item__media">
