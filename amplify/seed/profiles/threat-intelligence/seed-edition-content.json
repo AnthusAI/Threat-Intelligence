@@ -3,26 +3,27 @@
   "id": "edition-current",
   "slug": "current",
   "title": "Anthus Threat Intelligence",
-  "description": "Practical AI/ML security analysis from Anthus AI Solutions.",
+  "description": "AI/ML security analysis from Anthus AI Solutions: how attacker capability is shifting, and what defenders should do about it.",
   "publishDate": "2026-07-04",
   "suppressNewsDeskAppendix": true,
+  "video": {
+    "src": "/seed-art/threat-intelligence/videos/edition-overview.mp4",
+    "alt": "Edition overview video for Anthus Threat Intelligence",
+    "caption": "Teaser for the latest Anthus Threat Intelligence edition.",
+    "credit": "Anthus Threat Intelligence video",
+    "durationSeconds": 65
+  },
   "articles": [
     {
       "slug": "the-balance-of-power-is-shifting",
       "shortSlug": "BALANCE",
       "section": "Mission",
       "headline": "The Balance of Power Is Shifting",
-      "deck": "AI weakens the old defensive assumption that only nation-state-level actors can bring scale, patience, and advanced tradecraft to ordinary targets. Defenders need to revisit controls that were tolerated because capable attackers were assumed to be rare.",
-      "excerpt": "Treat AI as a force multiplier for ordinary attackers, not a magic upgrade to elite status. Controls that relied on obscurity, friction, or attacker fatigue need a fresh threat model, because more adversaries can now sustain the work required to break them. The important shift is capability diffusion: cheaper reconnaissance, faster variation, better translation, and more patient automation make old assumptions about who can exploit a weakness much less reliable.",
+      "deck": "AI is making attacker capability cheap. Controls that were tolerated because capable adversaries were rare need a new threat model.",
+      "excerpt": "Somewhere in your stack is a control that survives only because nobody has tried hard enough. The number of attackers who can try hard enough just went up.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
       "image": {
-        "src": "/seed-art/threat-intelligence/balance-shift.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/balance-shift-dark.svg"
-          }
-        },
         "alt": "A tilted balance beam showing many smaller attacker nodes outweighing a single larger capability source.",
         "caption": "Capability is becoming less scarce, changing who defenders must plan for.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -34,6 +35,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/the-balance-of-power-is-shifting.mp4",
+        "alt": "Video summary of The Balance of Power Is Shifting",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The scarce resource was never malice. It was capability.",
@@ -108,17 +116,11 @@
       "shortSlug": "LEARN",
       "section": "Newsroom",
       "headline": "How Our Newsroom Learns",
-      "deck": "Attackers are using tireless automation to expand what they can do. Defenders need the same persistence applied to evidence, trend analysis, and practical guidance, with expert judgment steering what matters and AI doing the patient work of watching patterns emerge.",
-      "excerpt": "Our newsroom uses continuous AI-assisted research, expert steering, and a growing threat-intelligence knowledge base to turn noisy security signals into practical advice defenders can act on. The goal is not more content for its own sake. It is a defender-side learning system that watches patterns, preserves evidence, compares new signals against past work, and gives seasoned security judgment a persistent operating surface.",
+      "deck": "Attackers no longer get tired. Defenders need the same persistence in how they learn — expert judgment steering, AI doing the patient watching.",
+      "excerpt": "A security team that reads occasional reports is competing against adversaries that never stop watching. This newsroom is built to close that gap.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
       "image": {
-        "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/newsroom-learning-pipeline-dark.svg"
-          }
-        },
         "alt": "A continuous newsroom pipeline connecting expert steering, AI research loops, a knowledge graph, and practical security guidance.",
         "caption": "A continuous intelligence pipeline turns research signals into practical defensive guidance.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -130,6 +132,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/how-our-newsroom-learns.mp4",
+        "alt": "Video summary of How Our Newsroom Learns",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "If attackers get tireless automation, defenders need tireless analysis.",
@@ -201,19 +210,13 @@
     {
       "slug": "audit-aws-exposure-before-attackers-do",
       "shortSlug": "AWS",
-      "section": "AWS",
-      "headline": "Correlate AWS Exposure Signals Before They Chain",
-      "deck": "AWS risk rarely arrives as one finding. It appears when identity reachability, sensitive data, public paths, key policy, logging gaps, and suspicious activity line up across accounts. The work is to correlate those signals before an attacker does.",
-      "excerpt": "Use AWS-native signals to turn a noisy multi-account estate into a prioritized exposure queue. Security Hub, GuardDuty, Config, CloudTrail, CloudWatch, IAM Access Analyzer, Macie, and Detective each answer a different question; the defensive value comes from joining them into one view of what can be reached, abused, decrypted, or exfiltrated.",
+      "section": "Cloud",
+      "headline": "Turn AWS Findings Into an Exposure Queue",
+      "deck": "AWS risk rarely arrives as one finding. It shows up when identity, data, key policy, and logging gaps line up across accounts — and the work is to see the line-up first.",
+      "excerpt": "Security Hub, GuardDuty, Config, Macie, and Access Analyzer each answer one question — and nobody is responsible for the sentence they form together. That sentence is the finding that matters.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
       "image": {
-        "src": "/seed-art/threat-intelligence/s3-exposure-map.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/s3-exposure-map-dark.svg"
-          }
-        },
         "alt": "A storage map with bucket icons, red sensitivity hotspots, and an exposure path.",
         "caption": "Sensitive-data discovery turns an S3 inventory into an exposure map.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -225,6 +228,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/audit-aws-exposure-before-attackers-do.mp4",
+        "alt": "Video summary of Correlate AWS Exposure Signals Before They Chain",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity.",
@@ -246,7 +256,7 @@
     {
       "slug": "build-the-aws-exposure-control-stack",
       "shortSlug": "STACK",
-      "section": "AWS",
+      "section": "Cloud",
       "headline": "Build the AWS Findings Pipeline",
       "deck": "A useful AWS control stack does not stop at detection. It routes findings into ownership, context, escalation, and closure so exposure reduction survives noisy accounts, temporary exceptions, and alert fatigue.",
       "excerpt": "Treat AWS security services as inputs to an operating pipeline. The pipeline should normalize findings, enrich them with account and data context, route them to owners, distinguish drift from active threat, and prove closure. Without that workflow, even good AWS-native detections become dashboard archaeology.",
@@ -273,7 +283,7 @@
     {
       "slug": "find-pii-risk-in-s3-buckets",
       "shortSlug": "S3PII",
-      "section": "AWS",
+      "section": "Cloud",
       "headline": "Find PII Risk in Your S3 Buckets",
       "deck": "Start with a concrete AWS question: which S3 buckets contain PII, and which of those buckets create real exposure because of access, sharing, encryption, retention, ownership, or unclear remediation paths?",
       "excerpt": "S3 discovery should turn bucket sprawl into decisions. Use inventory and Macie findings to identify likely PII, then combine those findings with Block Public Access settings, bucket policies, cross-account access, broad roles, KMS exposure, weak ownership, and unclear retention. The priority is to find the buckets where sensitive content and reachable access overlap.",
@@ -302,17 +312,11 @@
       "shortSlug": "AZURE",
       "section": "Azure",
       "headline": "Map Azure Attack Paths Through Identity",
-      "deck": "Azure exposure starts with Entra identities, role assignments, applications, managed identities, subscriptions, and data stores. Defender for Cloud attack paths are useful because they show how separate weaknesses can become one route to impact.",
-      "excerpt": "Do not review Azure as a flat resource inventory. Start with Entra ID, Azure RBAC, PIM eligibility, app registrations, managed identities, Key Vault access, storage exposure, and Defender for Cloud attack paths. The Azure question is which identities and workloads can cross boundaries into sensitive systems.",
+      "deck": "In Azure the center of gravity is identity. The question is which identities and workloads can cross boundaries into sensitive systems.",
+      "excerpt": "A stale guest account, a group that conveys more power than its name suggests, an app permission granted in a hurry — none is an incident on its own; chained, they are a route.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
       "image": {
-        "src": "/seed-art/threat-intelligence/azure-exposure-map.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/azure-exposure-map-dark.svg"
-          }
-        },
         "alt": "An Azure exposure map showing Entra identities, subscriptions, sensitive data, and an attacker path crossing privilege boundaries.",
         "caption": "Azure blast radius starts with identity paths, privilege, data, and reachability.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -324,6 +328,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/audit-azure-blast-radius-before-attackers-do.mp4",
+        "alt": "Video summary of Map Azure Attack Paths Through Identity",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "In Azure, the path often starts with identity and ends at data.",
@@ -399,17 +410,11 @@
       "shortSlug": "AI",
       "section": "AI",
       "headline": "Govern OpenAI Workspaces Like Access Boundaries",
-      "deck": "OpenAI security is not only prompt hygiene. Workspaces, projects, service accounts, connectors, files, custom actions, and API keys define who can use AI systems and what business data they can reach.",
-      "excerpt": "Treat OpenAI administration as access-boundary work. Review workspace owners, SSO and SCIM, project membership, service accounts, API keys, connected apps, uploaded knowledge, audit logs, and data-retention settings so a compromised user or token cannot quietly inherit the whole organization's AI surface.",
+      "deck": "OpenAI security is not prompt hygiene. Workspaces, projects, keys, connectors, and files decide who can use AI systems and what business data they can reach.",
+      "excerpt": "The engineer left in January — but the workspace invite, the project membership, and the connector they authorized are all still live. Nobody watches that boundary, because nobody decided it was one.",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
       "image": {
-        "src": "/seed-art/threat-intelligence/openai-account-control-plane.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/openai-account-control-plane-dark.svg"
-          }
-        },
         "alt": "An OpenAI account control plane connected to projects, API keys, service accounts, files, connectors, and audit signals.",
         "caption": "AI accounts become control planes when they connect identity, data, tools, and automation.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -421,6 +426,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure.mp4",
+        "alt": "Video summary of Govern OpenAI Workspaces Like Access Boundaries",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The AI boundary is made of accounts, projects, keys, apps, files, and connectors.",
@@ -494,19 +506,13 @@
     {
       "slug": "how-to-play-games-securely",
       "shortSlug": "GAME",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "How to Play Games Securely",
-      "deck": "Treat unfamiliar games, experimental builds, launchers, mods, and anti-cheat drivers as software that deserves its own blast radius. Keep gaming separate from banking, work sessions, recovery accounts, and sensitive files so experimentation cannot drag everything else with it.",
-      "excerpt": "Keep gaming away from the accounts and files that would hurt most to lose. Use a dedicated device, separate OS account, or clean browser profile so launchers, mods, overlays, and community downloads cannot casually share space with banking, tax records, work sessions, or password recovery. The goal is not to make gaming sterile; it is to make experimentation cheap by keeping high-value personal and work data out of the same blast radius as unfamiliar software.",
+      "deck": "Games, mods, launchers, and anti-cheat drivers are software from strangers. Give them their own blast radius, away from banking, work, and recovery accounts.",
+      "excerpt": "You do not have to trust every mod and experimental build — you just have to make sure the machine running them can afford to lose the bet.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
       "image": {
-        "src": "/seed-art/threat-intelligence/secure-gaming-isolation.svg",
-        "themeVariants": {
-          "dark": {
-            "src": "/seed-art/threat-intelligence/secure-gaming-isolation-dark.svg"
-          }
-        },
         "alt": "A game controller inside a protected zone separated from finance and work systems.",
         "caption": "A gaming setup is safer when it has its own blast radius.",
         "credit": "Anthus Threat Intelligence diagram",
@@ -518,6 +524,13 @@
           "crop": "contain",
           "wrapsText": true
         }
+      },
+      "video": {
+        "src": "/seed-art/threat-intelligence/videos/how-to-play-games-securely.mp4",
+        "alt": "Video summary of How to Play Games Securely",
+        "caption": "1-minute briefing narrated from the article excerpt.",
+        "credit": "Anthus Threat Intelligence video",
+        "durationSeconds": 75
       },
       "pullQuotes": [
         "The most practical gaming security control is separation.",
@@ -538,7 +551,7 @@
     {
       "slug": "separate-game-accounts-from-real-life",
       "shortSlug": "ACCTS",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "Separate Game Accounts From Real Life",
       "deck": "Gaming risk is not only malware on a machine. Store accounts, Discord identities, email recovery, payment methods, cloud saves, and social graphs can all become paths from a compromised game account back into real life.",
       "excerpt": "Treat gaming identity as its own compartment. Use unique passwords, MFA, separate recovery email where practical, limited payment methods, and careful OAuth permissions so a stolen store, Discord, streaming, or launcher account does not become a shortcut to banking, work, family photos, password recovery, or your primary inbox. Account separation is boring, but it keeps a bad gaming incident from becoming a whole-life incident.",
@@ -564,7 +577,7 @@
     {
       "slug": "treat-mods-and-launchers-like-untrusted-code",
       "shortSlug": "MODS",
-      "section": "Gaming",
+      "section": "Gaming & Consumer",
       "headline": "Treat Mods and Launchers Like Untrusted Code",
       "deck": "Mods, private servers, launchers, overlays, trainers, anti-cheat systems, and vibe-coded game builds are software supply chain decisions. Install them only inside a trust zone you are willing to rebuild.",
       "excerpt": "The riskiest gaming software is often not the official game. It is the helper executable, mod loader, private server patch, overlay, trainer, launcher, or prototype build that asks for broad access because that is how the community makes it work. Treat those installs like untrusted code: isolate them, verify sources, avoid admin rights when possible, and keep anything irreplaceable outside the blast radius.",

@@ -31,6 +31,7 @@ export function getSeedEditionConfig(): SeedEditionConfig {
     metadata: {
       source: "fixture-seed",
       suppressNewsDeskAppendix: seedContent.suppressNewsDeskAppendix === true,
+      ...(seedContent.video ? { editionVideo: seedContent.video } : {}),
     },
     articleOrder: itemIds,
     layoutPlan: applySeedHouseAds(createSeedEditionLayoutPlan(seedEditionArticles), seedContent.houseAds),

@@ -26,7 +26,7 @@ export type ArticleImageThemeVariants = {
 };
 
 export type ArticleImage = {
-  src: string;
+  src?: string;
   alt: string;
   caption?: string;
   credit: string;
@@ -40,7 +40,19 @@ export type ArticleImageAsset = ArticleImage & {
   roles?: Array<"lead" | "continuation" | "continuationInset" | "feature" | "thumbnail">;
 };
 
-export type ArticleAsset = ArticleImageAsset;
+export type ArticleVideoAsset = {
+  id?: string;
+  type: "video";
+  src: string;
+  posterSrc?: string;
+  alt: string;
+  caption?: string;
+  credit: string;
+  durationSeconds?: number;
+  roles?: Array<"lead" | "feature" | "thumbnail">;
+};
+
+export type ArticleAsset = ArticleImageAsset | ArticleVideoAsset;
 
 export type Article = {
   slug: string;
@@ -52,6 +64,7 @@ export type Article = {
   byline: string;
   dateline: string;
   image?: ArticleImage;
+  video?: ArticleVideoAsset;
   assets?: ArticleAsset[];
   pullQuotes?: string[];
   body: string[];
@@ -278,7 +291,7 @@ export function getArticleText(article: Article): string {
 }
 
 export function getArticleImageAssets(article: Article): ArticleImageAsset[] {
-  const imageAssets = article.assets?.filter((asset) => asset.type === "image") ?? [];
+  const imageAssets = article.assets?.filter((asset): asset is ArticleImageAsset => asset.type === "image") ?? [];
   if (imageAssets.length > 0) return imageAssets;
   if (!article.image) return [];
 
@@ -290,4 +303,12 @@ export function getArticleImageAssets(article: Article): ArticleImageAsset[] {
       roles: ["lead", "continuation", "continuationInset"],
     },
   ];
+}
+
+export function getArticleVideoAsset(article: Article): ArticleVideoAsset | undefined {
+  const videoAssets = article.assets?.filter((asset): asset is ArticleVideoAsset => asset.type === "video") ?? [];
+  if (videoAssets.length > 0) {
+    return videoAssets.find((asset) => asset.roles?.includes("lead")) ?? videoAssets[0];
+  }
+  return article.video;
 }

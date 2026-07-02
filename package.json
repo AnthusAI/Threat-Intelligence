@@ -21,6 +21,7 @@
     "test:blog-defense-graph": "node scripts/test-blog-defense-graph.cjs",
     "test:blog-header-obstacles": "node scripts/test-blog-header-obstacles.cjs",
     "test:threat-intelligence-pictograms": "node scripts/test-threat-intelligence-pictograms.cjs",
+    "videoml:bundle": "node scripts/videoml/build-browser-bundle.mjs",
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",

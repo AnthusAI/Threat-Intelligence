@@ -4,7 +4,9 @@ import Link from "next/link";
 import type { Article } from "../lib/articles";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
+import { getPublicationItemVideoAsset } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
+import { ArticleVideoFigure } from "./article-video";
 import { PictogramFigure } from "./pictograms/pictogram-figure";
 import { PresentationFooter } from "./presentation-footer";
 
@@ -44,22 +46,7 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
           </div>
         </header>
         <div className="article-body">
-          {article.image ? (
-            <PictogramFigure
-              alt={article.image.alt}
-              caption={article.image.caption}
-              credit={article.image.credit}
-              figureClassName="article-photo"
-              height={680}
-              layout={article.image.layout}
-              priority
-              sizes="(max-width: 980px) 100vw, 900px"
-              slug={article.slug}
-              src={article.image.src}
-              themeVariants={article.image.themeVariants}
-              width={1200}
-            />
-          ) : null}
+          <ArticleLeadMedia article={article} />
           {article.body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -103,22 +90,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
           ) : null}
         </header>
         <div className="article-body">
-          {item.image ? (
-            <PictogramFigure
-              alt={item.image.alt}
-              caption={item.image.caption}
-              credit={item.image.credit}
-              figureClassName="article-photo"
-              height={680}
-              layout={item.image.layout}
-              priority
-              sizes="(max-width: 980px) 100vw, 900px"
-              slug={item.slug}
-              src={item.image.src}
-              themeVariants={item.image.themeVariants}
-              width={1200}
-            />
-          ) : null}
+          <ItemLeadMedia item={item} />
           {(item.body ?? []).map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -126,6 +98,54 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
       </article>
       {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
     </main>
+  );
+}
+
+function ArticleLeadMedia({ article }: { article: Article }) {
+  if (article.video) {
+    return <ArticleVideoFigure slug={article.slug} video={article.video} />;
+  }
+  if (!article.image) return null;
+  return (
+    <PictogramFigure
+      alt={article.image.alt}
+      caption={article.image.caption}
+      credit={article.image.credit}
+      figureClassName="article-photo"
+      height={680}
+      layout={article.image.layout}
+      priority
+      sizes="(max-width: 980px) 100vw, 900px"
+      slug={article.slug}
+      src={article.image.src}
+      themeVariants={article.image.themeVariants}
+      width={1200}
+    />
+  );
+}
+
+function ItemLeadMedia({ item }: { item: PublicationItem }) {
+  const video = getPublicationItemVideoAsset(item);
+  if (video) {
+    return <ArticleVideoFigure slug={item.slug} video={video} />;
+  }
+  const image = item.type === "article" ? item.image : item.image;
+  if (!image) return null;
+  return (
+    <PictogramFigure
+      alt={image.alt}
+      caption={image.caption}
+      credit={image.credit}
+      figureClassName="article-photo"
+      height={680}
+      layout={image.layout}
+      priority
+      sizes="(max-width: 980px) 100vw, 900px"
+      slug={item.slug}
+      src={image.src}
+      themeVariants={image.themeVariants}
+      width={1200}
+    />
   );
 }
 
