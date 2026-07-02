@@ -53,257 +53,235 @@ const STOCHASTIC = {
   completionLateralScale: 2.2,
 };
 
-export const BLOG_DEFENSE_NODES: BlogDefenseNode[] = [
-  { id: "core", x: 770, y: 175, radius: 12, role: "core", zone: "core" },
-  { id: "halo_n", x: 770, y: 32, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_ne", x: 913, y: 58, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_e", x: 913, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_se", x: 878, y: 284, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_s", x: 770, y: 318, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_sw", x: 662, y: 284, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_w", x: 627, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "halo_nw", x: 662, y: 66, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_n", x: 770, y: 56, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_ne", x: 854, y: 91, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_e", x: 889, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_se", x: 854, y: 259, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_s", x: 770, y: 294, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_sw", x: 686, y: 259, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_w", x: 651, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "outer_nw", x: 686, y: 91, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_n", x: 770, y: 84, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_ne", x: 833, y: 111, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_e", x: 858, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_se", x: 833, y: 240, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_s", x: 770, y: 266, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_sw", x: 706, y: 240, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_w", x: 682, y: 175, radius: 7, role: "perimeter", zone: "core" },
-  { id: "ring_nw", x: 706, y: 111, radius: 7, role: "perimeter", zone: "core" },
+// The whole template derives from one construction: a right triangle hugging
+// the top-right corner. Four true concentric octagon rings surround the core;
+// each arm is a rail lying exactly on a halo tangent line (the left rail
+// shares the halo's north y, the right rail its east x) with a short two-lane
+// shoulder wedge where it roots into the ring. Past the wedge each arm thins
+// to a single file of nodes so it can hug the page margin: the top margin
+// going left, the right margin going down. The right rail's lower reach is
+// the attack corridor — attacks come in on the margins.
+const CENTER_X = 770;
+const CENTER_Y = 175;
 
-  { id: "mid_n", x: 770, y: 111, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_ne", x: 814, y: 130, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_e", x: 832, y: 175, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_se", x: 814, y: 220, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_s", x: 770, y: 239, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_sw", x: 726, y: 220, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_w", x: 708, y: 175, radius: 5, role: "interior", zone: "core" },
-  { id: "mid_nw", x: 726, y: 130, radius: 5, role: "interior", zone: "core" },
+export const BLOG_DEFENSE_RING_RADII = {
+  mid: 64,
+  ring: 92,
+  outer: 120,
+  halo: 148,
+} as const;
 
-  { id: "left_attach_top", x: 640, y: 42, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_attach_bottom", x: 626, y: 114, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_bridge_top", x: 678, y: 32, radius: 6, role: "perimeter", zone: "left_arm" },
-  { id: "left_a0", x: 640, y: 32, radius: 6, role: "perimeter", zone: "left_arm" },
-  { id: "left_a1", x: 600, y: 32, radius: 6, role: "perimeter", zone: "left_arm" },
-  { id: "left_a2", x: 556, y: 32, radius: 6, role: "perimeter", zone: "left_arm" },
-  { id: "left_a3", x: 514, y: 32, radius: 6, role: "perimeter", zone: "left_arm" },
-  { id: "left_b0", x: 628, y: 72, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_b3", x: 534, y: 44, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_c0", x: 632, y: 120, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_c3", x: 548, y: 60, radius: 6, role: "interior", zone: "left_arm" },
-  { id: "left_tip", x: 492, y: 32, radius: 5, role: "perimeter", zone: "left_arm" },
-  { id: "left_tail_1", x: 450, y: 32, radius: 5, role: "perimeter", zone: "left_arm" },
-  { id: "left_tail_2", x: 408, y: 32, radius: 5, role: "perimeter", zone: "left_arm" },
-  { id: "left_tail_3", x: 366, y: 32, radius: 5, role: "perimeter", zone: "left_arm" },
-  { id: "left_tail_4", x: 326, y: 32, radius: 5, role: "perimeter", zone: "left_arm" },
+const HALO_RADIUS = BLOG_DEFENSE_RING_RADII.halo;
 
-  { id: "right_attach_bottom", x: 820, y: 308, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_bridge_top", x: 905, y: 74, radius: 6, role: "perimeter", zone: "right_arm" },
-  { id: "right_bridge_peak", x: 913, y: 42, radius: 6, role: "perimeter", zone: "right_arm" },
-  { id: "right_a0", x: 906, y: 240, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_a1", x: 910, y: 316, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_a2", x: 912, y: 390, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_a3", x: 912, y: 470, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_a4", x: 912, y: 552, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_a5", x: 912, y: 632, radius: 7, role: "perimeter", zone: "right_arm" },
-  { id: "right_b0", x: 834, y: 286, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_b1", x: 848, y: 350, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_b2", x: 872, y: 424, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_b3", x: 907, y: 502, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_b4", x: 910, y: 582, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_b5", x: 911, y: 654, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c0", x: 790, y: 328, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c1", x: 812, y: 366, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c2", x: 836, y: 444, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c3", x: 900, y: 528, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c4", x: 908, y: 608, radius: 6, role: "interior", zone: "right_arm" },
-  { id: "right_c5", x: 910, y: 676, radius: 6, role: "interior", zone: "right_arm" },
-
-  { id: "corridor_0", x: 970, y: 260, radius: 7, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_1", x: 972, y: 328, radius: 7, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_2", x: 974, y: 398, radius: 7, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_3", x: 976, y: 472, radius: 8, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_4", x: 978, y: 548, radius: 8, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_5", x: 980, y: 620, radius: 9, role: "attack", zone: "right_corridor", protectedIngress: true },
-  { id: "corridor_6", x: 982, y: 684, radius: 10, role: "attack", zone: "right_corridor", protectedIngress: true },
+const RING_SPECS: Array<{
+  prefix: "mid" | "ring" | "outer" | "halo";
+  radius: number;
+  role: BlogDefenseNodeRole;
+  nodeRadius: number;
+}> = [
+  { prefix: "mid", radius: BLOG_DEFENSE_RING_RADII.mid, role: "interior", nodeRadius: 5 },
+  { prefix: "ring", radius: BLOG_DEFENSE_RING_RADII.ring, role: "perimeter", nodeRadius: 7 },
+  { prefix: "outer", radius: BLOG_DEFENSE_RING_RADII.outer, role: "perimeter", nodeRadius: 7 },
+  { prefix: "halo", radius: BLOG_DEFENSE_RING_RADII.halo, role: "perimeter", nodeRadius: 7 },
 ];
 
-export const BLOG_DEFENSE_EDGES: BlogDefenseEdge[] = [
-  { id: "halo_1", from: "halo_n", to: "halo_ne" },
-  { id: "halo_2", from: "halo_ne", to: "halo_e" },
-  { id: "halo_3", from: "halo_e", to: "halo_se" },
-  { id: "halo_4", from: "halo_se", to: "halo_s" },
-  { id: "halo_5", from: "halo_s", to: "halo_sw" },
-  { id: "halo_6", from: "halo_sw", to: "halo_w" },
-  { id: "halo_7", from: "halo_w", to: "halo_nw" },
-  { id: "halo_8", from: "halo_nw", to: "halo_n" },
-  { id: "halo_to_outer_n", from: "halo_n", to: "outer_n" },
-  { id: "halo_to_outer_ne", from: "halo_ne", to: "outer_ne" },
-  { id: "halo_to_outer_e", from: "halo_e", to: "outer_e" },
-  { id: "halo_to_outer_se", from: "halo_se", to: "outer_se" },
-  { id: "halo_to_outer_s", from: "halo_s", to: "outer_s" },
-  { id: "halo_to_outer_sw", from: "halo_sw", to: "outer_sw" },
-  { id: "halo_to_outer_w", from: "halo_w", to: "outer_w" },
-  { id: "halo_to_outer_nw", from: "halo_nw", to: "outer_nw" },
-  { id: "outer_1", from: "outer_n", to: "outer_ne" },
-  { id: "outer_2", from: "outer_ne", to: "outer_e" },
-  { id: "outer_3", from: "outer_e", to: "outer_se" },
-  { id: "outer_4", from: "outer_se", to: "outer_s" },
-  { id: "outer_5", from: "outer_s", to: "outer_sw" },
-  { id: "outer_6", from: "outer_sw", to: "outer_w" },
-  { id: "outer_7", from: "outer_w", to: "outer_nw" },
-  { id: "outer_8", from: "outer_nw", to: "outer_n" },
-  { id: "outer_to_ring_n", from: "outer_n", to: "ring_n" },
-  { id: "outer_to_ring_ne", from: "outer_ne", to: "ring_ne" },
-  { id: "outer_to_ring_e", from: "outer_e", to: "ring_e" },
-  { id: "outer_to_ring_se", from: "outer_se", to: "ring_se" },
-  { id: "outer_to_ring_s", from: "outer_s", to: "ring_s" },
-  { id: "outer_to_ring_sw", from: "outer_sw", to: "ring_sw" },
-  { id: "outer_to_ring_w", from: "outer_w", to: "ring_w" },
-  { id: "outer_to_ring_nw", from: "outer_nw", to: "ring_nw" },
-  { id: "ring_1", from: "ring_n", to: "ring_ne" },
-  { id: "ring_2", from: "ring_ne", to: "ring_e" },
-  { id: "ring_3", from: "ring_e", to: "ring_se" },
-  { id: "ring_4", from: "ring_se", to: "ring_s" },
-  { id: "ring_5", from: "ring_s", to: "ring_sw" },
-  { id: "ring_6", from: "ring_sw", to: "ring_w" },
-  { id: "ring_7", from: "ring_w", to: "ring_nw" },
-  { id: "ring_8", from: "ring_nw", to: "ring_n" },
-  { id: "spoke_n", from: "ring_n", to: "core" },
-  { id: "spoke_e", from: "ring_e", to: "core" },
-  { id: "spoke_s", from: "ring_s", to: "core" },
-  { id: "spoke_w", from: "ring_w", to: "core" },
-  { id: "mid_ring_1", from: "mid_n", to: "mid_ne" },
-  { id: "mid_ring_2", from: "mid_ne", to: "mid_e" },
-  { id: "mid_ring_3", from: "mid_e", to: "mid_se" },
-  { id: "mid_ring_4", from: "mid_se", to: "mid_s" },
-  { id: "mid_ring_5", from: "mid_s", to: "mid_sw" },
-  { id: "mid_ring_6", from: "mid_sw", to: "mid_w" },
-  { id: "mid_ring_7", from: "mid_w", to: "mid_nw" },
-  { id: "mid_ring_8", from: "mid_nw", to: "mid_n" },
-  { id: "mid_spoke_n", from: "mid_n", to: "core" },
-  { id: "mid_spoke_e", from: "mid_e", to: "core" },
-  { id: "mid_spoke_s", from: "mid_s", to: "core" },
-  { id: "mid_spoke_w", from: "mid_w", to: "core" },
-  { id: "mid_to_outer_n", from: "mid_n", to: "ring_n" },
-  { id: "mid_to_outer_e", from: "mid_e", to: "ring_e" },
-  { id: "mid_to_outer_s", from: "mid_s", to: "ring_s" },
-  { id: "mid_to_outer_w", from: "mid_w", to: "ring_w" },
-  { id: "left_a_chain_1", from: "left_a0", to: "left_a1" },
-  { id: "left_a_chain_0", from: "left_bridge_top", to: "left_a0" },
-  { id: "left_a_chain_2", from: "left_a1", to: "left_a2" },
-  { id: "left_a_chain_3", from: "left_a2", to: "left_a3" },
-  { id: "left_a_chain_4", from: "left_a3", to: "left_tip" },
-  { id: "left_b_chain_1", from: "left_b0", to: "left_b3" },
-  { id: "left_b_chain_4", from: "left_b3", to: "left_tip" },
-  { id: "left_c_chain_1", from: "left_c0", to: "left_c3" },
-  { id: "left_c_chain_4", from: "left_c3", to: "left_tip" },
-  { id: "left_tail_chain_1", from: "left_tip", to: "left_tail_1" },
-  { id: "left_tail_chain_2", from: "left_tail_1", to: "left_tail_2" },
-  { id: "left_tail_chain_3", from: "left_tail_2", to: "left_tail_3" },
-  { id: "left_tail_chain_4", from: "left_tail_3", to: "left_tail_4" },
-  { id: "left_tri_1", from: "left_a0", to: "left_b0" },
-  { id: "left_tri_2", from: "left_b0", to: "left_c0" },
-  { id: "left_tri_7", from: "left_a3", to: "left_b3" },
-  { id: "left_tri_8", from: "left_b3", to: "left_c3" },
-  { id: "left_tri_9", from: "left_a3", to: "left_tip" },
-  { id: "left_tri_10", from: "left_c3", to: "left_tip" },
-  { id: "left_cross_1", from: "left_b0", to: "left_a1" },
-  { id: "left_cross_7", from: "left_b3", to: "left_tip" },
-  { id: "left_cross_8", from: "left_c3", to: "left_tip" },
-  { id: "left_attach_1", from: "left_attach_top", to: "left_a0" },
-  { id: "left_attach_1b", from: "left_attach_top", to: "left_bridge_top" },
-  { id: "left_attach_2", from: "left_attach_top", to: "left_b0" },
-  { id: "left_attach_3", from: "left_attach_bottom", to: "left_b0" },
-  { id: "left_attach_4", from: "left_attach_bottom", to: "left_c0" },
-  { id: "left_to_outer_1", from: "left_attach_top", to: "halo_nw" },
-  { id: "left_to_outer_2", from: "left_attach_bottom", to: "halo_nw" },
-  { id: "left_to_outer_3", from: "left_c0", to: "halo_w" },
-  { id: "left_to_outer_4", from: "left_c0", to: "halo_nw" },
-  { id: "left_to_outer_5", from: "left_a0", to: "halo_nw" },
-  { id: "left_to_outer_11", from: "left_bridge_top", to: "halo_nw" },
-  { id: "left_to_outer_12", from: "left_bridge_top", to: "halo_n" },
-  { id: "left_to_outer_6", from: "left_b0", to: "halo_nw" },
-  { id: "left_to_outer_10", from: "left_c3", to: "halo_nw" },
+const AZIMUTHS = [
+  { key: "n", ux: 0, uy: -1 },
+  { key: "ne", ux: Math.SQRT1_2, uy: -Math.SQRT1_2 },
+  { key: "e", ux: 1, uy: 0 },
+  { key: "se", ux: Math.SQRT1_2, uy: Math.SQRT1_2 },
+  { key: "s", ux: 0, uy: 1 },
+  { key: "sw", ux: -Math.SQRT1_2, uy: Math.SQRT1_2 },
+  { key: "w", ux: -1, uy: 0 },
+  { key: "nw", ux: -Math.SQRT1_2, uy: -Math.SQRT1_2 },
+] as const;
 
-  { id: "right_a_chain_1", from: "right_a0", to: "right_a1" },
-  { id: "right_a_chain_2", from: "right_a1", to: "right_a2" },
-  { id: "right_a_chain_3", from: "right_a2", to: "right_a3" },
-  { id: "right_a_chain_4", from: "right_a3", to: "right_a4" },
-  { id: "right_a_chain_5", from: "right_a4", to: "right_a5" },
-  { id: "right_b_chain_1", from: "right_b0", to: "right_b1" },
-  { id: "right_b_chain_2", from: "right_b1", to: "right_b2" },
-  { id: "right_b_chain_3", from: "right_b2", to: "right_b3" },
-  { id: "right_b_chain_4", from: "right_b3", to: "right_b4" },
-  { id: "right_b_chain_5", from: "right_b4", to: "right_b5" },
-  { id: "right_c_chain_1", from: "right_c0", to: "right_c1" },
-  { id: "right_c_chain_2", from: "right_c1", to: "right_c2" },
-  { id: "right_c_chain_3", from: "right_c2", to: "right_c3" },
-  { id: "right_c_chain_4", from: "right_c3", to: "right_c4" },
-  { id: "right_c_chain_5", from: "right_c4", to: "right_c5" },
-  { id: "right_tri_1", from: "right_a0", to: "right_b0" },
-  { id: "right_tri_2", from: "right_a1", to: "right_b1" },
-  { id: "right_tri_3", from: "right_a2", to: "right_b2" },
-  { id: "right_tri_4", from: "right_a3", to: "right_b3" },
-  { id: "right_tri_5", from: "right_a4", to: "right_b4" },
-  { id: "right_tri_6", from: "right_a5", to: "right_b5" },
-  { id: "right_thick_1", from: "right_b0", to: "right_c0" },
-  { id: "right_thick_2", from: "right_b1", to: "right_c1" },
-  { id: "right_thick_3", from: "right_b2", to: "right_c2" },
-  { id: "right_thick_4", from: "right_b3", to: "right_c3" },
-  { id: "right_thick_5", from: "right_b4", to: "right_c4" },
-  { id: "right_thick_6", from: "right_b5", to: "right_c5" },
-  { id: "right_cross_1", from: "right_b0", to: "right_a1" },
-  { id: "right_cross_2", from: "right_b1", to: "right_a2" },
-  { id: "right_cross_3", from: "right_b2", to: "right_a3" },
-  { id: "right_cross_4", from: "right_b3", to: "right_a4" },
-  { id: "right_cross_5", from: "right_b4", to: "right_a5" },
-  { id: "right_cross_7", from: "right_c1", to: "right_b2" },
-  { id: "right_cross_8", from: "right_c2", to: "right_b3" },
-  { id: "right_cross_9", from: "right_c3", to: "right_b4" },
-  { id: "right_cross_10", from: "right_c4", to: "right_b5" },
-  { id: "right_attach_3", from: "right_attach_bottom", to: "right_b0" },
-  { id: "right_attach_4", from: "right_attach_bottom", to: "right_c0" },
-  { id: "right_to_outer_12", from: "right_bridge_top", to: "halo_ne" },
-  { id: "right_to_outer_13", from: "right_bridge_top", to: "halo_e" },
-  { id: "right_to_outer_14", from: "right_bridge_peak", to: "halo_ne" },
-  { id: "right_to_outer_15", from: "right_bridge_peak", to: "halo_n" },
-  { id: "right_bridge_chain_1", from: "right_bridge_top", to: "right_bridge_peak" },
+const CARDINAL_KEYS = new Set(["n", "e", "s", "w"]);
 
-  { id: "corridor_chain_1", from: "corridor_0", to: "corridor_1" },
-  { id: "corridor_chain_2", from: "corridor_1", to: "corridor_2" },
-  { id: "corridor_chain_3", from: "corridor_2", to: "corridor_3" },
-  { id: "corridor_chain_4", from: "corridor_3", to: "corridor_4" },
-  { id: "corridor_chain_5", from: "corridor_4", to: "corridor_5" },
-  { id: "corridor_chain_6", from: "corridor_5", to: "corridor_6" },
-  { id: "corridor_to_arm_1", from: "corridor_0", to: "right_c1" },
-  { id: "corridor_to_arm_2", from: "corridor_1", to: "right_c2" },
-  { id: "corridor_to_arm_3", from: "corridor_2", to: "right_c3" },
-  { id: "corridor_to_arm_4", from: "corridor_3", to: "right_b2" },
-  { id: "corridor_to_arm_5", from: "corridor_4", to: "right_b4" },
-  { id: "corridor_to_arm_6", from: "corridor_5", to: "right_a5" },
-  { id: "corridor_to_arm_7", from: "corridor_5", to: "right_c3" },
-  { id: "corridor_to_arm_8", from: "corridor_5", to: "right_b2" },
-];
+// Node pitch along each arm rail, and the gap between an arm's lanes.
+export const BLOG_DEFENSE_ARM_PITCH = 42;
+const ARM_PITCH = BLOG_DEFENSE_ARM_PITCH;
+const ARM_LANE_GAP = 36;
+
+// Shoulder wedge lanes. Lane "a" is the tangent rail; b and c start later and
+// end earlier in whole pitch steps so both staircase edges are straight lines
+// and the wedge melts into a single-file rail at step 6.
+const LANE_B = { lane: "b", count: 4, startStep: 2, role: "interior" as BlogDefenseNodeRole };
+const LANE_C = { lane: "c", count: 2, startStep: 3, role: "interior" as BlogDefenseNodeRole };
+const LEFT_RAIL_COUNT = 12;
+// The right rail hands off to the attack corridor, which continues the same
+// column at the same pitch — one unbroken line down the page margin.
+const RIGHT_RAIL_COUNT = 7;
+const CORRIDOR_COUNT = 5;
+const ARM_NODE_RADIUS = 6;
+const CORRIDOR_NODE_RADIUS = 7;
+
+const TAPER_RAIL_STEP = LANE_B.startStep + LANE_B.count; // 6
+
+function armLanes(railCount: number) {
+  return [
+    { lane: "a", count: railCount, startStep: 0, role: "perimeter" as BlogDefenseNodeRole },
+    LANE_B,
+    LANE_C,
+  ];
+}
+
+function buildTemplateNodes(): BlogDefenseNode[] {
+  const nodes: BlogDefenseNode[] = [
+    { id: BLOG_DEFENSE_CORE_NODE_ID, x: CENTER_X, y: CENTER_Y, radius: 12, role: "core", zone: "core" },
+  ];
+
+  for (const ring of RING_SPECS) {
+    for (const azimuth of AZIMUTHS) {
+      nodes.push({
+        id: `${ring.prefix}_${azimuth.key}`,
+        x: CENTER_X + azimuth.ux * ring.radius,
+        y: CENTER_Y + azimuth.uy * ring.radius,
+        radius: ring.nodeRadius,
+        role: ring.role,
+        zone: "core",
+      });
+    }
+  }
+
+  const leftRailY = CENTER_Y - HALO_RADIUS;
+  const leftOriginX = CENTER_X - ARM_PITCH;
+  for (let laneIndex = 0; laneIndex < armLanes(LEFT_RAIL_COUNT).length; laneIndex += 1) {
+    const { lane, count, startStep, role } = armLanes(LEFT_RAIL_COUNT)[laneIndex];
+    for (let index = 0; index < count; index += 1) {
+      nodes.push({
+        id: `left_${lane}${index}`,
+        x: leftOriginX - (startStep + index) * ARM_PITCH,
+        y: leftRailY + laneIndex * ARM_LANE_GAP,
+        radius: ARM_NODE_RADIUS,
+        role,
+        zone: "left_arm",
+      });
+    }
+  }
+
+  const rightRailX = CENTER_X + HALO_RADIUS;
+  const rightOriginY = CENTER_Y + ARM_PITCH;
+  for (let laneIndex = 0; laneIndex < armLanes(RIGHT_RAIL_COUNT).length; laneIndex += 1) {
+    const { lane, count, startStep, role } = armLanes(RIGHT_RAIL_COUNT)[laneIndex];
+    for (let index = 0; index < count; index += 1) {
+      nodes.push({
+        id: `right_${lane}${index}`,
+        x: rightRailX - laneIndex * ARM_LANE_GAP,
+        y: rightOriginY + (startStep + index) * ARM_PITCH,
+        radius: ARM_NODE_RADIUS,
+        role,
+        zone: "right_arm",
+      });
+    }
+  }
+
+  for (let index = 0; index < CORRIDOR_COUNT; index += 1) {
+    nodes.push({
+      id: `corridor_${index}`,
+      x: rightRailX,
+      y: rightOriginY + (RIGHT_RAIL_COUNT + index) * ARM_PITCH,
+      radius: CORRIDOR_NODE_RADIUS,
+      role: "attack",
+      zone: "right_corridor",
+      protectedIngress: true,
+    });
+  }
+
+  return nodes;
+}
+
+function buildTemplateEdges(): BlogDefenseEdge[] {
+  const edges: BlogDefenseEdge[] = [];
+  const push = (id: string, from: string, to: string) => {
+    edges.push({ id, from, to });
+  };
+
+  for (const ring of RING_SPECS) {
+    const octagonPrefix = ring.prefix === "mid" ? "mid_ring" : ring.prefix;
+    for (let index = 0; index < AZIMUTHS.length; index += 1) {
+      const from = AZIMUTHS[index].key;
+      const to = AZIMUTHS[(index + 1) % AZIMUTHS.length].key;
+      push(`${octagonPrefix}_${index + 1}`, `${ring.prefix}_${from}`, `${ring.prefix}_${to}`);
+    }
+  }
+
+  for (const azimuth of AZIMUTHS) {
+    push(`halo_to_outer_${azimuth.key}`, `halo_${azimuth.key}`, `outer_${azimuth.key}`);
+    push(`outer_to_ring_${azimuth.key}`, `outer_${azimuth.key}`, `ring_${azimuth.key}`);
+    push(`mid_to_outer_${azimuth.key}`, `mid_${azimuth.key}`, `ring_${azimuth.key}`);
+    if (CARDINAL_KEYS.has(azimuth.key)) {
+      push(`mid_spoke_${azimuth.key}`, `mid_${azimuth.key}`, BLOG_DEFENSE_CORE_NODE_ID);
+    }
+  }
+
+  for (const side of ["left", "right"] as const) {
+    const railCount = side === "left" ? LEFT_RAIL_COUNT : RIGHT_RAIL_COUNT;
+    for (const { lane, count } of armLanes(railCount)) {
+      for (let index = 0; index < count - 1; index += 1) {
+        push(`${side}_${lane}_chain_${index + 1}`, `${side}_${lane}${index}`, `${side}_${lane}${index + 1}`);
+      }
+    }
+
+    // Shoulder truss: a rung at every shared step plus diagonals that all lean
+    // toward the core, and one closing edge per taper step (the two closing
+    // edges are collinear, drawing the straight taper line into the rail).
+    for (let step = LANE_B.startStep; step < LANE_B.startStep + LANE_B.count; step += 1) {
+      push(`${side}_rung_ab_${step}`, `${side}_a${step}`, `${side}_b${step - LANE_B.startStep}`);
+    }
+    for (let step = LANE_C.startStep; step < LANE_C.startStep + LANE_C.count; step += 1) {
+      push(`${side}_rung_bc_${step}`, `${side}_b${step - LANE_B.startStep}`, `${side}_c${step - LANE_C.startStep}`);
+    }
+    for (let index = 0; index < LANE_B.count; index += 1) {
+      push(`${side}_diag_ab_${index}`, `${side}_b${index}`, `${side}_a${index + 1}`);
+    }
+    for (let index = 0; index < LANE_C.count; index += 1) {
+      push(`${side}_diag_bc_${index}`, `${side}_c${index}`, `${side}_b${index}`);
+    }
+    push(`${side}_taper_ab`, `${side}_b${LANE_B.count - 1}`, `${side}_a${TAPER_RAIL_STEP}`);
+    push(
+      `${side}_taper_bc`,
+      `${side}_c${LANE_C.count - 1}`,
+      `${side}_b${LANE_C.startStep + LANE_C.count - LANE_B.startStep}`,
+    );
+  }
+
+  // Static shoulder attachments splay each lane end into its own halo azimuth.
+  // The layout skips these ids and rebuilds equivalent attachments dynamically
+  // so arms can re-target surviving halo nodes after obstacle culling.
+  push("left_shoulder_a0", "left_a0", "halo_n");
+  push("left_shoulder_b0", "left_b0", "halo_nw");
+  push("left_shoulder_c0", "left_c0", "halo_w");
+  push("right_shoulder_a0", "right_a0", "halo_e");
+  push("right_shoulder_b0", "right_b0", "halo_se");
+  push("right_shoulder_c0", "right_c0", "halo_s");
+
+  push("corridor_link", `right_a${RIGHT_RAIL_COUNT - 1}`, "corridor_0");
+  for (let index = 0; index < CORRIDOR_COUNT - 1; index += 1) {
+    push(`corridor_chain_${index + 1}`, `corridor_${index}`, `corridor_${index + 1}`);
+  }
+
+  return edges;
+}
+
+export const BLOG_DEFENSE_NODES: BlogDefenseNode[] = buildTemplateNodes();
+
+export const BLOG_DEFENSE_EDGES: BlogDefenseEdge[] = buildTemplateEdges();
 
 export const BLOG_DEFENSE_COMPROMISE_PATH: string[] = [
-  "corridor_6",
-  "corridor_5",
   "corridor_4",
   "corridor_3",
+  "corridor_2",
+  "corridor_1",
+  "corridor_0",
+  "right_a6",
   "right_b3",
   "right_b2",
   "right_b1",
   "right_b0",
+  "halo_se",
+  "outer_se",
+  "ring_se",
   "ring_s",
   "mid_s",
   "core",

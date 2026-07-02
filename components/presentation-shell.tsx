@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
 import { getEditionSectionPath } from "../lib/edition-routes";
 import { buildPresentationFooterEntries, type PresentationFooterEntry } from "../lib/presentation-footer";
+import { createThreatIntelligenceRhythm } from "../lib/blog-rhythm";
 import { layoutAllTextLines, prepareWithSegments, type TextLine } from "../lib/pretext-layout";
 import { truncateWords } from "../lib/excerpts";
 import {
@@ -43,6 +44,7 @@ const BLOG_TEXT_STYLE = {
   linePaintHeight: 24,
   fontFamily: PRESENTATION_TEXT_FONT,
 };
+const BLOG_RHYTHM = createThreatIntelligenceRhythm();
 const MAGAZINE_TEXT_STYLE = {
   fontSize: 17,
   lineHeight: 25,
@@ -126,10 +128,11 @@ function BlogPresentation({
   const footerSubtitle = SITE_BRAND.id === "papyrus" ? (content.description?.trim() || "Inside Papyrus") : SITE_BRAND.mastheadSubtitle;
   const contentRef = useRef<HTMLDivElement | null>(null);
   const pageRef = useRef<HTMLElement | null>(null);
+  const headerObstacles = useBlogHeaderObstacles(pageRef);
   usePresentationTargetScroll(targetSection);
   return (
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog" ref={pageRef}>
-      <BlogPageBackground pageRef={pageRef} />
+      <BlogPageBackground headerObstacles={headerObstacles} pageRef={pageRef} rhythm={BLOG_RHYTHM} />
       <PresentationHeader content={content} />
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
       <div className="blog-sections" ref={contentRef}>
@@ -380,6 +383,79 @@ function MeasuredPresentationLines({ lines }: { lines: TextLine[] }) {
       ))}
     </div>
   );
+}
+
+type BlogHeaderObstacle = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHeaderObstacle[] {
+  const [obstacles, setObstacles] = useState<BlogHeaderObstacle[]>([]);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+
+    const update = () => {
+      const background = page.querySelector<HTMLElement>(".blog-page-background");
+      const backgroundRect = background?.getBoundingClientRect();
+      if (!backgroundRect) return;
+
+      const selectors = [
+        ".presentation-header__word",
+        ".presentation-header__meta",
+        ".presentation-header__subtitle",
+        ".presentation-header__date",
+        ".presentation-header__tagline",
+        ".presentation-section-nav a",
+      ];
+      const measureObstacleRect = (element: HTMLElement): DOMRect => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const contentRect = range.getBoundingClientRect();
+        range.detach();
+        if (contentRect.width > 0 && contentRect.height > 0) return contentRect;
+        return element.getBoundingClientRect();
+      };
+
+      const next: BlogHeaderObstacle[] = [];
+      for (const selector of selectors) {
+        const elements = Array.from(page.querySelectorAll<HTMLElement>(selector));
+        for (const element of elements) {
+          const rect = measureObstacleRect(element);
+          const intersectionTop = Math.max(rect.top, backgroundRect.top);
+          const intersectionBottom = Math.min(rect.bottom, backgroundRect.bottom);
+          const intersectionLeft = Math.max(rect.left, backgroundRect.left);
+          const intersectionRight = Math.min(rect.right, backgroundRect.right);
+          const width = intersectionRight - intersectionLeft;
+          const height = intersectionBottom - intersectionTop;
+          if (width <= 0 || height <= 0) continue;
+          next.push({
+            x: intersectionLeft - backgroundRect.left,
+            y: intersectionTop - backgroundRect.top,
+            width,
+            height: Math.max(BLOG_RHYTHM.rowHeight, Math.ceil(height / BLOG_RHYTHM.rowHeight) * BLOG_RHYTHM.rowHeight),
+          });
+        }
+      }
+      setObstacles(next);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(page);
+    window.addEventListener("resize", update);
+    void document.fonts?.ready.then(update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [pageRef]);
+
+  return obstacles;
 }
 
 function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {

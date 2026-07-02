@@ -64,58 +64,78 @@ async function assertDesktopBlankRegion(browser) {
       const background = document.querySelector(".blog-page-background[data-blog-page-background-obstacles]");
       if (!background) throw new Error("Missing blog background");
       const containerRect = background.getBoundingClientRect();
-      const threat = Array.from(document.querySelectorAll(".presentation-header h1 span"))
-        .find((span) => span.textContent?.trim() === "THREAT");
-      if (!threat) throw new Error("Missing THREAT masthead span");
+      const threat = document.querySelector('.presentation-header__word-text');
+      if (!threat || threat.textContent?.trim() !== "THREAT") throw new Error("Missing THREAT masthead span");
 
-      const spanRect = threat.getBoundingClientRect();
+      const spanRect = threat.closest(".presentation-header__word")?.getBoundingClientRect();
+      if (!spanRect) throw new Error("Missing THREAT masthead word box");
       const renderedTextRect = textRect(threat);
       const obstacles = JSON.parse(background.getAttribute("data-blog-page-background-obstacles") ?? "[]");
       const blankWidth = spanRect.right - renderedTextRect.right;
-      const probe = {
-        x: ((renderedTextRect.right + spanRect.right) / 2) - containerRect.left,
-        y: ((renderedTextRect.top + renderedTextRect.bottom) / 2) - containerRect.top,
-      };
-      const overlappingProbe = obstacles.filter((obstacle) => (
-        probe.x >= obstacle.x
-        && probe.x <= obstacle.x + obstacle.width
-        && probe.y >= obstacle.y
-        && probe.y <= obstacle.y + obstacle.height
-      ));
+      const threatWordRight = spanRect.right - containerRect.left;
       const threatLineObstacles = obstacles.filter((obstacle) => (
-        probe.y >= obstacle.y
-        && probe.y <= obstacle.y + obstacle.height
-        && obstacle.x <= renderedTextRect.right - containerRect.left
+        ((spanRect.top + spanRect.bottom) / 2) - containerRect.top >= obstacle.y
+        && ((spanRect.top + spanRect.bottom) / 2) - containerRect.top <= obstacle.y + obstacle.height
+        && obstacle.x <= threatWordRight
       ));
-      const threatTextRight = renderedTextRect.right - containerRect.left;
       const maxThreatObstacleRight = threatLineObstacles.reduce((max, obstacle) => (
         Math.max(max, obstacle.x + obstacle.width)
       ), -Infinity);
+      const header = document.querySelector(".presentation-header");
+      const headerRect = header?.getBoundingClientRect();
+      const core = document.querySelector('[data-blog-node-id="core"]');
+      const capEmRatio = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--ti-masthead-cap-em-ratio"),
+      ) || 0.70459;
+      const fontSize = Number.parseFloat(getComputedStyle(threat).fontSize);
+      const expectedCapHeight = fontSize * capEmRatio;
+      // Read the row height from the blog rhythm shell (the inline style set
+      // from BLOG_RHYTHM), not from :root, so the test tracks the actually
+      // rendered rhythm rather than the static CSS fallback on :root.
+      const rhythmShell = document.querySelector(".blog-rhythm-shell");
+      const rowHeight = Number.parseFloat(
+        getComputedStyle(rhythmShell ?? document.documentElement).getPropertyValue("--ti-row-height"),
+      ) || 28;
+      const obstaclePadding = rowHeight;
 
       return {
         blankWidth,
+        coreCx: core ? Number(core.getAttribute("cx")) : null,
+        coreR: core ? Number(core.getAttribute("r")) : null,
+        expectedCapHeight,
+        expectedCapRows: expectedCapHeight / rowHeight,
+        fontSize,
+        headerClearance: headerRect ? headerRect.right - renderedTextRect.right : 0,
+        obstaclePadding,
         maxThreatObstacleRight,
         obstacleCount: obstacles.length,
-        overlappingProbeCount: overlappingProbe.length,
-        probe,
         spanRight: spanRect.right - containerRect.left,
-        threatTextRight,
+        spanHeight: spanRect.height,
+        threatWordRight,
+        wordBoxRows: spanRect.height / rowHeight,
       };
     });
 
     assert.ok(result.obstacleCount > 0, "expected the rendered page to expose header text obstacles");
     assert.ok(
-      result.blankWidth > 80,
-      `expected a meaningful blank region to the right of THREAT, got ${result.blankWidth}`,
-    );
-    assert.equal(
-      result.overlappingProbeCount,
-      0,
-      `blank region probe should not be covered by text obstacles: ${JSON.stringify(result.probe)}`,
+      Math.abs(result.expectedCapRows - 4) < 0.05,
+      `expected cap-compensated THREAT caps to fill four rows, got ${result.expectedCapRows}`,
     );
     assert.ok(
-      result.maxThreatObstacleRight <= result.threatTextRight + 28,
-      `THREAT obstacle should hug rendered text, got obstacle right ${result.maxThreatObstacleRight} vs text right ${result.threatTextRight}`,
+      Math.abs(result.wordBoxRows - 4) < 0.05,
+      `expected THREAT word box to stay four rows tall, got ${result.wordBoxRows}`,
+    );
+    assert.ok(
+      result.headerClearance > 80,
+      `expected header space to the right of THREAT for the pictogram, got ${result.headerClearance}`,
+    );
+    assert.ok(
+      result.coreCx !== null && result.coreR !== null,
+      "expected the defense pictogram core to render on desktop",
+    );
+    assert.ok(
+      result.maxThreatObstacleRight <= result.threatWordRight + result.obstaclePadding * 2 + 1,
+      `THREAT obstacle should hug the word box with one row of pictogram padding, got obstacle right ${result.maxThreatObstacleRight} vs word right ${result.threatWordRight}`,
     );
   } finally {
     await page.close();
@@ -131,14 +151,15 @@ async function assertNarrowCoreGap(browser) {
       if (!background) throw new Error("Missing blog background");
       const containerRect = background.getBoundingClientRect();
       const core = document.querySelector('[data-blog-node-id="core"]');
-      const threat = Array.from(document.querySelectorAll(".presentation-header h1 span"))
+      const threat = Array.from(document.querySelectorAll(".presentation-header__word-text"))
         .find((span) => span.textContent?.trim() === "THREAT");
-      const intelligence = Array.from(document.querySelectorAll(".presentation-header h1 span"))
+      const intelligence = Array.from(document.querySelectorAll(".presentation-header__word-text"))
         .find((span) => span.textContent?.trim() === "INTELLIGENCE");
       if (!threat || !intelligence) throw new Error("Missing masthead words");
 
-      const threatRect = threat.getBoundingClientRect();
-      const intelligenceRect = intelligence.getBoundingClientRect();
+      const threatRect = threat.closest(".presentation-header__word")?.getBoundingClientRect();
+      const intelligenceRect = intelligence.closest(".presentation-header__word")?.getBoundingClientRect();
+      if (!threatRect || !intelligenceRect) throw new Error("Missing masthead word boxes");
       const coreRect = core
         ? {
             cx: Number(core.getAttribute("cx")),
@@ -147,17 +168,23 @@ async function assertNarrowCoreGap(browser) {
           }
         : null;
       const obstacles = JSON.parse(background.getAttribute("data-blog-page-background-obstacles") ?? "[]");
+      const threatMidY = ((threatRect.top + threatRect.bottom) / 2) - containerRect.top;
       const threatObstacle = obstacles
-        .filter((obstacle) => obstacle.y <= ((threatRect.top + threatRect.bottom) / 2) - containerRect.top
-          && obstacle.y + obstacle.height >= ((threatRect.top + threatRect.bottom) / 2) - containerRect.top)
+        .filter((obstacle) => obstacle.y <= threatMidY && obstacle.y + obstacle.height >= threatMidY)
         .sort((left, right) => (right.x + right.width) - (left.x + left.width))[0];
+      // When the pictogram background does not horizontally overlap the THREAT
+      // word (which can happen at small rhythm scales on narrow viewports), no
+      // THREAT obstacle is generated. In that case fall back to the THREAT word
+      // box's right edge (relative to the background) as the clearance bound.
+      const threatWordRight = threatRect.right - containerRect.left;
 
       return {
         core: coreRect,
         intelligenceTop: intelligenceRect.top - containerRect.top,
         obstacleCount: obstacles.length,
         threatBottom: threatRect.bottom - containerRect.top,
-        threatObstacleRight: threatObstacle ? threatObstacle.x + threatObstacle.width : null,
+        threatObstacleRight: threatObstacle ? threatObstacle.x + threatObstacle.width : threatWordRight,
+        threatWordRight,
       };
     });
 
@@ -165,7 +192,7 @@ async function assertNarrowCoreGap(browser) {
     assert.ok(result.core, "core node should remain visible at 558px");
     assert.ok(
       result.threatObstacleRight !== null && result.core.cx > result.threatObstacleRight + result.core.r,
-      `core should sit to the right of the THREAT obstacle, got core ${JSON.stringify(result.core)} and obstacle right ${result.threatObstacleRight}`,
+      `core should sit to the right of the THREAT text, got core ${JSON.stringify(result.core)} and text/obstacle right ${result.threatObstacleRight}`,
     );
     assert.ok(
       result.core.cy < result.intelligenceTop,

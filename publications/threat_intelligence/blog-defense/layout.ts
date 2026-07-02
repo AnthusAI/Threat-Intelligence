@@ -1,10 +1,15 @@
 import {
+  snapRhythmCoordinate,
+  type VerticalRhythm,
+} from "../../../lib/blog-rhythm";
+import {
+  BLOG_DEFENSE_ARM_PITCH,
   BLOG_DEFENSE_CORE_NODE_ID,
   BLOG_DEFENSE_EDGES,
   BLOG_DEFENSE_NODES,
+  BLOG_DEFENSE_RING_RADII,
   BLOG_DEFENSE_VIEWBOX_HEIGHT,
   BLOG_DEFENSE_VIEWBOX_WIDTH,
-  type BlogDefenseEdge,
   type BlogDefenseNode,
 } from "./graph";
 
@@ -20,8 +25,7 @@ export type LayoutDefenseGraphInput = {
   height: number;
   obstacles?: LayoutRect[];
   padX?: number;
-  padTop?: number;
-  padBottom?: number;
+  rhythm?: VerticalRhythm;
 };
 
 export type LayoutDefenseNode = BlogDefenseNode;
@@ -46,39 +50,21 @@ function uniformNodeRadius(scale: number): number {
   return Math.max(4.4, scale * 6);
 }
 
-const RIGHT_ARM_BASE_CANDIDATE_IDS = ["right_attach_bottom", "right_c0"] as const;
-const LEFT_ARM_ATTACH_CANDIDATE_IDS = [
-  "left_bridge_top",
-  "left_attach_top",
-  "left_attach_bottom",
-  "left_a0",
-  "left_b0",
-  "left_c0",
-] as const;
-const LEFT_ARM_CORE_TARGET_IDS = [
-  "halo_nw",
-  "halo_n",
-  "halo_w",
-] as const;
-const LEFT_ARM_ROW_NODE_IDS = [
-  ["left_tail_4", "left_tail_3", "left_tail_2", "left_tail_1", "left_tip", "left_a3", "left_a2", "left_a1", "left_a0", "left_bridge_top"],
-  ["left_b3", "left_b0", "left_attach_top"],
-  ["left_c3", "left_c0", "left_attach_bottom"],
-] as const;
-const RIGHT_ARM_CORE_TARGET_IDS = [
-  "halo_e",
-  "halo_se",
-  "halo_s",
-  "halo_sw",
-] as const;
-const RIGHT_ARM_ROW_NODE_IDS = [
-  ["right_c0", "right_b0", "right_a0"],
-  ["right_attach_bottom", "right_c1", "right_b1", "right_a1"],
-  ["right_c2", "right_b2", "right_a2"],
-  ["right_c3", "right_b3", "right_a3"],
-  ["right_c4", "right_b4", "right_a4"],
-  ["right_c5", "right_b5", "right_a5"],
-] as const;
+// The arm rails hug the page margins: the top and right edges use these tight
+// insets instead of the content-side padding, so the rails run as close to
+// the edge as they can without clipping node circles or edge strokes.
+const TOP_EDGE_INSET = 4;
+const RIGHT_EDGE_INSET = 3;
+const BOTTOM_EDGE_INSET = 2;
+
+// Static shoulder edges are skipped and rebuilt dynamically so the arms can
+// re-target surviving halo nodes after obstacle culling. When nothing is
+// culled the rebuilt edges match the static template exactly.
+const STATIC_SHOULDER_EDGE_PREFIXES = ["left_shoulder_", "right_shoulder_"] as const;
+const LEFT_ARM_ATTACH_SOURCE_IDS = ["left_a0", "left_b0", "left_c0"] as const;
+const LEFT_ARM_HALO_TARGET_IDS = ["halo_n", "halo_nw", "halo_w"] as const;
+const RIGHT_ARM_ATTACH_SOURCE_IDS = ["right_a0", "right_b0", "right_c0"] as const;
+const RIGHT_ARM_HALO_TARGET_IDS = ["halo_e", "halo_se", "halo_s", "halo_sw"] as const;
 
 function pointInRect(x: number, y: number, rect: LayoutRect, inflate = 0): boolean {
   return x >= rect.x - inflate
@@ -172,49 +158,59 @@ function nodeIntersectsObstacles(
   });
 }
 
-function coreAnchor(
-  width: number,
-  height: number,
-  padX: number,
-  scale: number,
-  coreNode: BlogDefenseNode,
-): { x: number; y: number } {
-  const coreZoneNodes = BLOG_DEFENSE_NODES.filter((node) => node.zone === "core");
-  const maxCoreDx = coreZoneNodes.reduce((maxDx, node) => Math.max(maxDx, node.x - coreNode.x), 0);
-  const rightAlignedX = width - padX - maxCoreDx * scale;
+function templateNodeById(id: string): BlogDefenseNode | undefined {
+  return BLOG_DEFENSE_NODES.find((node) => node.id === id);
+}
+
+type BoundsChecker = (x: number, y: number) => boolean;
+
+function makeBoundsChecker(input: {
+  width: number;
+  height: number;
+  padX: number;
+  nodeRadius: number;
+}): BoundsChecker {
+  const { width, height, padX, nodeRadius } = input;
+  return (x, y) => (
+    x > padX + nodeRadius
+    && x <= width - nodeRadius - RIGHT_EDGE_INSET + 0.5
+    && y >= TOP_EDGE_INSET + nodeRadius - 0.5
+    && y <= height - nodeRadius - BOTTOM_EDGE_INSET
+  );
+}
+
+function coreAnchor(input: {
+  width: number;
+  scale: number;
+  coreNode: BlogDefenseNode;
+  nodeRadius: number;
+}): { x: number; y: number } {
+  const { width, scale, coreNode, nodeRadius } = input;
+  // The right rail (the template's rightmost element) sits flush against the
+  // right edge inset, and the halo crown sits flush against the top inset —
+  // the arm rails share the halo's tangent lines, so both rails hug their
+  // page margins by construction.
+  const maxDx = BLOG_DEFENSE_NODES.reduce((max, node) => Math.max(max, node.x - coreNode.x), 0);
   return {
-    x: rightAlignedX,
-    y: Math.max(76, Math.min(height * 0.24, 208)),
+    x: width - nodeRadius - RIGHT_EDGE_INSET - maxDx * scale,
+    y: TOP_EDGE_INSET + nodeRadius + BLOG_DEFENSE_RING_RADII.halo * scale,
   };
 }
 
 function bestCoreAnchor(input: {
   width: number;
-  height: number;
-  padX: number;
-  padTop: number;
-  padBottom: number;
   scale: number;
   coreNode: BlogDefenseNode;
   nodeRadius: number;
   obstacles: LayoutRect[];
+  inBounds: BoundsChecker;
 }): { x: number; y: number } {
-  const {
-    width,
-    height,
-    padX,
-    padTop,
-    padBottom,
-    scale,
-    coreNode,
-    nodeRadius,
-    obstacles,
-  } = input;
-  const base = coreAnchor(width, height, padX, scale, coreNode);
+  const { width, scale, coreNode, nodeRadius, obstacles, inBounds } = input;
+  const base = coreAnchor({ width, scale, coreNode, nodeRadius });
   if (!obstacles.length) return base;
 
   const coreZoneNodes = BLOG_DEFENSE_NODES.filter((node) => node.zone === "core");
-  const maxAnchorX = width - padX - nodeRadius;
+  const maxAnchorX = width - nodeRadius - RIGHT_EDGE_INSET;
   const step = Math.max(4, Math.round(width * 0.012));
   let best = base;
   let bestScore = -Infinity;
@@ -224,11 +220,7 @@ function bestCoreAnchor(input: {
     for (const node of coreZoneNodes) {
       const candidateX = x + (node.x - coreNode.x) * scale;
       const candidateY = base.y + (node.y - coreNode.y) * scale;
-      const inBounds = candidateX > padX + nodeRadius
-        && candidateX < width - padX - nodeRadius
-        && candidateY > padTop + nodeRadius
-        && candidateY < height - padBottom - nodeRadius;
-      if (!inBounds) continue;
+      if (!inBounds(candidateX, candidateY)) continue;
       if (nodeIntersectsObstacles(candidateX, candidateY, nodeRadius + 2, obstacles)) continue;
       score += node.id === BLOG_DEFENSE_CORE_NODE_ID ? 100 : 1;
     }
@@ -244,55 +236,6 @@ function bestCoreAnchor(input: {
   return best;
 }
 
-function bestCorridorX(
-  width: number,
-  height: number,
-  padX: number,
-  padTop: number,
-  padBottom: number,
-  scale: number,
-  coreNode: BlogDefenseNode,
-  anchor: { x: number; y: number },
-  obstacles: LayoutRect[],
-): number {
-  const preferred = width - padX - Math.max(12, 22 * scale);
-  const minX = Math.max(padX + 10, preferred - Math.max(40, width * 0.13));
-  const maxX = preferred;
-  const step = Math.max(6, Math.round(width * 0.01));
-  let bestX = preferred;
-  let bestScore = -1;
-
-  for (let x = maxX; x >= minX; x -= step) {
-    let clearCount = 0;
-    for (const node of BLOG_DEFENSE_NODES) {
-      if (node.zone !== "right_corridor") continue;
-      const dy = node.y - coreNode.y;
-      const y = Math.min(
-        height - padBottom - node.radius * scale,
-        Math.max(padTop + node.radius * scale, anchor.y + dy * scale),
-      );
-      const blocked = obstacles.some((obstacle) => pointInRect(x, y, obstacle, node.radius * scale + 2));
-      if (!blocked) clearCount += 1;
-    }
-    if (clearCount > bestScore || (clearCount === bestScore && x > bestX)) {
-      bestScore = clearCount;
-      bestX = x;
-    }
-  }
-
-  return bestX;
-}
-
-function templateNodeById(id: string): BlogDefenseNode | undefined {
-  return BLOG_DEFENSE_NODES.find((node) => node.id === id);
-}
-
-function normalizeAngle(angle: number): number {
-  while (angle > Math.PI) angle -= Math.PI * 2;
-  while (angle < -Math.PI) angle += Math.PI * 2;
-  return angle;
-}
-
 function buildEdgeRecord(from: LayoutDefenseNode, to: LayoutDefenseNode, id: string): LayoutDefenseEdge {
   return {
     id,
@@ -305,388 +248,47 @@ function buildEdgeRecord(from: LayoutDefenseNode, to: LayoutDefenseNode, id: str
   };
 }
 
-function keepNodeOutsideCoreEnvelope(input: {
-  nextX: number;
-  nextY: number;
-  node: LayoutDefenseNode;
-  coreCenter?: LayoutDefenseNode;
-  outerCoreRadius: number;
-  preferredHorizontalDirection: -1 | 1;
-}): { x: number; y: number } {
-  const {
-    nextX,
-    nextY,
-    node,
-    coreCenter,
-    outerCoreRadius,
-    preferredHorizontalDirection,
-  } = input;
-  if (!coreCenter) {
-    return { x: nextX, y: nextY };
-  }
-
-  const clearance = Math.max(4, node.radius * 0.5);
-  const minDistanceFromCore = outerCoreRadius + node.radius + clearance;
-  const dx = nextX - coreCenter.x;
-  const dy = nextY - coreCenter.y;
-  const distance = Math.hypot(dx, dy);
-  if (distance >= minDistanceFromCore) {
-    return { x: nextX, y: nextY };
-  }
-
-  const verticalDistance = Math.abs(dy);
-  if (verticalDistance < minDistanceFromCore) {
-    const horizontalDistance = Math.sqrt((minDistanceFromCore ** 2) - (verticalDistance ** 2));
-    return {
-      x: coreCenter.x + preferredHorizontalDirection * horizontalDistance,
-      y: nextY,
-    };
-  }
-
-  const ux = distance > 0.0001 ? dx / distance : preferredHorizontalDirection;
-  const uy = distance > 0.0001 ? dy / distance : 0;
-  return {
-    x: coreCenter.x + ux * minDistanceFromCore,
-    y: coreCenter.y + uy * minDistanceFromCore,
-  };
-}
-
-function leftArmIrregularityOffset(nodeId: string, rowIndex: number, scale: number): number {
-  if (rowIndex === 0) {
-    const offsets: Record<string, number> = {
-      left_tail_4: -24,
-      left_tail_3: -18,
-      left_tail_2: -12,
-      left_tail_1: -7,
-      left_tip: -2,
-      left_a3: 1,
-      left_a2: 2,
-      left_a1: 5,
-      left_a0: 1,
-      left_bridge_top: 14,
-    };
-    return (offsets[nodeId] ?? 0) * scale;
-  }
-
-  if (rowIndex === 1) {
-    const offsets: Record<string, number> = {
-      left_b3: -10,
-      left_b0: -4,
-      left_attach_top: 12,
-    };
-    return (offsets[nodeId] ?? 0) * scale;
-  }
-
-  const offsets: Record<string, number> = {
-    left_c3: -7,
-    left_c0: -3,
-    left_attach_bottom: 11,
-  };
-  return (offsets[nodeId] ?? 0) * scale;
-}
-
-function layoutLeftArmRows(input: {
-  coreNodes: LayoutDefenseNode[];
-  leftArmNodes: LayoutDefenseNode[];
+function buildArmAttachmentEdges(input: {
+  side: "left" | "right";
+  sourceIds: readonly string[];
+  targetIds: readonly string[];
   positionedNodes: Map<string, LayoutDefenseNode>;
-  padX: number;
-  padTop: number;
-  scale: number;
-  coreCenter?: LayoutDefenseNode;
-}): void {
-  const {
-    coreNodes,
-    leftArmNodes,
-    positionedNodes,
-    padX,
-    padTop,
-    scale,
-    coreCenter,
-  } = input;
-
-  if (!leftArmNodes.length) return;
-
-  const coreLeftEdge = coreNodes.reduce((min, node) => Math.min(min, node.x - node.radius), Infinity);
-  const coreTopY = coreNodes.reduce((min, node) => Math.min(min, node.y), Infinity);
-  const outerCoreRadius = coreCenter
-    ? coreNodes.reduce((maxRadius, node) => (
-      Math.max(maxRadius, Math.hypot(node.x - coreCenter.x, node.y - coreCenter.y) + node.radius)
-    ), 0)
-    : 0;
-
-  const visibleRows = LEFT_ARM_ROW_NODE_IDS
-    .map((rowIds, templateIndex) => ({
-      templateIndex,
-      nodes: rowIds
-        .map((id) => positionedNodes.get(id))
-        .filter((node): node is LayoutDefenseNode => Boolean(node)),
-      fullIds: [...rowIds] as string[],
-    }))
-    .filter((row) => row.nodes.length > 0);
-  if (!visibleRows.length) return;
-
-  const topRow = visibleRows[0];
-  const topRightNode = topRow.nodes
-    .slice()
-    .sort((left, right) => right.x - left.x)[0];
-  const topRowY = Math.max(padTop + (topRightNode?.radius ?? 0), coreTopY);
-  const rowGap = Math.max(20 * scale, Math.min(34 * scale, outerCoreRadius * 0.32));
-  const topRowLeft = topRow.nodes.reduce((min, node) => Math.min(min, node.x), Infinity) - (62 * scale);
-  const topRowRight = topRightNode?.x ?? coreLeftEdge - (10 * scale);
-  const topRowWidth = Math.max(12 * scale, topRowRight - topRowLeft);
-
-  for (let visibleIndex = 0; visibleIndex < visibleRows.length; visibleIndex += 1) {
-    const row = visibleRows[visibleIndex];
-    const rowY = topRowY + rowGap * visibleIndex;
-    const slotCount = row.fullIds.length;
-    const rawRowLeft = row.nodes.reduce((min, node) => Math.min(min, node.x), Infinity);
-    const rawRowRight = row.nodes.reduce((max, node) => Math.max(max, node.x), -Infinity);
-    const rawRowWidth = Math.max(1, rawRowRight - rawRowLeft);
-    const rowRightNode = row.nodes
-      .slice()
-      .sort((left, right) => right.x - left.x)[0];
-    const rowRightCenter = visibleIndex === 0
-      ? topRowRight
-      : Math.min(
-        rowRightNode?.x ?? (coreLeftEdge - (10 * scale)),
-        coreLeftEdge - Math.max(8 * scale, (rowRightNode?.radius ?? 0) + (4 * scale)),
-      );
-    const taperInset = visibleIndex === 0 ? 0 : topRowWidth * (0.16 + (visibleIndex - 1) * 0.07);
-    const currentRowLeft = rawRowLeft;
-    const monotonicLeft = topRowLeft + taperInset;
-    const rowLeftCenter = Math.min(
-      rowRightCenter - Math.max(10 * scale, row.nodes[0]?.radius ?? 0),
-      Math.max(
-        padX + (row.nodes[0]?.radius ?? 0),
-        visibleIndex === 0
-          ? Math.min(currentRowLeft - (10 * scale), monotonicLeft)
-          : Math.max(currentRowLeft - (4 * scale), monotonicLeft),
-      ),
-    );
-    const rowSpan = Math.max(1, rowRightCenter - rowLeftCenter);
-    const templateBlend = visibleIndex === 0 ? 0.76 : visibleIndex === 1 ? 0.56 : 0.42;
-
-    for (const node of row.nodes) {
-      const slotIndex = row.fullIds.indexOf(node.id);
-      if (slotIndex < 0) continue;
-      const slotProgress = slotCount === 1 ? 1 : slotIndex / (slotCount - 1);
-      const rawProgress = rawRowWidth <= 1 ? slotProgress : (node.x - rawRowLeft) / rawRowWidth;
-      let blendedProgress = (slotProgress * (1 - templateBlend)) + (rawProgress * templateBlend);
-      if (visibleIndex === 0) {
-        if (slotProgress <= 0.45) blendedProgress -= 0.03;
-        if (slotProgress >= 0.82) blendedProgress += 0.015;
-      } else if (visibleIndex === 1) {
-        if (slotProgress <= 0.3) blendedProgress -= 0.02;
-        if (slotProgress >= 0.72) blendedProgress += 0.02;
-      } else {
-        if (slotProgress <= 0.35) blendedProgress -= 0.015;
-      }
-      blendedProgress = Math.max(0, Math.min(1, blendedProgress));
-      let nextX = rowLeftCenter + rowSpan * blendedProgress + leftArmIrregularityOffset(node.id, visibleIndex, scale);
-      let nextY = rowY;
-
-      const outsideCore = keepNodeOutsideCoreEnvelope({
-        nextX,
-        nextY,
-        node,
-        coreCenter,
-        outerCoreRadius,
-        preferredHorizontalDirection: -1,
-      });
-      nextX = outsideCore.x;
-      nextY = outsideCore.y;
-
-      positionedNodes.set(node.id, {
-        ...node,
-        x: Math.max(padX + node.radius, nextX),
-        y: Math.max(padTop + node.radius, nextY),
-      });
-    }
-  }
-}
-
-function layoutRightArmRows(input: {
-  coreNodes: LayoutDefenseNode[];
-  rightArmNodes: LayoutDefenseNode[];
-  positionedNodes: Map<string, LayoutDefenseNode>;
-  padX: number;
-  padTop: number;
-  padBottom: number;
-  height: number;
-  scale: number;
-  coreCenter?: LayoutDefenseNode;
-}): void {
-  const {
-    coreNodes,
-    rightArmNodes,
-    positionedNodes,
-    padX,
-    padTop,
-    padBottom,
-    height,
-    scale,
-    coreCenter,
-  } = input;
-  const drawableNodes = rightArmNodes.filter((node) => !node.id.startsWith("right_bridge_"));
-  if (!drawableNodes.length) return;
-
-  const coreRightEdge = coreNodes.reduce((max, node) => Math.max(max, node.x + node.radius), -Infinity);
-  const coreLeftEdge = coreNodes.reduce((min, node) => Math.min(min, node.x - node.radius), Infinity);
-  const baseEnvelopeWidth = Math.max(16, (coreRightEdge - coreLeftEdge) * 0.82);
-  const outerCoreRadius = coreCenter
-    ? coreNodes.reduce((maxRadius, node) => (
-      Math.max(maxRadius, Math.hypot(node.x - coreCenter.x, node.y - coreCenter.y) + node.radius)
-    ), 0)
-    : 0;
-  const minRadius = drawableNodes.reduce((min, node) => Math.min(min, node.radius), Infinity);
-  const tailWidthTarget = Math.max(2.2 * scale, minRadius * 2);
-
-  const visibleRows = RIGHT_ARM_ROW_NODE_IDS
-    .map((rowIds, templateIndex) => ({
-      templateIndex,
-      nodes: rowIds
-        .map((id) => positionedNodes.get(id))
-        .filter((node): node is LayoutDefenseNode => Boolean(node)),
-      fullIds: [...rowIds] as string[],
-    }))
-    .filter((row) => row.nodes.length > 0);
-  if (!visibleRows.length) return;
-
-  const topY = visibleRows.reduce((min, row) => Math.min(min, ...row.nodes.map((node) => node.y)), Infinity);
-  const bottomY = visibleRows.reduce((max, row) => Math.max(max, ...row.nodes.map((node) => node.y)), -Infinity);
-  const rowSpan = Math.max(1, bottomY - topY);
-  const rowGap = visibleRows.length === 1 ? 0 : rowSpan / (visibleRows.length - 1);
-  const rowTilt = Math.min(Math.max(10 * scale, rowGap * 0.44), 24 * scale);
-
-  for (let visibleIndex = 0; visibleIndex < visibleRows.length; visibleIndex += 1) {
-    const row = visibleRows[visibleIndex];
-    const rowProgress = visibleRows.length === 1 ? 0 : visibleIndex / (visibleRows.length - 1);
-    const rowWidth = baseEnvelopeWidth - (baseEnvelopeWidth - tailWidthTarget) * rowProgress;
-    const rowY = topY + rowSpan * rowProgress;
-    const slotCount = row.fullIds.length;
-
-    for (const node of row.nodes) {
-      const slotIndex = row.fullIds.indexOf(node.id);
-      if (slotIndex < 0) continue;
-      const slotProgress = slotCount === 1 ? 1 : slotIndex / (slotCount - 1);
-      const rowRightCenter = coreRightEdge - node.radius;
-      const rowLeftCenter = Math.max(padX + node.radius, rowRightCenter - rowWidth);
-      let nextX = rowLeftCenter + (rowRightCenter - rowLeftCenter) * slotProgress;
-      const slotOffset = slotCount === 1 ? 0 : ((slotProgress - 0.5) * rowTilt);
-      let nextY = rowY + slotOffset;
-
-      if (node.id === "right_c0") {
-        nextX += 112 * scale;
-        nextY += 118 * scale;
-      }
-
-      if (coreCenter) {
-        const clearance = Math.max(4 * scale, 3);
-        const minDistanceFromCore = outerCoreRadius + node.radius + clearance;
-        const dx = nextX - coreCenter.x;
-        const dy = nextY - coreCenter.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance < minDistanceFromCore) {
-          const verticalDistance = Math.abs(dy);
-          if (verticalDistance < minDistanceFromCore) {
-            const horizontalDistance = Math.sqrt((minDistanceFromCore ** 2) - (verticalDistance ** 2));
-            const direction = dx <= 0 ? -1 : 1;
-            nextX = coreCenter.x + direction * horizontalDistance;
-          } else {
-            const ux = distance > 0.0001 ? dx / distance : 1;
-            const uy = distance > 0.0001 ? dy / distance : 0;
-            nextX = coreCenter.x + ux * minDistanceFromCore;
-            nextY = coreCenter.y + uy * minDistanceFromCore;
-          }
-        }
-      }
-
-      nextX = Math.min(Math.max(nextX, padX + node.radius), coreRightEdge - node.radius);
-      nextY = Math.min(height - padBottom - node.radius, Math.max(padTop + node.radius, nextY));
-      positionedNodes.set(node.id, {
-        ...node,
-        x: nextX,
-        y: nextY,
-      });
-    }
-  }
-
-  for (const node of rightArmNodes.filter((candidate) => candidate.id.startsWith("right_bridge_"))) {
-    positionedNodes.set(node.id, {
-      ...node,
-      x: Math.min(node.x, coreRightEdge - node.radius),
-    });
-  }
-}
-
-type BuildRightArmAttachmentEdgesInput = {
-  positionedNodes: Map<string, LayoutDefenseNode>;
-  coreCenter: LayoutDefenseNode;
   obstacles: LayoutRect[];
   usedEdgeIds: Set<string>;
-};
-
-function buildRightArmAttachmentEdges(input: BuildRightArmAttachmentEdgesInput): LayoutDefenseEdge[] {
-  const { positionedNodes, coreCenter, obstacles, usedEdgeIds } = input;
-  const candidateNodes = RIGHT_ARM_BASE_CANDIDATE_IDS
+}): LayoutDefenseEdge[] {
+  const { side, sourceIds, targetIds, positionedNodes, obstacles, usedEdgeIds } = input;
+  const targets = targetIds
     .map((id) => positionedNodes.get(id))
     .filter((node): node is LayoutDefenseNode => Boolean(node));
-  const preferredExtraCandidateIds = RIGHT_ARM_ROW_NODE_IDS[1]
-    .filter((id) => id !== "right_attach_bottom");
-  const extraCandidate = preferredExtraCandidateIds
-    .map((id) => positionedNodes.get(id))
-    .filter((node): node is LayoutDefenseNode => Boolean(node))
-    .sort((a, b) => b.x - a.x || a.y - b.y)[0]
-    ?? Array.from(positionedNodes.values())
-      .filter((node) => (
-        node.zone === "right_arm"
-        && !RIGHT_ARM_BASE_CANDIDATE_IDS.includes(node.id as (typeof RIGHT_ARM_BASE_CANDIDATE_IDS)[number])
-        && !node.id.startsWith("right_bridge_")
-      ))
-      .sort((a, b) => a.y - b.y || b.x - a.x)[0];
-  if (extraCandidate) {
-    candidateNodes.push(extraCandidate);
-  }
-
-  const targets = RIGHT_ARM_CORE_TARGET_IDS
-    .map((id) => positionedNodes.get(id))
-    .filter((node): node is LayoutDefenseNode => Boolean(node));
-  if (!candidateNodes.length || !targets.length) {
-    return [];
-  }
+  if (!targets.length) return [];
 
   const usedTargetIds = new Set<string>();
   const attachmentEdges: LayoutDefenseEdge[] = [];
-  const orderedCandidates = candidateNodes
-    .slice()
-    .sort((a, b) => a.x - b.x || a.y - b.y);
 
-  for (const candidate of orderedCandidates) {
-    const candidateAngle = Math.atan2(candidate.y - coreCenter.y, candidate.x - coreCenter.x);
-    const bestTarget = targets
-      .filter((target) => candidate.id === "right_c0" || !usedTargetIds.has(target.id))
-      .filter((target) => !edgeIntersectsObstacles(candidate.x, candidate.y, target.x, target.y, obstacles))
+  for (const sourceId of sourceIds) {
+    const source = positionedNodes.get(sourceId);
+    if (!source) continue;
+    const reachable = targets.filter((target) => (
+      !edgeIntersectsObstacles(source.x, source.y, target.x, target.y, obstacles)
+    ));
+    if (!reachable.length) continue;
+    const preferred = reachable.filter((target) => !usedTargetIds.has(target.id));
+    const pool = preferred.length ? preferred : reachable;
+    const bestTarget = pool
+      .slice()
       .sort((left, right) => {
-        const leftDistance = Math.hypot(candidate.x - left.x, candidate.y - left.y);
-        const rightDistance = Math.hypot(candidate.x - right.x, candidate.y - right.y);
+        const leftDistance = Math.hypot(source.x - left.x, source.y - left.y);
+        const rightDistance = Math.hypot(source.x - right.x, source.y - right.y);
         if (Math.abs(leftDistance - rightDistance) > 0.001) {
           return leftDistance - rightDistance;
         }
-
-        const leftAngleDelta = Math.abs(normalizeAngle(candidateAngle - Math.atan2(left.y - coreCenter.y, left.x - coreCenter.x)));
-        const rightAngleDelta = Math.abs(normalizeAngle(candidateAngle - Math.atan2(right.y - coreCenter.y, right.x - coreCenter.x)));
-        if (Math.abs(leftAngleDelta - rightAngleDelta) > 0.001) {
-          return leftAngleDelta - rightAngleDelta;
-        }
-
-        return left.x - right.x;
+        return targetIds.indexOf(left.id) - targetIds.indexOf(right.id);
       })[0];
-
     if (!bestTarget) continue;
 
-    const edgeId = `right_dynamic_attach_${candidate.id}_${bestTarget.id}`;
+    const edgeId = `${side}_dynamic_attach_${sourceId}_${bestTarget.id}`;
     if (usedEdgeIds.has(edgeId)) continue;
-    attachmentEdges.push(buildEdgeRecord(candidate, bestTarget, edgeId));
+    attachmentEdges.push(buildEdgeRecord(source, bestTarget, edgeId));
     usedEdgeIds.add(edgeId);
     usedTargetIds.add(bestTarget.id);
   }
@@ -694,91 +296,61 @@ function buildRightArmAttachmentEdges(input: BuildRightArmAttachmentEdgesInput):
   return attachmentEdges;
 }
 
-type BuildLeftArmAttachmentEdgesInput = {
+// Extend a margin rail one pitch at a time until it reaches the container
+// boundary or an obstacle, so the single-file line runs the full margin
+// regardless of container proportions.
+function extendMarginRail(input: {
+  seed: LayoutDefenseNode;
+  stepX: number;
+  stepY: number;
+  withinBounds: (x: number, y: number) => boolean;
+  makeNode: (index: number, x: number, y: number) => LayoutDefenseNode;
+  idPrefix: string;
   positionedNodes: Map<string, LayoutDefenseNode>;
-  coreCenter: LayoutDefenseNode;
-  obstacles: LayoutRect[];
+  edges: LayoutDefenseEdge[];
   usedEdgeIds: Set<string>;
-  scale: number;
-};
-
-function buildLeftArmAttachmentEdges(input: BuildLeftArmAttachmentEdgesInput): LayoutDefenseEdge[] {
+  obstacles: LayoutRect[];
+}): void {
   const {
+    seed,
+    stepX,
+    stepY,
+    withinBounds,
+    makeNode,
+    idPrefix,
     positionedNodes,
-    coreCenter,
-    obstacles,
+    edges,
     usedEdgeIds,
-    scale,
+    obstacles,
   } = input;
-  const candidateNodes = LEFT_ARM_ATTACH_CANDIDATE_IDS
-    .map((id) => positionedNodes.get(id))
-    .filter((node): node is LayoutDefenseNode => Boolean(node))
-    .sort((a, b) => {
-      const priority = ["left_a0", "left_b0", "left_c0", "left_attach_top", "left_attach_bottom", "left_bridge_top"];
-      const aIndex = priority.indexOf(a.id);
-      const bIndex = priority.indexOf(b.id);
-      if (aIndex !== bIndex) return aIndex - bIndex;
-      return a.y - b.y || b.x - a.x;
-    });
-  const targets = LEFT_ARM_CORE_TARGET_IDS
-    .map((id) => positionedNodes.get(id))
-    .filter((node): node is LayoutDefenseNode => Boolean(node));
-  if (!candidateNodes.length || !targets.length) {
-    return [];
-  }
-
-  const usedTargetIds = new Set<string>();
-  const attachmentEdges: LayoutDefenseEdge[] = [];
-
-  for (const candidate of candidateNodes) {
-    const targetPool = targets.filter((target) => !edgeIntersectsObstacles(candidate.x, candidate.y, target.x, target.y, obstacles));
-    if (!targetPool.length) continue;
-    const preferredTargets = targetPool.filter((target) => !usedTargetIds.has(target.id));
-    const shouldIgnoreDedupe = candidate.id === "left_a0" || candidate.id === "left_b0" || candidate.id === "left_c0";
-    const availableTargets = shouldIgnoreDedupe || !preferredTargets.length ? targetPool : preferredTargets;
-    const verticalBias = candidate.y <= coreCenter.y - (16 * scale)
-      ? ["halo_n", "halo_nw", "halo_w"]
-      : candidate.y >= coreCenter.y + (16 * scale)
-        ? ["halo_w", "halo_nw", "halo_n"]
-        : ["halo_nw", "halo_w", "halo_n"];
-
-    const bestTarget = availableTargets
-      .slice()
-      .sort((left, right) => {
-        const leftDistance = Math.hypot(candidate.x - left.x, candidate.y - left.y);
-        const rightDistance = Math.hypot(candidate.x - right.x, candidate.y - right.y);
-        if (Math.abs(leftDistance - rightDistance) > 0.001) {
-          return leftDistance - rightDistance;
-        }
-
-        const leftPreference = verticalBias.indexOf(left.id);
-        const rightPreference = verticalBias.indexOf(right.id);
-        if (leftPreference !== rightPreference) {
-          return leftPreference - rightPreference;
-        }
-
-        return right.x - left.x;
-      })[0];
-
-    if (!bestTarget) continue;
-
-    const edgeId = `left_dynamic_attach_${candidate.id}_${bestTarget.id}`;
-    if (usedEdgeIds.has(edgeId)) continue;
-    attachmentEdges.push(buildEdgeRecord(candidate, bestTarget, edgeId));
+  let previous = seed;
+  for (let index = 0; ; index += 1) {
+    const x = previous.x + stepX;
+    const y = previous.y + stepY;
+    if (!withinBounds(x, y)) break;
+    if (nodeIntersectsObstacles(x, y, seed.radius + 2, obstacles)) break;
+    if (edgeIntersectsObstacles(previous.x, previous.y, x, y, obstacles)) break;
+    const node = makeNode(index, x, y);
+    positionedNodes.set(node.id, node);
+    const edgeId = `${idPrefix}_chain_${index}`;
+    edges.push(buildEdgeRecord(previous, node, edgeId));
     usedEdgeIds.add(edgeId);
-    usedTargetIds.add(bestTarget.id);
+    previous = node;
   }
-
-  return attachmentEdges;
 }
 
 export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefenseGraphResult {
   const width = Math.max(1, input.width);
   const height = Math.max(1, input.height);
-  const padX = input.padX ?? 18;
-  const padTop = input.padTop ?? 8;
-  const padBottom = input.padBottom ?? 12;
-  const obstacles = input.obstacles ?? [];
+  const rhythm = input.rhythm;
+  const snap = (value: number) => (rhythm ? snapRhythmCoordinate(value, rhythm) : value);
+  const padX = snap(input.padX ?? (rhythm ? rhythm.rowHeight * 2 : 18));
+  const obstacles = (input.obstacles ?? []).map((obstacle) => ({
+    x: snap(obstacle.x),
+    y: snap(obstacle.y),
+    width: snap(obstacle.width),
+    height: snap(obstacle.height),
+  }));
   const core = templateNodeById(BLOG_DEFENSE_CORE_NODE_ID) ?? BLOG_DEFENSE_NODES[0];
   const baseScale = Math.min(width / BLOG_DEFENSE_VIEWBOX_WIDTH, height / BLOG_DEFENSE_VIEWBOX_HEIGHT);
   const scaleBoost = width >= 720
@@ -788,114 +360,70 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
       : 1.02;
   const scale = Math.max(0.48, Math.min(1.18, baseScale * scaleBoost));
   const nodeRadius = uniformNodeRadius(scale);
+  const pitch = BLOG_DEFENSE_ARM_PITCH * scale;
+  const inBounds = makeBoundsChecker({ width, height, padX, nodeRadius });
   const anchor = bestCoreAnchor({
     width,
-    height,
-    padX,
-    padTop,
-    padBottom,
     scale,
     coreNode: core,
     nodeRadius,
     obstacles,
+    inBounds,
   });
-  const corridorX = bestCorridorX(width, height, padX, padTop, padBottom, scale, core, anchor, obstacles);
 
+  // The template is already a finished geometric construction, so layout is a
+  // uniform scale-and-anchor: no per-node reshaping, only culling of nodes
+  // that fall outside the margins or under an obstacle.
   const positionedNodes = new Map<string, LayoutDefenseNode>();
   for (const node of BLOG_DEFENSE_NODES) {
-    const dx = node.x - core.x;
-    const dy = node.y - core.y;
-    let x = anchor.x + dx * scale;
-    let y = anchor.y + dy * scale;
-    const radius = nodeRadius;
+    const x = anchor.x + (node.x - core.x) * scale;
+    const y = anchor.y + (node.y - core.y) * scale;
 
-    if (node.zone === "right_corridor") {
-      x = corridorX;
-      y = Math.min(height - padBottom - radius, Math.max(padTop + radius, y));
-    }
-
-    const inBounds = x > padX + radius
-      && x < width - padX - radius
-      && y > padTop + radius
-      && y < height - padBottom - radius;
-    if (!inBounds) continue;
+    if (!inBounds(x, y)) continue;
+    if (nodeIntersectsObstacles(x, y, nodeRadius + 2, obstacles)) continue;
 
     positionedNodes.set(node.id, {
       ...node,
       x,
       y,
-      radius,
+      radius: nodeRadius,
     });
   }
 
-  const coreNodes = Array.from(positionedNodes.values()).filter((node) => node.zone === "core");
-  const leftArmNodes = Array.from(positionedNodes.values()).filter((node) => node.zone === "left_arm");
-  const rightArmNodes = Array.from(positionedNodes.values()).filter((node) => node.zone === "right_arm");
-  if (coreNodes.length && leftArmNodes.length) {
-    layoutLeftArmRows({
-      coreNodes,
-      leftArmNodes,
-      positionedNodes,
-      padX,
-      padTop,
-      scale,
-      coreCenter: positionedNodes.get(BLOG_DEFENSE_CORE_NODE_ID),
-    });
-  }
-  if (coreNodes.length && rightArmNodes.length) {
-    layoutRightArmRows({
-      coreNodes,
-      rightArmNodes,
-      positionedNodes,
-      padX,
-      padTop,
-      padBottom,
-      height,
-      scale,
-      coreCenter: positionedNodes.get(BLOG_DEFENSE_CORE_NODE_ID),
-    });
-  }
-
-  for (const [nodeId, node] of positionedNodes.entries()) {
-    if (nodeIntersectsObstacles(node.x, node.y, node.radius + 2, obstacles)) {
-      positionedNodes.delete(nodeId);
-    }
-  }
-
-  const phaseAEdges: LayoutDefenseEdge[] = [];
+  const edges: LayoutDefenseEdge[] = [];
   const usedEdgeIds = new Set<string>();
   for (const edge of BLOG_DEFENSE_EDGES) {
-    if (edge.id.startsWith("left_to_outer_")) continue;
+    if (STATIC_SHOULDER_EDGE_PREFIXES.some((prefix) => edge.id.startsWith(prefix))) continue;
     const from = positionedNodes.get(edge.from);
     const to = positionedNodes.get(edge.to);
     if (!from || !to) continue;
     if (edgeIntersectsObstacles(from.x, from.y, to.x, to.y, obstacles)) continue;
-    phaseAEdges.push(buildEdgeRecord(from, to, edge.id));
+    edges.push(buildEdgeRecord(from, to, edge.id));
     usedEdgeIds.add(edge.id);
   }
 
-  const coreCenter = positionedNodes.get(BLOG_DEFENSE_CORE_NODE_ID);
-  if (coreCenter) {
-    phaseAEdges.push(...buildLeftArmAttachmentEdges({
-      positionedNodes,
-      coreCenter,
-      obstacles,
-      usedEdgeIds,
-      scale,
-    }));
-    phaseAEdges.push(...buildRightArmAttachmentEdges({
-      positionedNodes,
-      coreCenter,
-      obstacles,
-      usedEdgeIds,
-    }));
-  }
+  edges.push(...buildArmAttachmentEdges({
+    side: "left",
+    sourceIds: LEFT_ARM_ATTACH_SOURCE_IDS,
+    targetIds: LEFT_ARM_HALO_TARGET_IDS,
+    positionedNodes,
+    obstacles,
+    usedEdgeIds,
+  }));
+  edges.push(...buildArmAttachmentEdges({
+    side: "right",
+    sourceIds: RIGHT_ARM_ATTACH_SOURCE_IDS,
+    targetIds: RIGHT_ARM_HALO_TARGET_IDS,
+    positionedNodes,
+    obstacles,
+    usedEdgeIds,
+  }));
 
+  // Re-chain surviving template corridor nodes across culled gaps so the
+  // ingress rail stays a connected attack route.
   const corridorNodes = Array.from(positionedNodes.values())
     .filter((node) => node.zone === "right_corridor")
     .sort((a, b) => a.y - b.y);
-
-  const phaseBEdges = [...phaseAEdges];
   for (let index = 0; index < corridorNodes.length - 1; index += 1) {
     const from = corridorNodes[index];
     const to = corridorNodes[index + 1];
@@ -905,30 +433,67 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
     ));
     const id = templateEdge ? templateEdge.id : `corridor_relink_${from.id}_${to.id}`;
     if (usedEdgeIds.has(id)) continue;
-    phaseBEdges.push(buildEdgeRecord(from, to, id));
+    edges.push(buildEdgeRecord(from, to, id));
     usedEdgeIds.add(id);
   }
 
-  const corridorCoreTargets = corridorNodes
-    .slice()
-    .sort((a, b) => Math.abs(a.y - anchor.y) - Math.abs(b.y - anchor.y))
-    .slice(0, 2);
-  const rightArmCandidates = Array.from(positionedNodes.values())
-    .filter((node) => node.zone === "right_arm")
-    .sort((a, b) => Math.abs(a.y - anchor.y) - Math.abs(b.y - anchor.y));
-  for (let index = 0; index < Math.min(corridorCoreTargets.length, rightArmCandidates.length); index += 1) {
-    const from = corridorCoreTargets[index];
-    const to = rightArmCandidates[index];
-    if (edgeIntersectsObstacles(from.x, from.y, to.x, to.y, obstacles)) continue;
-    const id = `corridor_bridge_${from.id}_${to.id}`;
-    if (usedEdgeIds.has(id)) continue;
-    phaseBEdges.push(buildEdgeRecord(from, to, id));
-    usedEdgeIds.add(id);
+  // Stretch the right rail down the page margin: extra ingress nodes continue
+  // the single-file line to the bottom of the container.
+  const rightRailSeed = Array.from(positionedNodes.values())
+    .filter((node) => node.zone === "right_corridor" || /^right_a\d/.test(node.id))
+    .sort((a, b) => b.y - a.y)[0];
+  if (rightRailSeed) {
+    extendMarginRail({
+      seed: rightRailSeed,
+      stepX: 0,
+      stepY: pitch,
+      withinBounds: (x, y) => inBounds(x, y),
+      makeNode: (index, x, y) => ({
+        id: `corridor_ext_${index}`,
+        x,
+        y,
+        radius: nodeRadius,
+        role: "attack",
+        zone: "right_corridor",
+        protectedIngress: true,
+      }),
+      idPrefix: "corridor_ext",
+      positionedNodes,
+      edges,
+      usedEdgeIds,
+      obstacles,
+    });
+  }
+
+  // Stretch the left rail along the top margin toward the content padding.
+  const leftRailSeed = Array.from(positionedNodes.values())
+    .filter((node) => /^left_a\d/.test(node.id))
+    .sort((a, b) => a.x - b.x)[0];
+  if (leftRailSeed) {
+    extendMarginRail({
+      seed: leftRailSeed,
+      stepX: -pitch,
+      stepY: 0,
+      withinBounds: (x, y) => inBounds(x, y),
+      makeNode: (index, x, y) => ({
+        id: `left_ext_${index}`,
+        x,
+        y,
+        radius: nodeRadius,
+        role: "perimeter",
+        zone: "left_arm",
+      }),
+      idPrefix: "left_ext",
+      positionedNodes,
+      edges,
+      usedEdgeIds,
+      obstacles,
+    });
   }
 
   return {
     nodes: Array.from(positionedNodes.values()),
-    edges: phaseBEdges,
+    edges,
     scale,
   };
 }

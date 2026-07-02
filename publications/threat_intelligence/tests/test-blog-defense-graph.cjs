@@ -28,84 +28,137 @@ const {
 } = require("../blog-defense/graph.ts");
 const { layoutDefenseGraph } = require("../blog-defense/layout.ts");
 
-const RIGHT_ARM_HALO_TARGET_IDS = new Set([
-  "halo_e",
-  "halo_se",
-  "halo_s",
-  "halo_sw",
-]);
-const LEFT_ARM_HALO_TARGET_IDS = new Set([
-  "halo_nw",
-  "halo_n",
-  "halo_w",
-]);
-const REMOVED_RIGHT_ARM_EDGE_IDS = new Set([
-  "right_cross_6",
-  "right_attach_1",
-  "right_attach_1b",
-  "right_attach_2",
-  "right_to_outer_1",
-  "right_to_outer_2",
-  "right_to_outer_3",
-  "right_to_outer_4",
-  "right_to_outer_5",
-  "right_to_outer_6",
-  "right_to_outer_7",
-  "right_to_outer_8",
-  "right_to_outer_9",
-  "right_to_outer_10",
-  "right_to_outer_11",
-]);
-const STATIC_LEFT_ARM_ATTACHMENT_EDGE_IDS = new Set([
-  "left_to_outer_1",
-  "left_to_outer_2",
-  "left_to_outer_3",
-  "left_to_outer_4",
-  "left_to_outer_5",
-  "left_to_outer_6",
-  "left_to_outer_7",
-  "left_to_outer_8",
-  "left_to_outer_9",
-  "left_to_outer_10",
-  "left_to_outer_11",
-  "left_to_outer_12",
-]);
-const LEFT_ARM_ROWS = [
-  ["left_tail_4", "left_tail_3", "left_tail_2", "left_tail_1", "left_tip", "left_a3", "left_a2", "left_a1", "left_a0", "left_bridge_top"],
-  ["left_b3", "left_b0", "left_attach_top"],
-  ["left_c3", "left_c0", "left_attach_bottom"],
+const AZIMUTH_KEYS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+const RING_PREFIXES = ["mid", "ring", "outer", "halo"];
+const LEFT_ARM_HALO_TARGET_IDS = new Set(["halo_n", "halo_nw", "halo_w"]);
+const RIGHT_ARM_HALO_TARGET_IDS = new Set(["halo_e", "halo_se", "halo_s", "halo_sw"]);
+// Legacy hand-placed shoulder/bridge nodes must stay gone: the truss lanes and
+// the halo attachments replace them.
+const REMOVED_LEGACY_NODE_IDS = [
+  "left_bridge_top",
+  "left_attach_top",
+  "left_attach_bottom",
+  "left_tip",
+  "right_bridge_top",
+  "right_bridge_peak",
+  "right_attach_top",
+  "right_attach_bottom",
 ];
-const RIGHT_ARM_ROWS = [
-  ["right_c0", "right_b0", "right_a0"],
-  ["right_attach_bottom", "right_c1", "right_b1", "right_a1"],
-  ["right_c2", "right_b2", "right_a2"],
-  ["right_c3", "right_b3", "right_a3"],
-  ["right_c4", "right_b4", "right_a4"],
-  ["right_c5", "right_b5", "right_a5"],
+const LEFT_ARM_LANES = [
+  Array.from({ length: 12 }, (_, index) => `left_a${index}`),
+  Array.from({ length: 4 }, (_, index) => `left_b${index}`),
+  Array.from({ length: 2 }, (_, index) => `left_c${index}`),
 ];
+const RIGHT_ARM_LANES = [
+  Array.from({ length: 7 }, (_, index) => `right_a${index}`),
+  Array.from({ length: 4 }, (_, index) => `right_b${index}`),
+  Array.from({ length: 2 }, (_, index) => `right_c${index}`),
+];
+// Lane ends whose three nodes must sit on one straight taper line per arm.
+const LEFT_TAPER_IDS = ["left_a6", "left_b3", "left_c1"];
+const RIGHT_TAPER_IDS = ["right_a6", "right_b3", "right_c1"];
 
-assert.equal(BLOG_DEFENSE_COMPROMISE_PATH[0], "corridor_6");
+function nodeById(nodes, id) {
+  return nodes.find((node) => node.id === id);
+}
+
+function crossProduct(a, b, c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function assertUniformGaps(values, tolerance, message) {
+  assert.ok(values.length >= 2, `${message}: needs at least two values`);
+  const gaps = [];
+  for (let index = 1; index < values.length; index += 1) {
+    gaps.push(values[index] - values[index - 1]);
+  }
+  const avgGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+  assert.ok(
+    gaps.every((gap) => Math.abs(gap - avgGap) <= tolerance),
+    `${message} (gaps ${gaps.map((gap) => gap.toFixed(2)).join(", ")})`,
+  );
+}
+
+// --- static template ---------------------------------------------------
+
+assert.equal(BLOG_DEFENSE_COMPROMISE_PATH[0], "corridor_4");
 assert.equal(BLOG_DEFENSE_COMPROMISE_PATH.at(-1), BLOG_DEFENSE_CORE_NODE_ID);
-assert.ok(!BLOG_DEFENSE_NODES.some((node) => node.id === "right_attach_top"));
-assert.ok(!BLOG_DEFENSE_NODES.some((node) => node.id.startsWith("inner_")));
-assert.ok(BLOG_DEFENSE_EDGES.every((edge) => !REMOVED_RIGHT_ARM_EDGE_IDS.has(edge.id)));
-assert.ok(BLOG_DEFENSE_EDGES.every((edge) => !edge.id.startsWith("inner_") && !edge.id.startsWith("inner_core_") && !edge.id.startsWith("inner_to_mid_")));
+for (let index = 0; index < BLOG_DEFENSE_COMPROMISE_PATH.length - 1; index += 1) {
+  const from = BLOG_DEFENSE_COMPROMISE_PATH[index];
+  const to = BLOG_DEFENSE_COMPROMISE_PATH[index + 1];
+  assert.ok(
+    BLOG_DEFENSE_EDGES.some((edge) => (
+      (edge.from === from && edge.to === to) || (edge.from === to && edge.to === from)
+    )),
+    `static compromise path must follow real template edges (${from} -> ${to})`,
+  );
+}
 
-const templateCore = BLOG_DEFENSE_NODES.find((node) => node.id === BLOG_DEFENSE_CORE_NODE_ID);
-const templateMidRing = BLOG_DEFENSE_NODES.filter((node) => node.id.startsWith("mid_"));
-const templateOuterRing = BLOG_DEFENSE_NODES.filter((node) => node.id.startsWith("ring_"));
+for (const id of REMOVED_LEGACY_NODE_IDS) {
+  assert.ok(!BLOG_DEFENSE_NODES.some((node) => node.id === id), `${id} should be removed from the roster`);
+}
+
+const templateCore = nodeById(BLOG_DEFENSE_NODES, BLOG_DEFENSE_CORE_NODE_ID);
 assert.ok(templateCore);
-assert.ok(templateMidRing.length > 0);
-assert.ok(templateOuterRing.length > 0);
-const avgMidRadius = templateMidRing.reduce((sum, node) => (
-  sum + Math.hypot(node.x - templateCore.x, node.y - templateCore.y)
-), 0) / templateMidRing.length;
-const avgOuterRingRadius = templateOuterRing.reduce((sum, node) => (
-  sum + Math.hypot(node.x - templateCore.x, node.y - templateCore.y)
-), 0) / templateOuterRing.length;
+
+const ringRadii = {};
+for (const prefix of RING_PREFIXES) {
+  const ringNodes = AZIMUTH_KEYS.map((key) => nodeById(BLOG_DEFENSE_NODES, `${prefix}_${key}`));
+  assert.ok(ringNodes.every(Boolean), `${prefix} ring should have all 8 azimuth nodes`);
+  const radii = ringNodes.map((node) => Math.hypot(node.x - templateCore.x, node.y - templateCore.y));
+  const meanRadius = radii.reduce((sum, radius) => sum + radius, 0) / radii.length;
+  assert.ok(
+    radii.every((radius) => Math.abs(radius - meanRadius) <= 0.5),
+    `${prefix} ring must be a true concentric ring (radii ${radii.map((r) => r.toFixed(1)).join(", ")})`,
+  );
+  ringRadii[prefix] = meanRadius;
+}
 assert.ok(
-  avgMidRadius >= avgOuterRingRadius * 0.66,
-  `first core ring should not be too tight (${avgMidRadius} vs ${avgOuterRingRadius})`,
+  ringRadii.mid < ringRadii.ring && ringRadii.ring < ringRadii.outer && ringRadii.outer < ringRadii.halo,
+  "ring radii must increase outward",
+);
+assert.ok(
+  ringRadii.mid >= ringRadii.ring * 0.66,
+  `first core ring should not be too tight (${ringRadii.mid} vs ${ringRadii.ring})`,
+);
+
+for (const lanes of [LEFT_ARM_LANES, RIGHT_ARM_LANES]) {
+  const horizontal = lanes === LEFT_ARM_LANES;
+  const laneCross = [];
+  for (const laneIds of lanes) {
+    const laneNodes = laneIds.map((id) => nodeById(BLOG_DEFENSE_NODES, id));
+    assert.ok(laneNodes.every(Boolean), `template lane ${laneIds[0]}.. should be complete`);
+    const cross = horizontal ? laneNodes.map((node) => node.y) : laneNodes.map((node) => node.x);
+    const along = horizontal ? laneNodes.map((node) => node.x) : laneNodes.map((node) => node.y);
+    assert.ok(
+      cross.every((value) => Math.abs(value - cross[0]) <= 0.001),
+      `template lane ${laneIds[0]}.. must be straight`,
+    );
+    assertUniformGaps(along, 0.001, `template lane ${laneIds[0]}.. must have uniform pitch`);
+    laneCross.push(cross[0]);
+  }
+  assertUniformGaps(laneCross, 0.001, "template arm lanes must have a uniform lane gap");
+}
+for (const taperIds of [LEFT_TAPER_IDS, RIGHT_TAPER_IDS]) {
+  const [a, b, c] = taperIds.map((id) => nodeById(BLOG_DEFENSE_NODES, id));
+  assert.ok(a && b && c);
+  assert.ok(
+    Math.abs(crossProduct(a, b, c)) <= 0.001,
+    `taper lane ends ${taperIds.join(", ")} must be collinear`,
+  );
+}
+
+const templateCorridor = BLOG_DEFENSE_NODES.filter((node) => node.zone === "right_corridor");
+const templateRightRailX = nodeById(BLOG_DEFENSE_NODES, "right_a0").x;
+assert.ok(templateCorridor.every((node) => node.protectedIngress === true));
+assert.ok(
+  templateCorridor.every((node) => Math.abs(node.x - templateRightRailX) <= 0.001),
+  "corridor must continue the right rail as one single-file line",
+);
+assertUniformGaps(
+  templateCorridor.map((node) => node.y).sort((a, b) => a - b),
+  0.001,
+  "corridor nodes must be evenly spaced",
 );
 
 const zoneCounts = BLOG_DEFENSE_NODES.reduce((acc, node) => {
@@ -117,8 +170,7 @@ assert.ok(zoneCounts.left_arm >= 6);
 assert.ok(zoneCounts.right_arm >= 6);
 assert.ok(zoneCounts.right_corridor >= 5);
 
-const ingressProtected = BLOG_DEFENSE_NODES.filter((node) => node.zone === "right_corridor");
-assert.ok(ingressProtected.every((node) => node.protectedIngress === true));
+// --- responsive layout --------------------------------------------------
 
 const desktopLayout = layoutDefenseGraph({ width: 720, height: 430 });
 const tabletLayout = layoutDefenseGraph({ width: 520, height: 330 });
@@ -129,11 +181,52 @@ const namedLayouts = [
   { name: "mobile", width: 280, layout: mobileLayout },
 ];
 
+function visibleLane(layout, laneIds) {
+  return laneIds
+    .map((id) => nodeById(layout.nodes, id))
+    .filter(Boolean);
+}
+
+function assertLaneRegularity(name, layout, lanes, horizontal) {
+  const laneCross = [];
+  for (const laneIds of lanes) {
+    const laneNodes = visibleLane(layout, laneIds);
+    if (!laneNodes.length) continue;
+    const cross = laneNodes.map((node) => (horizontal ? node.y : node.x));
+    assert.ok(
+      cross.every((value) => Math.abs(value - cross[0]) <= 0.5),
+      `${name} lane ${laneIds[0]}.. should stay straight after layout`,
+    );
+    laneCross.push(cross[0]);
+
+    // Pitch must stay uniform between consecutive surviving template slots;
+    // culling may truncate a lane but never reshapes it.
+    const pitchGaps = [];
+    for (let index = 1; index < laneIds.length; index += 1) {
+      const previous = nodeById(layout.nodes, laneIds[index - 1]);
+      const current = nodeById(layout.nodes, laneIds[index]);
+      if (!previous || !current) continue;
+      pitchGaps.push(Math.abs(horizontal ? current.x - previous.x : current.y - previous.y));
+    }
+    if (pitchGaps.length >= 2) {
+      const avgPitch = pitchGaps.reduce((sum, gap) => sum + gap, 0) / pitchGaps.length;
+      assert.ok(
+        pitchGaps.every((gap) => Math.abs(gap - avgPitch) <= 0.5),
+        `${name} lane ${laneIds[0]}.. pitch should stay uniform (${pitchGaps.map((gap) => gap.toFixed(2)).join(", ")})`,
+      );
+    }
+  }
+  if (laneCross.length >= 2) {
+    assertUniformGaps(laneCross, 0.5, `${name} arm lane gap should stay uniform`);
+  }
+}
+
 for (const { name, width, layout } of namedLayouts) {
   assert.ok(layout.nodes.length > 0);
   assert.ok(layout.edges.length > 0);
   assert.ok(layout.nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y)));
   assert.ok(layout.edges.every((edge) => Number.isFinite(edge.x1) && Number.isFinite(edge.y1)));
+
   const nodeRadii = layout.nodes.map((node) => node.radius);
   const minRadius = Math.min(...nodeRadii);
   const maxRadius = Math.max(...nodeRadii);
@@ -142,227 +235,236 @@ for (const { name, width, layout } of namedLayouts) {
     `${name} should render all node dots at a uniform radius`,
   );
 
-  const coreNodes = layout.nodes.filter((node) => node.zone === "core");
-  const leftArmNodes = layout.nodes.filter((node) => node.zone === "left_arm");
-  const rightArmNodes = layout.nodes.filter((node) => node.zone === "right_arm");
-  if (coreNodes.length && leftArmNodes.length) {
-    const coreCenter = layout.nodes.find((node) => node.id === BLOG_DEFENSE_CORE_NODE_ID);
-    assert.ok(coreCenter, `${name} should keep a core node`);
-
-    const coreOuterRadius = coreNodes.reduce((maxRadius, node) => (
-      Math.max(maxRadius, Math.hypot(node.x - coreCenter.x, node.y - coreCenter.y) + node.radius)
-    ), 0);
-    const leftRows = LEFT_ARM_ROWS
-      .map((rowIds) => rowIds
-        .map((id) => leftArmNodes.find((node) => node.id === id))
-        .filter(Boolean)
-        .sort((left, right) => left.x - right.x))
-      .filter((rowNodes) => rowNodes.length > 0);
-
-    assert.ok(
-      !layout.edges.some((edge) => STATIC_LEFT_ARM_ATTACHMENT_EDGE_IDS.has(edge.id)),
-      `${name} should not render stale left-arm static halo attachments`,
-    );
-
-    const topRow = leftRows[0];
-    if (topRow && topRow.length >= 2) {
-      const topYs = topRow.map((node) => node.y);
-      const topYSpread = Math.max(...topYs) - Math.min(...topYs);
-      assert.ok(topYSpread <= Math.max(4, width * 0.01), `${name} left-arm top rail should stay flat`);
-    }
-
-    if (leftRows.length >= 3) {
-      const rowCenters = leftRows.map((rowNodes) => rowNodes.reduce((sum, node) => sum + node.y, 0) / rowNodes.length);
-      const rowGaps = [];
-      for (let index = 1; index < rowCenters.length; index += 1) {
-        rowGaps.push(rowCenters[index] - rowCenters[index - 1]);
-      }
-      const avgRowGap = rowGaps.reduce((sum, gap) => sum + gap, 0) / rowGaps.length;
-      const rowGapTolerance = Math.max(6, avgRowGap * 0.2);
-      assert.ok(
-        rowGaps.every((gap) => Math.abs(gap - avgRowGap) <= rowGapTolerance),
-        `${name} left-arm rows should have near-uniform vertical spacing`,
+  for (let a = 0; a < layout.nodes.length; a += 1) {
+    for (let b = a + 1; b < layout.nodes.length; b += 1) {
+      const distance = Math.hypot(
+        layout.nodes[a].x - layout.nodes[b].x,
+        layout.nodes[a].y - layout.nodes[b].y,
       );
-    }
-
-    for (const rowNodes of leftRows) {
-      if (rowNodes.length < 3) continue;
-      const gaps = [];
-      for (let index = 1; index < rowNodes.length; index += 1) {
-        gaps.push(rowNodes[index].x - rowNodes[index - 1].x);
-      }
-      const avgGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
-      const laneGapTolerance = Math.max(12, avgGap * 0.72);
       assert.ok(
-        gaps.every((gap) => Math.abs(gap - avgGap) <= laneGapTolerance),
-        `${name} left-arm row lane spacing should stay controlled without becoming perfectly even`,
-      );
-    }
-
-    if (leftRows.length >= 3) {
-      const rowLeftEdges = leftRows.map((rowNodes) => Math.min(...rowNodes.map((node) => node.x - node.radius)));
-      assert.ok(
-        rowLeftEdges[1] >= rowLeftEdges[0] && rowLeftEdges[2] >= rowLeftEdges[1],
-        `${name} left-arm lower rows should taper inward from the top rail`,
-      );
-    }
-
-    for (const node of leftArmNodes) {
-      const distanceFromCore = Math.hypot(node.x - coreCenter.x, node.y - coreCenter.y);
-      assert.ok(
-        distanceFromCore + 0.001 >= coreOuterRadius + Math.min(3, node.radius * 0.5),
-        `${name} left-arm nodes must remain outside the core envelope`,
-      );
-    }
-
-    const dynamicAttachmentEdges = layout.edges.filter((edge) => edge.id.startsWith("left_dynamic_attach_"));
-    assert.ok(dynamicAttachmentEdges.length >= 2, `${name} should keep rebuilt left-arm attachments`);
-    assert.ok(
-      dynamicAttachmentEdges.every((edge) => LEFT_ARM_HALO_TARGET_IDS.has(edge.to)),
-      `${name} rebuilt left-arm attachments must target left halo perimeter nodes only`,
-    );
-    assert.ok(
-      dynamicAttachmentEdges.every((edge) => !/^(outer_|ring_|mid_|inner_)/.test(edge.to) && edge.to !== BLOG_DEFENSE_CORE_NODE_ID),
-      `${name} rebuilt left-arm attachments must not target inner core rings`,
-    );
-
-    const visibleLeftTargets = layout.nodes.filter((node) => LEFT_ARM_HALO_TARGET_IDS.has(node.id));
-    const leftA0 = leftArmNodes.find((node) => node.id === "left_a0");
-    const leftA0Attachment = dynamicAttachmentEdges.find((edge) => edge.from === "left_a0");
-    if (leftA0 && leftA0Attachment && visibleLeftTargets.length) {
-      const nearestTarget = visibleLeftTargets
-        .slice()
-        .sort((left, right) => {
-          const leftDistance = Math.hypot(leftA0.x - left.x, leftA0.y - left.y);
-          const rightDistance = Math.hypot(leftA0.x - right.x, leftA0.y - right.y);
-          if (Math.abs(leftDistance - rightDistance) > 0.001) {
-            return leftDistance - rightDistance;
-          }
-          return right.x - left.x;
-        })[0];
-      assert.equal(
-        leftA0Attachment.to,
-        nearestTarget.id,
-        `${name} left_a0 should attach to the nearest visible left halo perimeter node`,
+        distance >= minRadius * 2,
+        `${name} nodes must never overlap (${layout.nodes[a].id} vs ${layout.nodes[b].id})`,
       );
     }
   }
-  if (coreNodes.length && rightArmNodes.length) {
-    const coreLeft = Math.min(...coreNodes.map((node) => node.x - node.radius));
+
+  assert.ok(
+    !layout.edges.some((edge) => edge.id.startsWith("left_shoulder_") || edge.id.startsWith("right_shoulder_")),
+    `${name} should not render static shoulder edges (they are rebuilt dynamically)`,
+  );
+  assert.ok(
+    layout.edges.every((edge) => (
+      layout.nodes.some((node) => node.id === edge.from)
+      && layout.nodes.some((node) => node.id === edge.to)
+    )),
+    `${name} edges must reference visible nodes`,
+  );
+
+  const coreCenter = nodeById(layout.nodes, BLOG_DEFENSE_CORE_NODE_ID);
+  assert.ok(coreCenter, `${name} should keep a core node`);
+
+  // Every ring that survives culling must stay perfectly concentric.
+  for (const prefix of RING_PREFIXES) {
+    const ringNodes = layout.nodes.filter((node) => node.id.startsWith(`${prefix}_`) && node.zone === "core");
+    if (ringNodes.length < 2) continue;
+    const radii = ringNodes.map((node) => Math.hypot(node.x - coreCenter.x, node.y - coreCenter.y));
+    const meanRadius = radii.reduce((sum, radius) => sum + radius, 0) / radii.length;
+    assert.ok(
+      radii.every((radius) => Math.abs(radius - meanRadius) <= 0.5),
+      `${name} ${prefix} ring should stay concentric after layout`,
+    );
+  }
+
+  // Left arm: flat rail hugging the top, uniform truss, straight leftward taper.
+  const leftLanes = LEFT_ARM_LANES.map((laneIds) => visibleLane(layout, laneIds));
+  if (leftLanes[0].length >= 2) {
+    assertLaneRegularity(name, layout, LEFT_ARM_LANES, true);
+
+    const laneLeftEdges = leftLanes
+      .filter((laneNodes) => laneNodes.length > 0)
+      .map((laneNodes) => Math.min(...laneNodes.map((node) => node.x - node.radius)));
+    for (let index = 1; index < laneLeftEdges.length; index += 1) {
+      assert.ok(
+        laneLeftEdges[index] >= laneLeftEdges[index - 1] - 0.001,
+        `${name} left-arm lower lanes should taper inward from the rail`,
+      );
+    }
+
+    const leftTaper = LEFT_TAPER_IDS.map((id) => nodeById(layout.nodes, id));
+    if (leftTaper.every(Boolean)) {
+      assert.ok(
+        Math.abs(crossProduct(...leftTaper)) <= 1,
+        `${name} left-arm taper ends should stay collinear`,
+      );
+    }
+
+    const leftAttachments = layout.edges.filter((edge) => edge.id.startsWith("left_dynamic_attach_"));
+    assert.ok(leftAttachments.length >= 2, `${name} should keep rebuilt left-arm attachments`);
+    assert.ok(
+      leftAttachments.every((edge) => LEFT_ARM_HALO_TARGET_IDS.has(edge.to)),
+      `${name} left-arm attachments must target left halo azimuths only`,
+    );
+    const expectedLeft = [
+      ["left_a0", "halo_n"],
+      ["left_b0", "halo_nw"],
+      ["left_c0", "halo_w"],
+    ];
+    for (const [sourceId, targetId] of expectedLeft) {
+      if (!nodeById(layout.nodes, sourceId) || !nodeById(layout.nodes, targetId)) continue;
+      const attachment = leftAttachments.find((edge) => edge.from === sourceId);
+      assert.ok(attachment, `${name} ${sourceId} should have a halo attachment`);
+      assert.equal(
+        attachment.to,
+        targetId,
+        `${name} ${sourceId} should splay to ${targetId} when unobstructed`,
+      );
+    }
+  }
+
+  // Right arm: straight rail hugging the right edge, uniform truss, downward taper.
+  const rightLanes = RIGHT_ARM_LANES.map((laneIds) => visibleLane(layout, laneIds));
+  if (rightLanes[0].length >= 2) {
+    assertLaneRegularity(name, layout, RIGHT_ARM_LANES, false);
+
+    const coreNodes = layout.nodes.filter((node) => node.zone === "core");
     const coreRight = Math.max(...coreNodes.map((node) => node.x + node.radius));
-    const coreWidth = coreRight - coreLeft;
+    const rightArmNodes = layout.nodes.filter((node) => node.zone === "right_arm");
     const rightArmRight = Math.max(...rightArmNodes.map((node) => node.x + node.radius));
     assert.ok(
       rightArmRight <= coreRight + 0.001,
-      `right arm must not extend beyond core right edge (${rightArmRight} > ${coreRight})`,
+      `${name} right arm must not extend beyond core right edge (${rightArmRight} > ${coreRight})`,
     );
 
-    const widthControlNodes = rightArmNodes.filter((node) => (
-      /^right_[abc]\d/.test(node.id) || node.id === "right_attach_bottom"
-    ));
-    const armNodesForBands = widthControlNodes.length ? widthControlNodes : rightArmNodes;
-    const armTop = Math.min(...armNodesForBands.map((node) => node.y));
-    const armBottom = Math.max(...armNodesForBands.map((node) => node.y));
-    const armSpan = Math.max(1, armBottom - armTop);
-    const topBandLimit = armTop + armSpan * 0.28;
-    const bottomBandFloor = armBottom - armSpan * 0.2;
-    const topBandNodes = armNodesForBands.filter((node) => node.y <= topBandLimit);
-    const bottomBandNodes = armNodesForBands.filter((node) => node.y >= bottomBandFloor);
-    assert.ok(topBandNodes.length >= 1, `${name} should keep nodes in top arm band`);
-    assert.ok(bottomBandNodes.length >= 1, `${name} should keep nodes in bottom arm band`);
-
-    const topBandWidth = Math.max(...topBandNodes.map((node) => node.x + node.radius))
-      - Math.min(...topBandNodes.map((node) => node.x - node.radius));
-    const bottomBandWidth = Math.max(...bottomBandNodes.map((node) => node.x + node.radius))
-      - Math.min(...bottomBandNodes.map((node) => node.x - node.radius));
-
-    if (width >= 500 && topBandNodes.length >= 3) {
+    const laneBottomEdges = rightLanes
+      .filter((laneNodes) => laneNodes.length > 0)
+      .map((laneNodes) => Math.max(...laneNodes.map((node) => node.y + node.radius)));
+    for (let index = 1; index < laneBottomEdges.length; index += 1) {
       assert.ok(
-        topBandWidth >= coreWidth * 0.4,
-        `${name} right-arm top width should be close to core width (${topBandWidth} vs ${coreWidth})`,
-      );
-    }
-    if (topBandNodes.length >= 3 && bottomBandNodes.length >= 2) {
-      assert.ok(
-        bottomBandWidth < topBandWidth,
-        `${name} right-arm should taper downward (${bottomBandWidth} !< ${topBandWidth})`,
+        laneBottomEdges[index] <= laneBottomEdges[index - 1] + 0.001,
+        `${name} right-arm inner lanes should taper upward from the rail (downward point)`,
       );
     }
 
-    const armRows = RIGHT_ARM_ROWS
-      .map((rowIds) => rowIds
-        .map((id) => rightArmNodes.find((node) => node.id === id))
-        .filter(Boolean)
-        .sort((left, right) => left.x - right.x))
-      .filter((rowNodes) => rowNodes.length > 0);
-    if (armRows.length >= 3) {
-      const rowCenters = armRows.map((rowNodes) => rowNodes.reduce((sum, node) => sum + node.y, 0) / rowNodes.length);
-      const rowGaps = [];
-      for (let index = 1; index < rowCenters.length; index += 1) {
-        rowGaps.push(rowCenters[index] - rowCenters[index - 1]);
-      }
-      const spacingGaps = rowGaps.slice(1).length ? rowGaps.slice(1) : rowGaps;
-      const avgRowGap = spacingGaps.reduce((sum, gap) => sum + gap, 0) / spacingGaps.length;
-      const rowGapTolerance = Math.max(6, avgRowGap * 0.18);
+    const rightTaper = RIGHT_TAPER_IDS.map((id) => nodeById(layout.nodes, id));
+    if (rightTaper.every(Boolean)) {
       assert.ok(
-        spacingGaps.every((gap) => Math.abs(gap - avgRowGap) <= rowGapTolerance),
-        `${name} right-arm rows should have near-uniform vertical spacing`,
+        Math.abs(crossProduct(...rightTaper)) <= 1,
+        `${name} right-arm taper ends should stay collinear`,
       );
     }
 
-    for (const rowNodes of armRows) {
-      if (rowNodes.length < 4) continue;
-      const gaps = [];
-      for (let index = 1; index < rowNodes.length; index += 1) {
-        gaps.push(rowNodes[index].x - rowNodes[index - 1].x);
-      }
-      const avgGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
-      const laneGapTolerance = Math.max(5, avgGap * 0.2);
-      assert.ok(
-        gaps.every((gap) => Math.abs(gap - avgGap) <= laneGapTolerance),
-        `${name} right-arm row lane spacing should be approximately even`,
-      );
-    }
-
-    assert.ok(!rightArmNodes.some((node) => node.id === "right_attach_top"), `${name} should not render right_attach_top`);
-    assert.ok(!layout.edges.some((edge) => REMOVED_RIGHT_ARM_EDGE_IDS.has(edge.id)), `${name} should not render removed dense-cluster edges`);
-
-    const dynamicAttachmentEdges = layout.edges.filter((edge) => edge.id.startsWith("right_dynamic_attach_"));
-    assert.ok(dynamicAttachmentEdges.length >= 3, `${name} should keep multiple rebuilt arm attachments`);
+    const rightAttachments = layout.edges.filter((edge) => edge.id.startsWith("right_dynamic_attach_"));
+    assert.ok(rightAttachments.length >= 3, `${name} should keep rebuilt right-arm attachments`);
     assert.ok(
-      dynamicAttachmentEdges.every((edge) => RIGHT_ARM_HALO_TARGET_IDS.has(edge.to)),
-      `${name} rebuilt arm attachments must target halo perimeter nodes only`,
+      rightAttachments.every((edge) => RIGHT_ARM_HALO_TARGET_IDS.has(edge.to)),
+      `${name} right-arm attachments must target right halo azimuths only`,
     );
-
-    const visibleCoreTargets = layout.nodes.filter((node) => RIGHT_ARM_HALO_TARGET_IDS.has(node.id));
-    const rightC0 = rightArmNodes.find((node) => node.id === "right_c0");
-    const rightC0Attachment = dynamicAttachmentEdges.find((edge) => edge.from === "right_c0");
-    if (rightC0 && rightC0Attachment) {
-      const nearestTarget = visibleCoreTargets
-        .slice()
-        .sort((left, right) => {
-          const leftDistance = Math.hypot(rightC0.x - left.x, rightC0.y - left.y);
-          const rightDistance = Math.hypot(rightC0.x - right.x, rightC0.y - right.y);
-          if (Math.abs(leftDistance - rightDistance) > 0.001) {
-            return leftDistance - rightDistance;
-          }
-          return left.x - right.x;
-        })[0];
+    const expectedRight = [
+      ["right_a0", "halo_e"],
+      ["right_b0", "halo_se"],
+      ["right_c0", "halo_s"],
+    ];
+    for (const [sourceId, targetId] of expectedRight) {
+      if (!nodeById(layout.nodes, sourceId) || !nodeById(layout.nodes, targetId)) continue;
+      const attachment = rightAttachments.find((edge) => edge.from === sourceId);
+      assert.ok(attachment, `${name} ${sourceId} should have a halo attachment`);
       assert.equal(
-        rightC0Attachment.to,
-        nearestTarget.id,
-        `${name} right_c0 should attach to the nearest visible halo perimeter node`,
+        attachment.to,
+        targetId,
+        `${name} ${sourceId} should splay to ${targetId} when unobstructed`,
       );
     }
+  }
 
+  // Margin hugging: the right rail sits flush against the right edge and the
+  // top rail flush against the top edge of the container.
+  const maxNodeRight = Math.max(...layout.nodes.map((node) => node.x));
+  assert.ok(
+    maxNodeRight >= width - minRadius - 4,
+    `${name} right rail should hug the right edge (max x ${maxNodeRight.toFixed(1)} of ${width})`,
+  );
+  const minNodeTop = Math.min(...layout.nodes.map((node) => node.y));
+  assert.ok(
+    minNodeTop <= minRadius + 5,
+    `${name} top rail should hug the top edge (min y ${minNodeTop.toFixed(1)})`,
+  );
+
+  // Past the shoulder wedge each arm must thin to a single-file margin line.
+  const rightRailNode = nodeById(layout.nodes, "right_a0");
+  const rightTaperEnd = nodeById(layout.nodes, "right_a6");
+  if (rightRailNode && rightTaperEnd) {
+    const marginNodes = layout.nodes.filter((node) => (
+      (node.zone === "right_arm" || node.zone === "right_corridor") && node.y > rightTaperEnd.y + 1
+    ));
     assert.ok(
-      dynamicAttachmentEdges.every((edge) => !/^(outer_|ring_|mid_|inner_)/.test(edge.to) && edge.to !== BLOG_DEFENSE_CORE_NODE_ID),
-      `${name} rebuilt arm attachments must not target inner core rings`,
+      marginNodes.every((node) => Math.abs(node.x - rightRailNode.x) <= 0.5),
+      `${name} the descent below the shoulder must be single-file on the right margin`,
+    );
+  }
+  const leftRailNode = nodeById(layout.nodes, "left_a0");
+  const leftTaperEnd = nodeById(layout.nodes, "left_a6");
+  if (leftRailNode && leftTaperEnd) {
+    const marginNodes = layout.nodes.filter((node) => (
+      node.zone === "left_arm" && node.x < leftTaperEnd.x - 1
+    ));
+    assert.ok(
+      marginNodes.every((node) => Math.abs(node.y - leftRailNode.y) <= 0.5),
+      `${name} the leftward stretch past the shoulder must be single-file on the top margin`,
     );
   }
 }
 
-const desktopCore = desktopLayout.nodes.find((node) => node.id === BLOG_DEFENSE_CORE_NODE_ID);
+// --- margin rail extensions ------------------------------------------------
+
+const tallLayout = layoutDefenseGraph({ width: 720, height: 900 });
+const tallRail = nodeById(tallLayout.nodes, "right_a0");
+const tallExtension = tallLayout.nodes.filter((node) => node.id.startsWith("corridor_ext_"));
+assert.ok(tallRail, "tall layout should keep the right rail");
+assert.ok(tallExtension.length >= 3, "tall containers should extend the ingress rail down the margin");
+assert.ok(
+  tallExtension.every((node) => node.zone === "right_corridor" && node.protectedIngress === true),
+  "extension nodes must be attack ingress nodes",
+);
+assert.ok(
+  tallExtension.every((node) => Math.abs(node.x - tallRail.x) <= 0.5),
+  "extension nodes must continue the rail column",
+);
+const tallPitch = 42 * tallLayout.scale;
+const tallDeepest = Math.max(...tallExtension.map((node) => node.y));
+assert.ok(
+  tallDeepest >= 900 - tallPitch - 10,
+  `extended rail should reach the container bottom (deepest ${tallDeepest.toFixed(1)})`,
+);
+const tallCorridorChain = tallLayout.nodes
+  .filter((node) => node.zone === "right_corridor")
+  .sort((a, b) => a.y - b.y);
+for (let index = 0; index < tallCorridorChain.length - 1; index += 1) {
+  const from = tallCorridorChain[index];
+  const to = tallCorridorChain[index + 1];
+  assert.ok(
+    tallLayout.edges.some((edge) => (
+      (edge.from === from.id && edge.to === to.id) || (edge.from === to.id && edge.to === from.id)
+    )),
+    `extended ingress rail must stay chained (${from.id} -> ${to.id})`,
+  );
+}
+
+const leftExtension = desktopLayout.nodes.filter((node) => node.id.startsWith("left_ext_"));
+const desktopLeftRail = nodeById(desktopLayout.nodes, "left_a0");
+assert.ok(desktopLeftRail, "desktop layout should keep the top rail");
+assert.ok(leftExtension.length >= 1, "the top rail should extend leftward across the container");
+assert.ok(
+  leftExtension.every((node) => Math.abs(node.y - desktopLeftRail.y) <= 0.5),
+  "left extension nodes must continue the top rail",
+);
+const desktopPitch = 42 * desktopLayout.scale;
+const leftExtensionMin = Math.min(...leftExtension.map((node) => node.x));
+assert.ok(
+  leftExtensionMin <= 18 + desktopLeftRail.radius + desktopPitch,
+  `left extension should reach the content padding (leftmost ${leftExtensionMin.toFixed(1)})`,
+);
+
+const desktopCore = nodeById(desktopLayout.nodes, BLOG_DEFENSE_CORE_NODE_ID);
 assert.ok(desktopCore);
 assert.ok(desktopCore.x > 470, "core should remain in the top-right region");
 assert.ok(desktopCore.y < 210, "core should remain near top area");
@@ -372,6 +474,8 @@ const corridorVisible = desktopLayout.nodes
   .sort((a, b) => b.y - a.y);
 assert.ok(corridorVisible.length >= 1, "at least one right-corridor node should survive");
 assert.ok(corridorVisible[0].x > 640, "corridor should stay in right margin");
+
+// --- obstacle culling ----------------------------------------------------
 
 const blockedLayout = layoutDefenseGraph({
   width: 720,
@@ -390,8 +494,8 @@ assert.ok(
   "all visible edges must reference surviving visible nodes",
 );
 
-const collisionProbe = desktopLayout.nodes.find((node) => node.id === "left_attach_bottom");
-assert.ok(collisionProbe, "expected a stable left-arm shoulder node for collision regression");
+const collisionProbe = nodeById(desktopLayout.nodes, "left_c0");
+assert.ok(collisionProbe, "expected a stable left-arm lane node for collision regression");
 const collisionLayout = layoutDefenseGraph({
   width: 720,
   height: 430,
@@ -400,20 +504,20 @@ const collisionLayout = layoutDefenseGraph({
   ],
 });
 assert.ok(
-  !collisionLayout.nodes.some((node) => node.id === "left_attach_bottom"),
+  !collisionLayout.nodes.some((node) => node.id === "left_c0"),
   "a node whose rendered circle overlaps an obstacle should be fully removed",
 );
 assert.ok(
-  collisionLayout.nodes.some((node) => node.id === "left_c3"),
+  collisionLayout.nodes.some((node) => node.id === "left_c1"),
   "an adjacent node outside the obstacle should remain visible",
 );
 assert.ok(
-  collisionLayout.edges.every((edge) => edge.from !== "left_attach_bottom" && edge.to !== "left_attach_bottom"),
+  collisionLayout.edges.every((edge) => edge.from !== "left_c0" && edge.to !== "left_c0"),
   "edges referencing a removed node should also be removed",
 );
 
-const edgeProbeStart = desktopLayout.nodes.find((node) => node.id === "left_c3");
-const edgeProbeEnd = desktopLayout.nodes.find((node) => node.id === "left_c0");
+const edgeProbeStart = nodeById(desktopLayout.nodes, "left_c0");
+const edgeProbeEnd = nodeById(desktopLayout.nodes, "left_c1");
 assert.ok(edgeProbeStart && edgeProbeEnd, "expected stable left-arm nodes for edge collision regression");
 const edgeMidX = (edgeProbeStart.x + edgeProbeEnd.x) / 2;
 const edgeMidY = (edgeProbeStart.y + edgeProbeEnd.y) / 2;
@@ -425,17 +529,19 @@ const edgeCollisionLayout = layoutDefenseGraph({
   ],
 });
 assert.ok(
-  edgeCollisionLayout.nodes.some((node) => node.id === "left_c3")
-  && edgeCollisionLayout.nodes.some((node) => node.id === "left_c0"),
+  edgeCollisionLayout.nodes.some((node) => node.id === "left_c0")
+  && edgeCollisionLayout.nodes.some((node) => node.id === "left_c1"),
   "nodes adjacent to an edge-only obstacle should survive when not overlapped",
 );
 assert.ok(
   !edgeCollisionLayout.edges.some((edge) => (
-    (edge.from === "left_c3" && edge.to === "left_c0")
-    || (edge.from === "left_c0" && edge.to === "left_c3")
+    (edge.from === "left_c0" && edge.to === "left_c1")
+    || (edge.from === "left_c1" && edge.to === "left_c0")
   )),
   "an edge intersecting an obstacle should be removed even when both endpoint nodes survive",
 );
+
+// --- attack path ----------------------------------------------------------
 
 const visiblePath = buildVisibleAttackPath({
   nodes: desktopLayout.nodes,
@@ -446,9 +552,9 @@ assert.ok(visiblePath.nodeIds.length >= 2);
 assert.equal(visiblePath.nodeIds.at(-1), BLOG_DEFENSE_CORE_NODE_ID);
 assert.equal(visiblePath.nodeIds.at(-2), "mid_s", "final node before core should be the south mid approach");
 assert.ok(visiblePath.nodeIds.includes("mid_s"), "visible path should include the south mid approach node");
-assert.ok(visiblePath.edgeIds.includes("mid_to_outer_s"), "visible path should include the south outer-to-mid edge");
+assert.ok(visiblePath.edgeIds.includes("mid_to_outer_s"), "visible path should include the south ring-to-mid edge");
 assert.ok(visiblePath.edgeIds.includes("mid_spoke_s"), "visible path should include the south mid-to-core edge");
-const startNode = desktopLayout.nodes.find((node) => node.id === visiblePath.nodeIds[0]);
+const startNode = nodeById(desktopLayout.nodes, visiblePath.nodeIds[0]);
 assert.ok(startNode);
 assert.equal(startNode.zone, "right_corridor");
 

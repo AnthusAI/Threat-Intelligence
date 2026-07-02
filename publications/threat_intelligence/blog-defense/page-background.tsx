@@ -8,7 +8,8 @@ import {
   buildVisibleAttackPath,
   type BlogDefenseCompromiseStep,
 } from "./graph";
-import { layoutDefenseGraph, type LayoutDefenseNode } from "./layout";
+import { layoutDefenseGraph, type LayoutDefenseNode, type LayoutRect } from "./layout";
+import type { VerticalRhythm } from "../../../lib/blog-rhythm";
 import { SITE_BRAND } from "../../../lib/site-brand";
 import { PICTOGRAM_CYCLE_MS } from "../pictograms/registry";
 import { useResolvedPapyrusTheme } from "../../../components/use-resolved-papyrus-theme";
@@ -55,95 +56,11 @@ type Size = {
   height: number;
 };
 
-type ObstacleRect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
 type BlogPageBackgroundProps = {
+  headerObstacles?: LayoutRect[];
   pageRef: RefObject<HTMLElement | null>;
+  rhythm: VerticalRhythm;
 };
-
-function intersectRect(source: DOMRect, bounds: DOMRect): ObstacleRect | null {
-  const left = Math.max(source.left, bounds.left);
-  const top = Math.max(source.top, bounds.top);
-  const right = Math.min(source.right, bounds.right);
-  const bottom = Math.min(source.bottom, bounds.bottom);
-  const width = right - left;
-  const height = bottom - top;
-  if (width <= 0 || height <= 0) return null;
-  return {
-    x: left - bounds.left,
-    y: top - bounds.top,
-    width,
-    height,
-  };
-}
-
-function textFragmentRects(element: HTMLElement, bounds: DOMRect): ObstacleRect[] {
-  const ownerDocument = element.ownerDocument;
-  const elementRect = element.getBoundingClientRect();
-  const computedStyle = ownerDocument.defaultView?.getComputedStyle(element);
-  const context = ownerDocument.createElement("canvas").getContext("2d");
-  if (context && computedStyle) {
-    context.font = computedStyle.font;
-  }
-  const walker = ownerDocument.createTreeWalker(
-    element,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode(node) {
-        return /\S/.test(node.textContent ?? "")
-          ? NodeFilter.FILTER_ACCEPT
-          : NodeFilter.FILTER_REJECT;
-      },
-    },
-  );
-  const range = ownerDocument.createRange();
-  const rects: ObstacleRect[] = [];
-
-  try {
-    let node = walker.nextNode();
-    while (node) {
-      const text = node.textContent ?? "";
-      const tokenPattern = /\S+/g;
-      let match: RegExpExecArray | null;
-      while ((match = tokenPattern.exec(text)) !== null) {
-        range.setStart(node, match.index);
-        range.setEnd(node, match.index + match[0].length);
-        for (const fragmentRect of Array.from(range.getClientRects())) {
-          const measuredWidth = context?.measureText(match[0]).width ?? 0;
-          const textWidth = measuredWidth > 0 && measuredWidth < (fragmentRect.width * 0.98)
-            ? measuredWidth
-            : fragmentRect.width;
-          const sourceRect = new DOMRect(
-            fragmentRect.left,
-            elementRect.top,
-            textWidth,
-            elementRect.height,
-          );
-          const rect = intersectRect(sourceRect, bounds);
-          if (rect) rects.push(rect);
-        }
-      }
-      node = walker.nextNode();
-    }
-  } finally {
-    range.detach();
-  }
-
-  return rects;
-}
-
-function elementObstacleRects(element: HTMLElement, bounds: DOMRect): ObstacleRect[] {
-  const fragments = textFragmentRects(element, bounds);
-  if (fragments.length > 0) return fragments;
-  return Array.from(element.getClientRects())
-    .map((lineRect) => intersectRect(lineRect, bounds))
-    .filter((rect): rect is ObstacleRect => Boolean(rect));
-}
 
 function readPictogramColors(container: HTMLElement): PictogramColors {
   const style = getComputedStyle(container);
@@ -261,14 +178,14 @@ function CoreBreachEffect({
   );
 }
 
-export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
+export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: BlogPageBackgroundProps) {
   const svgId = useId().replace(/:/g, "-");
   const coreBreachFilterId = `${svgId}-core-breach-glow`;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resolvedTheme = useResolvedPapyrusTheme();
   const [colors, setColors] = useState<PictogramColors>(FALLBACK_COLORS[resolvedTheme]);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
-  const [obstacles, setObstacles] = useState<ObstacleRect[]>([]);
+  const [obstacles, setObstacles] = useState<LayoutRect[]>([]);
   const [enableStochasticPath] = useState(true);
   const [attackCycle, setAttackCycle] = useState(0);
   const [compromisedNodes, setCompromisedNodes] = useState<Set<string>>(() => new Set());
@@ -287,6 +204,13 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
       if (width > 0 && height > 0) {
         setSize((current) => (current.width === width && current.height === height ? current : { width, height }));
       }
+      const padding = rhythm.rowHeight;
+      setObstacles(headerObstacles.map((obstacle) => ({
+        x: Math.max(0, obstacle.x - padding),
+        y: Math.max(0, obstacle.y - padding),
+        width: obstacle.width + padding * 2,
+        height: obstacle.height + padding * 2,
+      })));
     };
 
     update();
@@ -298,83 +222,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, []);
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let page = pageRef.current ?? container.closest<HTMLElement>("main.presentation-page--blog");
-    let raf = 0;
-    let tries = 0;
-
-    const update = () => {
-      if (!page) {
-        page = pageRef.current ?? container.closest<HTMLElement>("main.presentation-page--blog");
-      }
-      if (!page) return false;
-
-      const containerRect = container.getBoundingClientRect();
-      const padding = containerRect.width < 420 ? 6 : containerRect.width < 780 ? 9 : 12;
-      const selectors = [
-        ".presentation-header h1 span",
-        ".presentation-header__meta",
-        ".presentation-header__subtitle",
-        ".presentation-header__date",
-        ".presentation-header__tagline",
-        ".presentation-section-nav a",
-      ];
-      const next: ObstacleRect[] = [];
-      for (const selector of selectors) {
-        const elements = Array.from(page.querySelectorAll<HTMLElement>(selector));
-        for (const element of elements) {
-          for (const rect of elementObstacleRects(element, containerRect)) {
-            next.push({
-              x: Math.max(0, rect.x - padding),
-              y: Math.max(0, rect.y - padding),
-              width: rect.width + padding * 2,
-              height: rect.height + padding * 2,
-            });
-          }
-        }
-      }
-      const unique = next.filter((candidate, index) => {
-        return !next.slice(0, index).some((existing) => (
-          Math.abs(existing.x - candidate.x) < 1
-          && Math.abs(existing.y - candidate.y) < 1
-          && Math.abs(existing.width - candidate.width) < 1
-          && Math.abs(existing.height - candidate.height) < 1
-        ));
-      });
-      setObstacles(unique);
-      return unique.length > 0;
-    };
-
-    const ensureInitial = () => {
-      const found = update();
-      tries += 1;
-      if (!found && tries < 30) {
-        raf = window.requestAnimationFrame(ensureInitial);
-      }
-    };
-    ensureInitial();
-
-    const observer = new ResizeObserver(() => {
-      void update();
-    });
-    observer.observe(container);
-    if (page) observer.observe(page);
-    window.addEventListener("resize", update);
-    void document.fonts?.ready.then(() => {
-      void update();
-    });
-
-    return () => {
-      if (raf) window.cancelAnimationFrame(raf);
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [pageRef]);
+  }, [headerObstacles, rhythm.rowHeight]);
 
   useEffect(() => {
     if (!enableStochasticPath) return;
@@ -392,8 +240,9 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
       width: size.width,
       height: size.height,
       obstacles,
+      rhythm,
     });
-  }, [obstacles, size.height, size.width]);
+  }, [obstacles, rhythm, size.height, size.width]);
 
   const animationLayoutKey = `${size.width}:${size.height}`;
   const compromiseSequence = useMemo(() => {
