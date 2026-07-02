@@ -1,6 +1,6 @@
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
-import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout, ArticleImageThemeVariants, ArticleVideoAsset } from "./articles";
+import type { Article, ArticleImage, ArticleImageAsset, ArticleImageLayout, ArticleImageThemeVariants, ArticleVideoAsset, ArticleVideoThemeVariants } from "./articles";
 import { withContentLoadTiming } from "./content-load-timing";
 import { getAmplifyServerRuntime } from "./amplify-server-runtime";
 import { resolveReaderStorageUrl, signStorageUrl } from "./reader-storage-url";
@@ -345,7 +345,8 @@ async function normalizeEditionVideoAsset(value: unknown): Promise<ArticleVideoA
       : undefined;
   const alt = typeof record.alt === "string" && record.alt.trim() ? record.alt.trim() : "Edition overview video";
   const caption = typeof record.caption === "string" ? record.caption.trim() : undefined;
-  const credit = typeof record.credit === "string" && record.credit.trim() ? record.credit.trim() : "Anthus Threat Intelligence video";
+  const credit = typeof record.credit === "string" && record.credit.trim() ? record.credit.trim() : (SITE_BRAND.defaultVideoCredit ?? "Edition overview video");
+  const themeVariants = await parseVideoThemeVariantsMetadata(record.themeVariants);
 
   return {
     type: "video",
@@ -356,6 +357,7 @@ async function normalizeEditionVideoAsset(value: unknown): Promise<ArticleVideoA
     credit,
     durationSeconds,
     roles: ["feature"],
+    themeVariants,
   };
 }
 
@@ -770,6 +772,7 @@ async function normalizeVideoAsset(
     credit: asset.credit ?? asset.caption ?? "Media asset",
     durationSeconds,
     roles: parseVideoRoles(asset.role),
+    themeVariants: await parseVideoThemeVariantsMetadata(metadata?.themeVariants),
   };
 }
 
@@ -814,6 +817,20 @@ async function parseThemeVariantsMetadata(value: unknown): Promise<ArticleImageT
   const dark = await resolveThemeVariantSource(variants.dark);
   if (!dark) return undefined;
   return { dark: { src: dark } };
+}
+
+async function parseVideoThemeVariantsMetadata(value: unknown): Promise<ArticleVideoThemeVariants | undefined> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const variants = value as Record<string, unknown>;
+  const [light, dark] = await Promise.all([
+    resolveThemeVariantSource(variants.light),
+    resolveThemeVariantSource(variants.dark),
+  ]);
+  if (!light && !dark) return undefined;
+  return {
+    ...(light ? { light: { src: light } } : {}),
+    ...(dark ? { dark: { src: dark } } : {}),
+  };
 }
 
 async function resolveThemeVariantSource(value: unknown): Promise<string | undefined> {

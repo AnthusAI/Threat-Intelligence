@@ -25,8 +25,8 @@ const {
   BLOG_DEFENSE_COMPROMISE_PATH,
   buildVisibleAttackPath,
   buildCompromiseSequenceFromPath,
-} = require("../lib/blog-defense-graph.ts");
-const { layoutDefenseGraph } = require("../lib/blog-defense-layout.ts");
+} = require("../blog-defense/graph.ts");
+const { layoutDefenseGraph } = require("../blog-defense/layout.ts");
 
 const RIGHT_ARM_HALO_TARGET_IDS = new Set([
   "halo_e",

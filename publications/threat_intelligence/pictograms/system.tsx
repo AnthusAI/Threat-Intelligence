@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { PICTOGRAM_CYCLE_MS, PICTOGRAM_EDGE_WIDTH, PICTOGRAM_NODE_RADIUS } from "../../lib/threat-intelligence-pictograms";
+import { PICTOGRAM_CYCLE_MS, PICTOGRAM_EDGE_WIDTH, PICTOGRAM_NODE_RADIUS } from "./registry";
 
 export type PictogramPalette = {
   frame: string;

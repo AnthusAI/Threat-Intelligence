@@ -88,7 +88,7 @@ async function bundle() {
   const outfile = path.join(outDir, "ti-browser-bundle.js");
 
   await esbuild.build({
-    entryPoints: [path.join(__dirname, "ti-browser-bundle.tsx")],
+    entryPoints: [path.join(projectRoot, "publications/threat_intelligence/videoml/browser-bundle.tsx")],
     bundle: true,
     format: "iife",
     outfile,

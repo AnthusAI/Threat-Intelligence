@@ -92,10 +92,20 @@ export function cloneArticle(article: Article): Article {
           themeVariants: cloneImageThemeVariants(article.image.themeVariants),
         }
       : undefined,
-    video: article.video ? { ...article.video, roles: article.video.roles ? [...article.video.roles] : undefined } : undefined,
+    video: article.video
+      ? {
+          ...article.video,
+          roles: article.video.roles ? [...article.video.roles] : undefined,
+          themeVariants: cloneVideoThemeVariants(article.video.themeVariants),
+        }
+      : undefined,
     assets: article.assets?.map((asset) =>
       asset.type === "video"
-        ? { ...asset, roles: asset.roles ? [...asset.roles] : undefined }
+        ? {
+            ...asset,
+            roles: asset.roles ? [...asset.roles] : undefined,
+            themeVariants: cloneVideoThemeVariants(asset.themeVariants),
+          }
         : {
             ...asset,
             layout: cloneImageLayout(asset.layout),
@@ -118,10 +128,20 @@ function cloneNonArticleItem(item: NonArticlePublicationItem): NonArticlePublica
           themeVariants: cloneImageThemeVariants(item.image.themeVariants),
         }
       : undefined,
-    video: item.video ? { ...item.video, roles: item.video.roles ? [...item.video.roles] : undefined } : undefined,
+    video: item.video
+      ? {
+          ...item.video,
+          roles: item.video.roles ? [...item.video.roles] : undefined,
+          themeVariants: cloneVideoThemeVariants(item.video.themeVariants),
+        }
+      : undefined,
     assets: item.assets?.map((asset) =>
       asset.type === "video"
-        ? { ...asset, roles: asset.roles ? [...asset.roles] : undefined }
+        ? {
+            ...asset,
+            roles: asset.roles ? [...asset.roles] : undefined,
+            themeVariants: cloneVideoThemeVariants(asset.themeVariants),
+          }
         : {
             ...asset,
             layout: cloneImageLayout(asset.layout),
@@ -147,6 +167,15 @@ function cloneImageThemeVariants<T extends ArticleImage["themeVariants"]>(themeV
   if (!themeVariants) return undefined as T;
   return {
     ...themeVariants,
+    dark: themeVariants.dark ? { ...themeVariants.dark } : undefined,
+  } as T;
+}
+
+function cloneVideoThemeVariants<T extends ArticleVideoAsset["themeVariants"]>(themeVariants: T): T {
+  if (!themeVariants) return undefined as T;
+  return {
+    ...themeVariants,
+    light: themeVariants.light ? { ...themeVariants.light } : undefined,
     dark: themeVariants.dark ? { ...themeVariants.dark } : undefined,
   } as T;
 }

@@ -17,9 +17,9 @@ import type { EditionContent, EditionPresentationFormat, EditionSection } from "
 import type { ArticleVideoAsset } from "../lib/articles";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { ArticleVideoFigure } from "./article-video";
-import { BlogPageBackground } from "./blog-page-background";
+import { BlogPageBackground } from "../publications/threat_intelligence/blog-defense/page-background";
 import { Newspaper } from "./newspaper";
-import { PictogramFigure } from "./pictograms/pictogram-figure";
+import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
 
@@ -36,9 +36,7 @@ export type PresentationTarget =
   | { kind: "edition" }
   | { kind: "section"; sectionKey: string };
 
-const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
-const SANS_TEXT_FONT = 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif';
-const PRESENTATION_TEXT_FONT = SITE_BRAND.id === "threat-intelligence" ? SANS_TEXT_FONT : SERIF_TEXT_FONT;
+const PRESENTATION_TEXT_FONT = SITE_BRAND.textFont;
 const BLOG_TEXT_STYLE = {
   fontSize: 18,
   lineHeight: 28,
@@ -133,13 +131,13 @@ function BlogPresentation({
     <main className="presentation-page presentation-page--blog" data-presentation-engine="blog" ref={pageRef}>
       <BlogPageBackground pageRef={pageRef} />
       <PresentationHeader content={content} />
-      {content.editionVideo ? (
-        <EditionOverviewVideo editionVideo={content.editionVideo} />
-      ) : null}
       <SectionNavigation content={content} editionBasePath={editionBasePath} />
       <div className="blog-sections" ref={contentRef}>
-        {sections.map((section) => (
+        {sections.map((section, sectionIndex) => (
           <section className="blog-section" data-edition-section={section.key} id={getSectionAnchorId(section.key)} key={section.key}>
+            {sectionIndex === 0 && content.editionVideo ? (
+              <EditionOverviewVideo editionVideo={content.editionVideo} />
+            ) : null}
             <header className="presentation-section-header">
               <p>{section.label}</p>
               {section.description ? <span>{section.description}</span> : null}
@@ -161,8 +159,8 @@ function BlogPresentation({
         entries={footerEntries}
         onSectionClick={handleBlogFooterSectionClick}
         resolveSectionHref={(entry) => getBlogFooterSectionHref(entry, editionBasePath)}
-        subtitle={SITE_BRAND.id === "threat-intelligence" ? "" : footerSubtitle}
-        title={SITE_BRAND.id === "threat-intelligence" ? "ANTHUS THREAT INTELLIGENCE" : undefined}
+        subtitle={SITE_BRAND.footerSubtitleOverride ?? footerSubtitle}
+        title={SITE_BRAND.footerTitle}
       />
     </main>
   );
@@ -223,10 +221,10 @@ function EditionOverviewVideo({ editionVideo }: { editionVideo: ArticleVideoAsse
 }
 
 function PresentationHeader({ content }: { content: EditionContent }) {
-  const title = SITE_BRAND.id === "papyrus" ? content.title : SITE_BRAND.mastheadTitle;
-  const subtitle = SITE_BRAND.id === "papyrus" ? content.description : SITE_BRAND.mastheadSubtitle;
-  const tagline = SITE_BRAND.id === "papyrus" ? null : SITE_BRAND.mastheadTagline;
-  const displayDate = SITE_BRAND.id === "threat-intelligence"
+  const title = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadTitle : content.title;
+  const subtitle = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadSubtitle : content.description;
+  const tagline = SITE_BRAND.mastheadTagline ?? null;
+  const displayDate = SITE_BRAND.mastheadDateFormat === "formatted"
     ? formatMastheadDate(content.editionDate)
     : content.editionDate;
 
@@ -234,7 +232,7 @@ function PresentationHeader({ content }: { content: EditionContent }) {
     <header className="presentation-header">
       <div className="presentation-header__copy-stack">
         <h1>
-          {SITE_BRAND.id === "threat-intelligence"
+          {SITE_BRAND.mastheadWordSplit
             ? title.split(/\s+/).map((word) => <span key={word}>{word}</span>)
             : title}
         </h1>
@@ -318,7 +316,7 @@ function PresentationItem({
         ) : null}
       </div>
       {image ? (
-        <div className={`presentation-item__media${video ? " presentation-item__media--has-video" : ""}`}>
+        <div className="presentation-item__media">
           <PictogramFigure
             alt={image.alt}
             caption={image.caption}
@@ -332,7 +330,15 @@ function PresentationItem({
             themeVariants={image.themeVariants}
             width={1200}
           />
-          {video ? <span className="video-play-badge" aria-hidden="true">▶</span> : null}
+        </div>
+      ) : null}
+      {video && mode === "blog" ? (
+        <div className="presentation-item__video">
+          <ArticleVideoFigure
+            figureClassName="presentation-item__video-figure article-video"
+            slug={item.slug}
+            video={video}
+          />
         </div>
       ) : null}
     </article>
@@ -401,7 +407,7 @@ function usePresentationTargetScroll(targetSection: EditionSection | undefined) 
 }
 
 function getSectionHref(content: EditionContent, section: EditionSection, editionBasePath?: string): string {
-  if (SITE_BRAND.id === "threat-intelligence") {
+  if (SITE_BRAND.sectionLinkStrategy === "anchor") {
     const anchor = `#${getSectionAnchorId(section.key)}`;
     return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
   }

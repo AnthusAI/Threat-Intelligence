@@ -93,6 +93,7 @@ def resolve_seed_content_path(options: dict[str, Any]) -> tuple[Path, str]:
         return SEED_CONTENT_PATH, profile_id
 
     candidates = [
+        PAPYRUS_ROOT / "publications" / profile_id.replace("-", "_") / "seed" / "seed-edition-content.json",
         PAPYRUS_ROOT / "amplify" / "seed" / "profiles" / profile_id / "seed-edition-content.json",
         SEED_CONTENT_PATH,
     ]
@@ -655,6 +656,17 @@ def video_media_metadata(asset: dict[str, Any]) -> dict[str, Any]:
     duration = asset.get("durationSeconds")
     if isinstance(duration, (int, float)):
         metadata["durationSeconds"] = duration
+    theme_variants = nested_get(asset, "themeVariants")
+    if isinstance(theme_variants, dict):
+        variants: dict[str, Any] = {}
+        light = theme_variants.get("light")
+        if isinstance(light, dict) and normalize_string(light.get("src")):
+            variants["light"] = {"sourceUrl": light["src"]}
+        dark = theme_variants.get("dark")
+        if isinstance(dark, dict) and normalize_string(dark.get("src")):
+            variants["dark"] = {"sourceUrl": dark["src"]}
+        if variants:
+            metadata["themeVariants"] = variants
     return metadata
 
 

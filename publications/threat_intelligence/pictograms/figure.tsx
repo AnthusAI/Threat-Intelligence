@@ -1,16 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import type { ArticleImageLayout, ArticleImageThemeVariants } from "../../lib/articles";
-import { shouldBypassImageOptimization } from "../../lib/image-url";
-import { resolveThemedImageSrc } from "../../lib/themed-image";
+import type { ArticleImageLayout, ArticleImageThemeVariants } from "../../../lib/articles";
+import { shouldBypassImageOptimization } from "../../../lib/image-url";
+import { resolveThemedImageSrc } from "../../../lib/themed-image";
 import {
   getThreatIntelligencePictogramPhaseOffset,
   isThreatIntelligencePictogramSlug,
-} from "../../lib/threat-intelligence-pictograms";
-import { useResolvedPapyrusTheme } from "../use-resolved-papyrus-theme";
-import { THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY } from "./pictogram-art";
-import { PICTOGRAM_PALETTE, PictogramFrame, usePictogramMotion } from "./pictogram-system";
+} from "./registry";
+import { useResolvedPapyrusTheme } from "../../../components/use-resolved-papyrus-theme";
+import { THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY } from "./art";
+import { PICTOGRAM_PALETTE, PictogramFrame, usePictogramMotion } from "./system";
 
 type PictogramFigureProps = {
   alt: string;

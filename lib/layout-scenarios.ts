@@ -4,7 +4,7 @@ import { createEditionSectionPlan } from "./edition-sections";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
 import { SITE_BRAND } from "./site-brand";
-import threatIntelligenceSeedContent from "../amplify/seed/profiles/threat-intelligence/seed-edition-content.json";
+import threatIntelligenceSeedContent from "../publications/threat_intelligence/seed/seed-edition-content.json";
 
 export type LayoutScenario = EditionContent & {
   source: "scenario";

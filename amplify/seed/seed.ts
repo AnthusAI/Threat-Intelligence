@@ -5,7 +5,7 @@ import { addToUserGroup, createAndSignUpUser, signInUser } from "@aws-amplify/se
 import { Amplify, type ResourcesConfig } from "aws-amplify";
 import { generateClient } from "aws-amplify/data";
 import { signOut } from "aws-amplify/auth";
-import { uploadData } from "aws-amplify/storage";
+import { getProperties, uploadData } from "aws-amplify/storage";
 import YAML from "yaml";
 import type { Schema } from "../data/resource";
 import type { Article, ArticleImageAsset, ArticleVideoAsset } from "../../lib/articles";
@@ -416,8 +416,32 @@ async function main() {
     }
 
     const editionVideo = getSeedEditionContentSource().content.video;
-    if (editionVideo && shouldSeedVideoUploads()) {
-      await uploadSeedEditionVideo(editionConfig.slug, editionVideo);
+    if (editionVideo) {
+      const editionVideoRecord = await buildSeedEditionVideoMetadata(editionConfig.slug, editionVideo);
+      const updatedMetadata = {
+        ...editionConfig.metadata,
+        editionVideo: editionVideoRecord,
+      };
+      if (JSON.stringify(updatedMetadata) !== JSON.stringify(editionConfig.metadata)) {
+        await upsert("Edition", {
+          ...editionRecord,
+          metadata: toAwsJson(updatedMetadata),
+        });
+        await upsert("PublishedEdition", {
+          id: publishedEditionId(editionConfig.id),
+          sourceEditionId: editionRecord.id,
+          editionLineageId: editionRecord.lineageId,
+          versionNumber: editionRecord.versionNumber,
+          slug: editionConfig.slug,
+          title: editionConfig.title,
+          status: "published",
+          editionDate: editionConfig.publishDate,
+          publishedAt: editionConfig.publishedAt,
+          description: editionConfig.description,
+          layoutPlan: toAwsJson(editionConfig.layoutPlan),
+          metadata: toAwsJson(updatedMetadata),
+        });
+      }
     }
 
     console.log(`Seeded ${orderedArticles.length} articles into Amplify Data and Storage.`);
@@ -728,11 +752,13 @@ async function seedArticle(article: Article, index: number, editionConfig: SeedE
     const mediaId = `media-${article.slug}-video`;
     const mediaSortKey = `${String(videoIndex + 1).padStart(3, "0")}#${article.slug}-lead-video`;
     let storagePath: string | undefined;
+    let uploadedVideoThemeVariants: UploadedVideoThemeVariants | undefined;
     if (shouldSeedVideoUploads()) {
       const uploaded = await uploadSeedVideo(article, videoAsset);
       storagePath = uploaded.storagePath;
+      uploadedVideoThemeVariants = uploaded.themeVariants;
     }
-    const videoMetadata = getVideoMediaMetadata(videoAsset);
+    const videoMetadata = getVideoMediaMetadata(videoAsset, uploadedVideoThemeVariants);
     const commonVideo = {
       type: "video" as const,
       role: "lead",
@@ -1020,18 +1046,23 @@ async function uploadSeedImage(article: Article, asset: ArticleImageAsset, index
     };
   }
 
-  const payload = await loadImagePayload(asset.src);
-  const extension = getImageExtension(payload.contentType, asset.src);
+  const extension = guessImageExtension(asset.src);
   const storagePath = `media/articles/${article.slug}/${String(index + 1).padStart(2, "0")}-${asset.id}.${extension}`;
-
-  await uploadData({
-    path: storagePath,
-    data: payload.data,
-    options: {
-      contentType: payload.contentType,
-      cacheControl: "public, max-age=31536000, immutable",
-    },
-  }).result;
+  const localFilepath = resolveLocalSeedFilepath(asset.src);
+  if (localFilepath && (await storageObjectMatchesLocal(storagePath, localFilepath))) {
+    console.log(`seed\timage-skip\t${storagePath}`);
+  } else {
+    const payload = await loadImagePayload(asset.src);
+    console.log(`seed\timage-upload\t${storagePath}`);
+    await uploadData({
+      path: storagePath,
+      data: payload.data,
+      options: {
+        contentType: payload.contentType,
+        cacheControl: "public, max-age=31536000, immutable",
+      },
+    }).result;
+  }
 
   const themeVariants: UploadedImageThemeVariants = {};
   if (asset.themeVariants?.dark?.src) {
@@ -1071,26 +1102,128 @@ function shouldSeedVideoUploads(): boolean {
   return process.env.PAPYRUS_SEED_VIDEOS === "1";
 }
 
-async function uploadSeedEditionVideo(editionSlug: string, asset: ArticleVideoAsset) {
-  const payload = await loadVideoPayload(asset.src);
-  const storagePath = `media/editions/${editionSlug}/edition-overview.mp4`;
-
-  await uploadData({
-    path: storagePath,
-    data: payload.data,
-    options: {
-      contentType: payload.contentType,
-      cacheControl: "public, max-age=31536000, immutable",
-    },
-  }).result;
-
-  return { storagePath };
+/**
+ * Resolves a seed asset `src` to a local filesystem path, or null when the src
+ * is a remote URL (which we cannot cheaply HEAD-compare via Amplify Storage).
+ */
+function resolveLocalSeedFilepath(src: string): string | null {
+  if (/^https?:\/\//.test(src)) return null;
+  if (path.isAbsolute(src) && fs.existsSync(src)) return src;
+  return path.join(process.cwd(), src.startsWith("/") ? path.join("public", src.slice(1)) : src);
 }
 
-async function uploadSeedVideo(article: Article, asset: ArticleVideoAsset) {
-  const payload = await loadVideoPayload(asset.src);
-  const storagePath = `media/articles/${article.slug}/video-${article.slug}.mp4`;
+/**
+ * Returns true when the S3 object at `storagePath` already has the same bytes as
+ * the local file at `filepath`, so the seed can skip re-uploading it. Uses a
+ * cheap HEAD (getProperties) for size + ETag; only reads the local file to
+ * compute an MD5 when the sizes already match. For single-part PUTs (all seed
+ * media are well under the 5 MB multipart threshold) the S3 ETag is the object's
+ * MD5, so a size + ETag match is a reliable identity check with no data transfer.
+ * On any error or missing object, returns false so the caller uploads.
+ */
+async function storageObjectMatchesLocal(storagePath: string, filepath: string): Promise<boolean> {
+  let props;
+  try {
+    props = await getProperties({ path: storagePath });
+  } catch {
+    return false;
+  }
+  const localSize = fs.statSync(filepath).size;
+  const remoteSize = (props as { size?: number }).size;
+  if (remoteSize !== localSize) return false;
+  const localMd5 = createHash("md5").update(fs.readFileSync(filepath)).digest("hex");
+  const etag = String((props as { eTag?: string }).eTag ?? "").replace(/^"|"$/g, "");
+  return etag === localMd5;
+}
 
+type UploadedVideoThemeVariants = {
+  light?: { storagePath: string };
+  dark?: { storagePath: string };
+};
+
+async function buildSeedEditionVideoMetadata(
+  editionSlug: string,
+  asset: ArticleVideoAsset,
+): Promise<Record<string, unknown>> {
+  const baseRecord: Record<string, unknown> = { ...asset };
+  if (!shouldSeedVideoUploads()) return baseRecord;
+  const uploaded = await uploadSeedEditionVideo(editionSlug, asset);
+  baseRecord.storagePath = uploaded.storagePath;
+  const themeVariants = buildVideoThemeVariantsMetadata(asset.themeVariants, uploaded.themeVariants);
+  if (themeVariants) baseRecord.themeVariants = themeVariants;
+  return baseRecord;
+}
+
+async function uploadSeedEditionVideo(
+  editionSlug: string,
+  asset: ArticleVideoAsset,
+): Promise<{ storagePath: string; themeVariants?: UploadedVideoThemeVariants }> {
+  const storagePath = `media/editions/${editionSlug}/edition-overview.mp4`;
+  await uploadSeedVideoFile(storagePath, asset.src);
+  const themeVariants: UploadedVideoThemeVariants = {};
+  const lightSrc = asset.themeVariants?.light?.src;
+  if (lightSrc) {
+    themeVariants.light = {
+      storagePath: await uploadSeedVideoFile(
+        `media/editions/${editionSlug}/edition-overview-light.mp4`,
+        lightSrc,
+      ),
+    };
+  }
+  const darkSrc = asset.themeVariants?.dark?.src;
+  if (darkSrc) {
+    themeVariants.dark = {
+      storagePath: await uploadSeedVideoFile(
+        `media/editions/${editionSlug}/edition-overview-dark.mp4`,
+        darkSrc,
+      ),
+    };
+  }
+  return {
+    storagePath,
+    themeVariants: Object.keys(themeVariants).length ? themeVariants : undefined,
+  };
+}
+
+async function uploadSeedVideo(
+  article: Article,
+  asset: ArticleVideoAsset,
+): Promise<{ storagePath: string; themeVariants?: UploadedVideoThemeVariants }> {
+  const storagePath = `media/articles/${article.slug}/video-${article.slug}.mp4`;
+  await uploadSeedVideoFile(storagePath, asset.src);
+  const themeVariants: UploadedVideoThemeVariants = {};
+  const lightSrc = asset.themeVariants?.light?.src;
+  if (lightSrc) {
+    themeVariants.light = {
+      storagePath: await uploadSeedVideoFile(
+        `media/articles/${article.slug}/video-${article.slug}-light.mp4`,
+        lightSrc,
+      ),
+    };
+  }
+  const darkSrc = asset.themeVariants?.dark?.src;
+  if (darkSrc) {
+    themeVariants.dark = {
+      storagePath: await uploadSeedVideoFile(
+        `media/articles/${article.slug}/video-${article.slug}-dark.mp4`,
+        darkSrc,
+      ),
+    };
+  }
+  return {
+    storagePath,
+    themeVariants: Object.keys(themeVariants).length ? themeVariants : undefined,
+  };
+}
+
+async function uploadSeedVideoFile(storagePath: string, assetSrc: string): Promise<string> {
+  const localFilepath = resolveLocalSeedFilepath(assetSrc);
+  if (localFilepath && (await storageObjectMatchesLocal(storagePath, localFilepath))) {
+    console.log(`seed\tvideo-skip\t${storagePath}`);
+    return storagePath;
+  }
+  const payload = await loadVideoPayload(assetSrc);
+  console.log(`seed\tvideo-upload\t${storagePath}`);
   await uploadData({
     path: storagePath,
     data: payload.data,
@@ -1100,7 +1233,7 @@ async function uploadSeedVideo(article: Article, asset: ArticleVideoAsset) {
     },
   }).result;
 
-  return { storagePath };
+  return storagePath;
 }
 
 async function loadVideoPayload(src: string): Promise<{ data: Uint8Array; contentType: string }> {
@@ -1117,11 +1250,45 @@ async function loadVideoPayload(src: string): Promise<{ data: Uint8Array; conten
   };
 }
 
-function getVideoMediaMetadata(asset: ArticleVideoAsset): Record<string, unknown> {
+function getVideoMediaMetadata(
+  asset: ArticleVideoAsset,
+  uploadedThemeVariants?: UploadedVideoThemeVariants,
+): Record<string, unknown> {
+  const themeVariants = buildVideoThemeVariantsMetadata(asset.themeVariants, uploadedThemeVariants);
   return {
     sourceUrl: asset.src,
     ...(asset.posterSrc ? { posterSrc: asset.posterSrc } : {}),
     ...(asset.durationSeconds ? { durationSeconds: asset.durationSeconds } : {}),
+    ...(themeVariants ? { themeVariants } : {}),
+  };
+}
+
+function buildVideoThemeVariantsMetadata(
+  seedVariants: ArticleVideoAsset["themeVariants"],
+  uploadedThemeVariants?: UploadedVideoThemeVariants,
+): Record<string, unknown> | undefined {
+  const lightSrc = seedVariants?.light?.src;
+  const darkSrc = seedVariants?.dark?.src;
+  const lightStoragePath = uploadedThemeVariants?.light?.storagePath;
+  const darkStoragePath = uploadedThemeVariants?.dark?.storagePath;
+  if (!lightSrc && !darkSrc && !lightStoragePath && !darkStoragePath) return undefined;
+  return {
+    ...(lightSrc || lightStoragePath
+      ? {
+          light: {
+            ...(lightStoragePath ? { storagePath: lightStoragePath } : {}),
+            ...(lightSrc ? { sourceUrl: lightSrc } : {}),
+          },
+        }
+      : {}),
+    ...(darkSrc || darkStoragePath
+      ? {
+          dark: {
+            ...(darkStoragePath ? { storagePath: darkStoragePath } : {}),
+            ...(darkSrc ? { sourceUrl: darkSrc } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -1132,9 +1299,15 @@ async function uploadSeedImageVariant(
   variant: "dark",
   src: string,
 ): Promise<string> {
-  const payload = await loadImagePayload(src);
-  const extension = getImageExtension(payload.contentType, src);
+  const extension = guessImageExtension(src);
   const storagePath = `media/articles/${article.slug}/${String(index + 1).padStart(2, "0")}-${asset.id}-${variant}.${extension}`;
+  const localFilepath = resolveLocalSeedFilepath(src);
+  if (localFilepath && (await storageObjectMatchesLocal(storagePath, localFilepath))) {
+    console.log(`seed\timage-skip\t${storagePath}`);
+    return storagePath;
+  }
+  const payload = await loadImagePayload(src);
+  console.log(`seed\timage-upload\t${storagePath}`);
   await uploadData({
     path: storagePath,
     data: payload.data,
@@ -1398,6 +1571,17 @@ function getImageExtension(contentType: string, src: string): string {
 
   const match = new URL(src, "file:///").pathname.match(/\.([a-z0-9]+)$/i);
   return match?.[1] ?? "jpg";
+}
+
+/**
+ * Derives the storage extension for an image src without loading the file, so
+ * the storage path can be computed for a pre-upload identity check. Local files
+ * use the filename content type; remote URLs fall back to the URL's extension.
+ */
+function guessImageExtension(src: string): string {
+  const local = resolveLocalSeedFilepath(src);
+  if (local) return getImageExtension(getContentTypeFromFilename(local), src);
+  return getImageExtension("", src);
 }
 
 function getContentTypeFromFilename(filename: string): string {

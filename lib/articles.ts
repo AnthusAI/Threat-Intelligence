@@ -25,6 +25,11 @@ export type ArticleImageThemeVariants = {
   };
 };
 
+export type ArticleVideoThemeVariants = {
+  light?: { src: string };
+  dark?: { src: string };
+};
+
 export type ArticleImage = {
   src: string;
   alt: string;
@@ -50,6 +55,7 @@ export type ArticleVideoAsset = {
   credit: string;
   durationSeconds?: number;
   roles?: Array<"lead" | "feature" | "thumbnail">;
+  themeVariants?: ArticleVideoThemeVariants;
 };
 
 export type ArticleAsset = ArticleImageAsset | ArticleVideoAsset;

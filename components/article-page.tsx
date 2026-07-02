@@ -7,7 +7,7 @@ import type { PublicationItem } from "../lib/publication-items";
 import { getPublicationItemVideoAsset } from "../lib/publication-items";
 import { SITE_BRAND } from "../lib/site-brand";
 import { ArticleVideoFigure } from "./article-video";
-import { PictogramFigure } from "./pictograms/pictogram-figure";
+import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
 
 export type ArticlePageEditionFooter = {
@@ -35,6 +35,11 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
         <span>{article.section}</span>
       </nav>
       <article className="article-page">
+        {article.video ? (
+          <div className="article-page__hero-video">
+            <ArticleVideoFigure slug={article.slug} video={article.video} />
+          </div>
+        ) : null}
         <header>
           <p className="story-label">{article.section}</p>
           <h1>{article.headline}</h1>
@@ -46,7 +51,7 @@ export function ArticlePageView({ article, backHref, backLabel = SITE_BRAND.back
           </div>
         </header>
         <div className="article-body">
-          <ArticleLeadMedia article={article} />
+          <ArticleLeadPictogram article={article} />
           {article.body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -71,6 +76,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
   }
 
   const itemDate = editionDate ? formatArticleDate(editionDate) : null;
+  const itemVideo = getPublicationItemVideoAsset(item);
 
   return (
     <main className={getArticleShellClassName(editionFooter)}>
@@ -79,6 +85,11 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
         <span>{item.section ?? item.type}</span>
       </nav>
       <article className="article-page" data-item-type={item.type}>
+        {itemVideo ? (
+          <div className="article-page__hero-video">
+            <ArticleVideoFigure slug={item.slug} video={itemVideo} />
+          </div>
+        ) : null}
         <header>
           <p className="story-label">{item.section ?? item.type}</p>
           <h1>{item.title}</h1>
@@ -90,7 +101,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
           ) : null}
         </header>
         <div className="article-body">
-          <ItemLeadMedia item={item} />
+          <ItemLeadPictogram item={item} />
           {(item.body ?? []).map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
@@ -101,10 +112,7 @@ export function ItemPageView({ item, backHref, backLabel = "Back to edition", ed
   );
 }
 
-function ArticleLeadMedia({ article }: { article: Article }) {
-  if (article.video) {
-    return <ArticleVideoFigure slug={article.slug} video={article.video} />;
-  }
+function ArticleLeadPictogram({ article }: { article: Article }) {
   if (!article.image) return null;
   return (
     <PictogramFigure
@@ -124,11 +132,7 @@ function ArticleLeadMedia({ article }: { article: Article }) {
   );
 }
 
-function ItemLeadMedia({ item }: { item: PublicationItem }) {
-  const video = getPublicationItemVideoAsset(item);
-  if (video) {
-    return <ArticleVideoFigure slug={item.slug} video={video} />;
-  }
+function ItemLeadPictogram({ item }: { item: PublicationItem }) {
   const image = item.type === "article" ? item.image : item.image;
   if (!image) return null;
   return (

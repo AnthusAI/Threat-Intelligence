@@ -196,7 +196,7 @@ from .steering import (
     resolve_classifier_for_corpus,
     selected_corpus_configs,
 )
-from .videos_commands import videos_attach, videos_render, videos_seed
+from publications.threat_intelligence.videoml.videos_commands import videos_attach, videos_render, videos_seed
 
 
 PORTED_COMMANDS = frozenset(

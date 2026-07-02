@@ -2,8 +2,8 @@ import {
   getThreatIntelligencePictogramPhaseOffset,
   PICTOGRAM_CYCLE_MS,
   type ThreatIntelligencePictogramSlug,
-} from "./threat-intelligence-pictograms";
-import type { PictogramMotion } from "../components/pictograms/pictogram-system";
+} from "./registry";
+import type { PictogramMotion } from "./system";
 
 export function createFrameDrivenPictogramMotion(
   frame: number,

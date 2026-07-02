@@ -6,7 +6,7 @@ import {
   BLOG_DEFENSE_VIEWBOX_WIDTH,
   type BlogDefenseEdge,
   type BlogDefenseNode,
-} from "./blog-defense-graph";
+} from "./graph";
 
 export type LayoutRect = {
   x: number;

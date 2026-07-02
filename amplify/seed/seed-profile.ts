@@ -56,6 +56,7 @@ function resolveSeedEditionSourcePath(profileId: string): string {
   const candidates = profileId === DEFAULT_SEED_PROFILE
     ? [path.join(seedDir, "seed-edition-content.json")]
     : [
+        path.join(process.cwd(), "publications", profileId.replace(/-/g, "_"), "seed", "seed-edition-content.json"),
         path.join(seedDir, "profiles", profileId, "seed-edition-content.json"),
         path.join(seedDir, "seed-edition-content.json"),
       ];

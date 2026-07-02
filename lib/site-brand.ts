@@ -1,4 +1,5 @@
 import type { EditionPresentationFormat } from "./content-types";
+import { threatIntelligenceBrand } from "../publications/threat_intelligence/brand";
 
 export type SiteBrandId = "papyrus" | "threat-intelligence";
 
@@ -14,7 +15,17 @@ export type SiteBrand = {
   placeholderByline: string;
   defaultPresentation: EditionPresentationFormat;
   forcedPresentation?: EditionPresentationFormat;
+  textFont: string;
+  footerTitle?: string;
+  footerSubtitleOverride?: string;
+  mastheadWordSplit: boolean;
+  mastheadDateFormat: "raw" | "formatted";
+  mastheadSource: "edition" | "brand";
+  sectionLinkStrategy: "route" | "anchor";
+  defaultVideoCredit?: string;
 };
+
+const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
 
 const SITE_BRANDS: Record<SiteBrandId, SiteBrand> = {
   papyrus: {
@@ -27,20 +38,13 @@ const SITE_BRANDS: Record<SiteBrandId, SiteBrand> = {
     articleTitleSuffix: "Papyrus",
     placeholderByline: "Papyrus",
     defaultPresentation: "newspaper",
+    textFont: SERIF_TEXT_FONT,
+    mastheadWordSplit: false,
+    mastheadDateFormat: "raw",
+    mastheadSource: "edition",
+    sectionLinkStrategy: "route",
   },
-  "threat-intelligence": {
-    id: "threat-intelligence",
-    appTitle: "Threat Intelligence",
-    appDescription: "ANTHUS THREAT INTELLIGENCE from Anthus AI Solutions.",
-    mastheadTitle: "THREAT INTELLIGENCE",
-    mastheadSubtitle: "from Anthus AI Solutions",
-    mastheadTagline: "Practical advice for staying secure as the threat landscape shifts.",
-    backToHomeLabel: "Back to Threat Intelligence",
-    articleTitleSuffix: "Threat Intelligence",
-    placeholderByline: "Anthus AI Solutions",
-    defaultPresentation: "blog",
-    forcedPresentation: "blog",
-  },
+  "threat-intelligence": threatIntelligenceBrand,
 };
 
 function normalizeSiteBrandId(value: string | undefined | null): SiteBrandId | null {

@@ -2,7 +2,7 @@
 
 import { motion } from "motion/react";
 import type { CSSProperties, ReactElement } from "react";
-import type { ThreatIntelligencePictogramSlug } from "../../lib/threat-intelligence-pictograms";
+import type { ThreatIntelligencePictogramSlug } from "./registry";
 import {
   Box,
   Line,
@@ -11,7 +11,7 @@ import {
   pointsPath,
   type PictogramMotion,
   type PictogramPalette,
-} from "./pictogram-system";
+} from "./system";
 
 export type RegisteredPictogramProps = {
   alt: string;

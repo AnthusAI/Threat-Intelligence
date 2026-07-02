@@ -7,11 +7,11 @@ import {
   buildCompromiseSequenceFromPath,
   buildVisibleAttackPath,
   type BlogDefenseCompromiseStep,
-} from "../lib/blog-defense-graph";
-import { layoutDefenseGraph, type LayoutDefenseNode } from "../lib/blog-defense-layout";
-import { SITE_BRAND } from "../lib/site-brand";
-import { PICTOGRAM_CYCLE_MS } from "../lib/threat-intelligence-pictograms";
-import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
+} from "./graph";
+import { layoutDefenseGraph, type LayoutDefenseNode } from "./layout";
+import { SITE_BRAND } from "../../../lib/site-brand";
+import { PICTOGRAM_CYCLE_MS } from "../pictograms/registry";
+import { useResolvedPapyrusTheme } from "../../../components/use-resolved-papyrus-theme";
 
 const THROB_MS = 190;
 const COMPROMISE_MS = 120;
@@ -401,6 +401,7 @@ export function BlogPageBackground({ pageRef }: BlogPageBackgroundProps) {
 
   const animationLayoutKey = `${size.width}:${size.height}`;
   const compromiseSequence = useMemo(() => {
+    void attackCycle; // force recompute on attack cycle change
     if (!graphLayout) return [];
     const visiblePath = buildVisibleAttackPath({
       nodes: graphLayout.nodes,

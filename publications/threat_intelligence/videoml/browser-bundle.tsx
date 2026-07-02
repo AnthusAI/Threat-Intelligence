@@ -1,5 +1,5 @@
 import React from "react";
-import { ThreatIntelligencePictogramVideo } from "../../components/videoml/threat-intelligence-pictogram-video";
+import { ThreatIntelligencePictogramVideo } from "./pictogram-video";
 
 import "babulus-browser-bundle";
 
@@ -27,6 +27,7 @@ type TiTitleSlideProps = Record<string, unknown> & {
   titleWeight?: number;
   eyebrowWeight?: number;
   eyebrowLetterSpacing?: number;
+  eyebrowSize?: number;
   eyebrowRule?: boolean;
   padding?: number;
   gap?: number;
@@ -40,28 +41,34 @@ function EyebrowWithRules({
   label,
   letterSpacing,
   weight,
+  fontSize = 14,
 }: {
   label: string;
   letterSpacing: number;
   weight: number;
+  fontSize?: number;
 }) {
+  const ruleHeight = Math.round(fontSize);
   return (
-    <div style={{ alignItems: "center", display: "flex", gap: 16, marginBottom: 12, width: "100%" }}>
-      <div style={{ background: "var(--ti-alarm-red)", flexShrink: 0, height: 4, width: 32 }} />
+    <div style={{ alignItems: "center", display: "flex", gap: 12, marginBottom: 14, width: "100%" }}>
+      <div style={{ background: "var(--ti-alarm-red)", flex: 1, height: ruleHeight, minWidth: 24 }} />
       <span
         style={{
+          background: "var(--background, #191918)",
           color: "var(--ti-headline-color, var(--foreground-strong, #eeeeec))",
           fontFamily: fontEyebrow,
-          fontSize: 14,
+          fontSize,
           fontWeight: weight,
           letterSpacing: `${letterSpacing}em`,
+          lineHeight: 1,
+          padding: "0 6px",
           textTransform: "uppercase",
           whiteSpace: "nowrap",
         }}
       >
         {label}
       </span>
-      <div style={{ background: "var(--ti-alarm-red)", flex: 1, height: 4, minWidth: 32 }} />
+      <div style={{ background: "var(--ti-alarm-red)", flex: 1, height: ruleHeight, minWidth: 24 }} />
     </div>
   );
 }
@@ -109,6 +116,7 @@ function TiTitleSlide(props: TiTitleSlideProps) {
     titleWeight = 900,
     eyebrowWeight = 900,
     eyebrowLetterSpacing = 0.09,
+    eyebrowSize = 14,
     eyebrowRule = false,
     padding = 80,
     gap = 24,
@@ -129,7 +137,12 @@ function TiTitleSlide(props: TiTitleSlideProps) {
 
   const eyebrowNode =
     eyebrow && eyebrowRule ? (
-      <EyebrowWithRules label={String(eyebrow)} letterSpacing={Number(eyebrowLetterSpacing)} weight={Number(eyebrowWeight)} />
+      <EyebrowWithRules
+        label={String(eyebrow)}
+        letterSpacing={Number(eyebrowLetterSpacing)}
+        weight={Number(eyebrowWeight)}
+        fontSize={Number(eyebrowSize)}
+      />
     ) : eyebrow ? (
       <PlainEyebrow label={String(eyebrow)} letterSpacing={Number(eyebrowLetterSpacing)} weight={Number(eyebrowWeight)} />
     ) : null;

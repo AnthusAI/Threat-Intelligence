@@ -31,18 +31,71 @@ Canonical video palette (approximate hex from Radix sand-dark + tomato accent):
 | surface | `#21201c` | Cards / quote panels |
 | text | `#eeeeec` | Headlines |
 | text muted | `#b5b3ad` | Decks, excerpts |
-| `--ti-alarm-red` | `#e54d2e` | Masthead wordmark, CTA title, quote accent, section rule bars |
-| accent / section rule | `#ec6142` | Legacy emphasis token (quotes may use `--ti-alarm-red`) |
+| `--ti-alarm-red` / `--ti-section-rule` | `#e54d2e` (Radix tomato-9 dark) | Masthead wordmark, CTA title, quote accent, section rule bars |
+| `--ti-pictogram-throb` | `#ac4d39` (Radix tomato-8 dark) | Pictogram pulse accent |
+| pictogram edge / node | `#363a3f` / `#2e3135` (Radix slate-6 / slate-5 dark) | Pictogram strokes and fills |
 
 Backgrounds are **flat solid `#191918` paper** — no gradient bands. This matches the TI blog brand language.
 
 Typography intent: Helvetica Neue / system sans stack, weight **900** on headlines and section eyebrows (same as TI blog display type).
 
-Section eyebrows on title slides use **red rule bars** flanking the label (matching blog section bands).
+Section eyebrows on title slides mimic the blog **section header** (`.presentation-section-header`): two red bars as tall as the eyebrow text, flanking the label on both sides, with the label centered on a page-background chip. Use `var(--ti-alarm-red)` (Radix tomato-9) for all brand reds — do not substitute lighter or legacy accent hex values.
 
-Implementation lives in `src/papyrus_content/video_pipeline.py` as `TI_SCENE_STYLES` and
-`TI_BACKGROUND_PROPS`. Update those constants when the blog theme changes — do not hard-code
+Implementation lives in `src/papyrus_content/video_pipeline.py` as `TI_SCENE_STYLES_DARK` and
+`TI_BACKGROUND_PROPS_DARK`. Update those constants when the blog theme changes — do not hard-code
 alternate palettes in one-off DSL files.
+
+## Light and dark dual-render
+
+Threat Intelligence videos support both dark and light reader themes. The render pipeline
+produces two MP4s per video: a dark default (`<slug>.mp4`) and a light variant
+(`<slug>-light.mp4`).
+
+### Light palette
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| `--color-bg` / paper | `#f9f9f8` (sand-2 light) | Flat scene background |
+| surface | `#fcfcfc` (sand-1) | Cards / quote panels |
+| text | `#44403c` (sand-12) | Headlines |
+| text muted | `#696964` (sand-11) | Decks, excerpts |
+| `--ti-alarm-red` / `--ti-section-rule` | `#c54028` (Radix tomato-11) | WCAG-compliant on light paper |
+| `--ti-pictogram-throb` | `#d9542e` (tomato-8 light) | Pictogram pulse accent |
+| pictogram edge / node | `#889096` (slate-8 light) | Pictogram strokes and fills |
+
+Light tomato uses `tomato-11` (`#c54028`) for WCAG contrast on `#f9f9f8` paper — do not use
+the dark-mode `tomato-9` (`#e54d2e`) on light backgrounds.
+
+Implementation: `TI_SCENE_STYLES_LIGHT` and `TI_BACKGROUND_PROPS_LIGHT` in
+`src/papyrus_content/video_pipeline.py`. Theme selection via `scene_styles_for_theme(theme)`
+and `background_props_for_theme(theme)`.
+
+### Render command
+
+```bash
+# Render all 14 MP4s (7 dark + 7 light) — default, 3 parallel jobs
+poetry run papyrus videos seed
+
+# Render with more parallelism (each job spawns a headless Chromium)
+poetry run papyrus videos seed --jobs 4
+
+# Render only one theme
+poetry run papyrus videos seed --theme dark
+poetry run papyrus videos seed --theme light
+
+# Render one article in both themes
+poetry run papyrus videos render --article <slug> --theme both
+```
+
+The `--jobs` flag controls parallel renders (default: `3`). Each job renders one video's themes sequentially (dark before light) so the light variant reuses the dark variant's TTS cache. Different videos run in parallel since each has its own work directory (`videoml-work/<slug>/`).
+
+Babulus caches TTS segments by text content hash, not visual styles. Since the voiceover text is identical across themes, the light render reuses the dark render's cached TTS with zero OpenAI API calls.
+
+### Data flow
+
+- Seed JSON `video.themeVariants.light.src` → `MediaAsset.metadata.themeVariants.light.sourceUrl` (GraphQL)
+- Reader: `ArticleVideoFigure` uses `useResolvedPapyrusTheme()` + `resolveThemedVideoSrc()` to pick the matching `<video>` src at runtime
+- The `<video>` element is keyed by src so React re-mounts on theme switch
 
 ## Pictograms (required)
 
@@ -68,7 +121,7 @@ Always include visual `<layer>` elements. Voice-only DSL produces blank frames.
 
 Preferred components:
 
-- `video-background` — flat TI paper backdrop (`variant: solid`, `#191918`)
+- `video-background` — flat TI paper backdrop (`variant: solid`, dark `#191918` or light `#f9f9f8`)
 - `ti-title-slide` — animated React pictogram + eyebrow / title / subtitle header (lead articles)
 - `title-slide` — text-only scenes (e.g. closing)
 - `quote-card` — pull-quote scenes
@@ -82,6 +135,8 @@ Do not ship scenes with `<voice>` cues only.
 **Article briefings:** hook (cold-open pull quote, if present) → title (pictogram + section eyebrow + headline + deck) → briefing excerpt → second pull quote (if present) → closing CTA.
 
 **Edition overview:** hook (first lead article's `pullQuotes[0]`) → title (edition title + first lead pictogram + tagline) → edition teaser (date + "In this edition" + headline list) → six spotlights → closing CTA.
+
+**Reader placement:** edition overview video on the blog index just above the first section header; article videos on index cards below excerpt/pictogram; article pages show video above title/deck with pictogram in body.
 
 No separate brand-only intro scene on edition overview.
 
@@ -107,6 +162,7 @@ Rules that follow from this:
 - **Excerpts do triple duty**: edition-index hook, full briefing narration, and spotlight tease. Write them for the ear as well as the eye — read them aloud.
 - **Adjacent-scene echo rule.** The hook quote and the deck are spoken ~10 seconds apart; do not let them share distinctive phrasing (a hook of "tireless automation / tireless analysis" followed by a deck opening "Attackers bring tireless automation" reads fine on the page and grates when spoken). Likewise the overview opens tagline → `description` → fixed "practical checks" line back-to-back: keep "practical" (and other tagline words) out of `description`.
 - **Deck = claim, excerpt = hook** — same division of labor as the edition index. The deck states the thesis in one or two tight sentences; the excerpt carries stakes, a question, or a scenario, and must not restate the deck (the title scene and briefing scene would then say the same thing twice in a row).
+- **Pull quotes are verbatim body sentences.** `pullQuotes` are narrated cold opens and must occur verbatim in the article body; video-lead articles require `pullQuotes[0]`. Not every article needs a pull quote — drop a weak one rather than keeping a paraphrase. When weaving, never leave the quote adjacent to the sentence that used to paraphrase it.
 
 ### Pre-render script check
 
@@ -149,27 +205,29 @@ poetry run papyrus videos render --article the-balance-of-power-is-shifting
 Outputs (gitignored):
 
 ```text
-public/seed-art/threat-intelligence/videos/edition-overview.mp4
-public/seed-art/threat-intelligence/videos/<slug>.mp4
+publications/threat_intelligence/seed-art/videos/edition-overview.mp4
+publications/threat_intelligence/seed-art/videos/<slug>.mp4
 ```
+
+Reader URLs: `/seed-art/threat-intelligence/videos/...` (symlinked from `public/`).
 
 Upload during Amplify seed: `PAPYRUS_SEED_VIDEOS=1 npm run seed:amplify`
 
 ## Seed fixture contract
 
 - Edition video: top-level `video` block in
-  `amplify/seed/profiles/threat-intelligence/seed-edition-content.json`
+  `publications/threat_intelligence/seed/seed-edition-content.json`
 - Article videos: per-article `video` blocks on the six lead-pictogram articles
 - Edition video is copied into `Edition.metadata.editionVideo` during seed
 - Blog reader shows edition video below the masthead via `EditionContent.editionVideo`
 
 ## When changing this pipeline
 
-1. Read this skill and `docs/video-pipeline.md`.
-2. Update `video_pipeline.py` (single source for theme + DSL).
+1. Read this skill and `publications/threat_intelligence/docs/video-pipeline.md`.
+2. Update `publications/threat_intelligence/videoml/video_pipeline.py` (single source for theme + DSL).
 3. Re-render with `poetry run papyrus videos seed`.
 4. Verify a extracted frame is not solid black and pictograms are visible.
-5. Update tests in `procedures/newsroom/tests/test_papyrus_content.py` if DSL shape changes.
+5. Update tests in `publications/threat_intelligence/tests/test_video_pipeline.py` if DSL shape changes.
 
 ## Improvement ideas (not yet implemented)
 

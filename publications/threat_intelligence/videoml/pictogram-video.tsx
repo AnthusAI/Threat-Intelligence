@@ -1,13 +1,13 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { createFrameDrivenPictogramMotion } from "../../lib/pictogram-video-motion";
+import { createFrameDrivenPictogramMotion } from "../pictograms/video-motion";
 import {
   isThreatIntelligencePictogramSlug,
   type ThreatIntelligencePictogramSlug,
-} from "../../lib/threat-intelligence-pictograms";
-import { getPictogramRegistryEntry } from "../pictograms/pictogram-art";
-import { PICTOGRAM_PALETTE } from "../pictograms/pictogram-system";
+} from "../pictograms/registry";
+import { getPictogramRegistryEntry } from "../pictograms/art";
+import { PICTOGRAM_PALETTE } from "../pictograms/system";
 
 const PICTOGRAM_FRAME_STYLE: CSSProperties = {
   aspectRatio: "var(--pictogram-aspect-ratio, 1)",
