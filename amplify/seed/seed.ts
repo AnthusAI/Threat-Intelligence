@@ -10,6 +10,7 @@ import YAML from "yaml";
 import type { Schema } from "../data/resource";
 import type { Article, ArticleImageAsset, ArticleVideoAsset } from "../../lib/articles";
 import { getSeedEditionConfig, getSeedEditionProfileInfo, seedEditionArticles } from "./seed-edition-content";
+import { getSeedEditionContentSource } from "./seed-profile";
 
 const EDITOR_GROUP = "editor";
 const ADMIN_GROUP = "admin";
