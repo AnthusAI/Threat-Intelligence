@@ -178,7 +178,11 @@ def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "source": "fixture-seed",
             "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
-            **({"editionVideo": payload["video"]} if isinstance(payload.get("video"), dict) else {}),
+            **(
+                {"editionVideo": build_edition_video_metadata(payload, payload["video"])}
+                if isinstance(payload.get("video"), dict)
+                else {}
+            ),
         },
         "articleOrder": item_ids,
         "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(payload["articles"]), payload.get("houseAds")),
@@ -387,7 +391,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
             "caption": video_asset.get("caption") or video_asset.get("credit"),
             "credit": video_asset.get("credit"),
             "aspectRatio": 16 / 9,
-            "metadata": to_aws_json(video_media_metadata(video_asset)),
+            "metadata": to_aws_json(video_media_metadata(video_asset, article_slug=str(article["slug"]))),
         }
         records.append(record("MediaAsset", {"id": media_id, "itemId": item_id, **video_common}))
         records.append(
@@ -602,9 +606,33 @@ def should_seed_video_uploads() -> bool:
     return os.environ.get("PAPYRUS_SEED_VIDEOS") == "1"
 
 
+def article_video_storage_path(slug: str) -> str:
+    return f"media/articles/{slug}/video-{slug}.mp4"
+
+
+def article_video_light_storage_path(slug: str) -> str:
+    return f"media/articles/{slug}/video-{slug}-light.mp4"
+
+
+def article_video_dark_storage_path(slug: str) -> str:
+    return f"media/articles/{slug}/video-{slug}-dark.mp4"
+
+
+def edition_video_storage_path(edition_slug: str) -> str:
+    return f"media/editions/{edition_slug}/edition-overview.mp4"
+
+
+def edition_video_light_storage_path(edition_slug: str) -> str:
+    return f"media/editions/{edition_slug}/edition-overview-light.mp4"
+
+
+def edition_video_dark_storage_path(edition_slug: str) -> str:
+    return f"media/editions/{edition_slug}/edition-overview-dark.mp4"
+
+
 def seed_video_upload_metadata(article: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
     return {
-        "storagePath": f"media/articles/{article['slug']}/video-{article['slug']}.mp4",
+        "storagePath": article_video_storage_path(str(article["slug"])),
         "contentType": "video/mp4",
     }
 
@@ -612,31 +640,114 @@ def seed_video_upload_metadata(article: dict[str, Any], asset: dict[str, Any]) -
 def seed_edition_video_upload_metadata(payload: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
     edition_slug = str(payload.get("slug") or payload.get("id") or "edition").strip()
     return {
-        "storagePath": f"media/editions/{edition_slug}/edition-overview.mp4",
+        "storagePath": edition_video_storage_path(edition_slug),
         "contentType": "video/mp4",
     }
 
 
+def build_video_theme_variants_metadata(
+    asset: dict[str, Any],
+    *,
+    article_slug: str | None = None,
+    edition_slug: str | None = None,
+) -> dict[str, Any] | None:
+    theme_variants = nested_get(asset, "themeVariants")
+    if not isinstance(theme_variants, dict):
+        return None
+
+    variants: dict[str, Any] = {}
+    light = theme_variants.get("light")
+    light_src = normalize_string(light.get("src")) if isinstance(light, dict) else None
+    light_storage_path = (
+        article_video_light_storage_path(article_slug)
+        if article_slug
+        else edition_video_light_storage_path(edition_slug or "current")
+        if edition_slug
+        else None
+    )
+    if light_src or light_storage_path:
+        entry: dict[str, Any] = {}
+        if light_storage_path:
+            entry["storagePath"] = light_storage_path
+        if light_src:
+            entry["sourceUrl"] = light_src
+        variants["light"] = entry
+
+    dark = theme_variants.get("dark")
+    dark_src = normalize_string(dark.get("src")) if isinstance(dark, dict) else None
+    dark_storage_path = (
+        article_video_dark_storage_path(article_slug)
+        if article_slug
+        else edition_video_dark_storage_path(edition_slug or "current")
+        if edition_slug
+        else None
+    )
+    if dark_src or dark_storage_path:
+        entry = {}
+        if dark_storage_path:
+            entry["storagePath"] = dark_storage_path
+        if dark_src:
+            entry["sourceUrl"] = dark_src
+        variants["dark"] = entry
+
+    return variants or None
+
+
+def build_edition_video_metadata(payload: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
+    edition_slug = str(payload.get("slug") or payload.get("id") or "edition").strip()
+    record = dict(asset)
+    record["storagePath"] = edition_video_storage_path(edition_slug)
+    theme_variants = build_video_theme_variants_metadata(asset, edition_slug=edition_slug)
+    if theme_variants:
+        record["themeVariants"] = theme_variants
+    return record
+
+
 def upload_seed_video(article: dict[str, Any], asset: dict[str, Any], *, bucket: str) -> None:
-    metadata = seed_video_upload_metadata(article, asset)
-    source = seed_video_source_path(asset["src"])
-    if source is None or not source.exists():
-        raise ValueError(
-            f"Seed video file not found for {article['slug']}: {asset['src']}. "
-            "Run `poetry run papyrus videos seed` first."
-        )
-    aws_s3_cp(str(source), bucket, metadata["storagePath"], metadata["contentType"])
+    slug = str(article["slug"])
+    upload_seed_video_file(bucket, asset["src"], article_video_storage_path(slug))
+    light_src = normalize_string(nested_get(asset, "themeVariants", "light", "src"))
+    if light_src:
+        upload_seed_video_file(bucket, light_src, article_video_light_storage_path(slug))
+    dark_src = normalize_string(nested_get(asset, "themeVariants", "dark", "src"))
+    if dark_src:
+        upload_seed_video_file(bucket, dark_src, article_video_dark_storage_path(slug))
 
 
 def upload_seed_edition_video(payload: dict[str, Any], asset: dict[str, Any], *, bucket: str) -> None:
-    metadata = seed_edition_video_upload_metadata(payload, asset)
-    source = seed_video_source_path(asset["src"])
-    if source is None or not source.exists():
-        raise ValueError(
-            f"Seed edition video file not found: {asset['src']}. "
-            "Run `poetry run papyrus videos seed` first."
-        )
-    aws_s3_cp(str(source), bucket, metadata["storagePath"], metadata["contentType"])
+    edition_slug = str(payload.get("slug") or payload.get("id") or "edition").strip()
+    upload_seed_video_file(bucket, asset["src"], edition_video_storage_path(edition_slug))
+    light_src = normalize_string(nested_get(asset, "themeVariants", "light", "src"))
+    if light_src:
+        upload_seed_video_file(bucket, light_src, edition_video_light_storage_path(edition_slug))
+    dark_src = normalize_string(nested_get(asset, "themeVariants", "dark", "src"))
+    if dark_src:
+        upload_seed_video_file(bucket, dark_src, edition_video_dark_storage_path(edition_slug))
+
+
+def upload_seed_video_file(bucket: str, src: str, storage_path: str) -> None:
+    source = seed_video_source_path(src)
+    if source is not None and source.exists():
+        aws_s3_cp(str(source), bucket, storage_path, "video/mp4")
+        return
+    if s3_object_exists(bucket, storage_path):
+        print(f"seed\tvideo-skip\t{storage_path}")
+        return
+    raise ValueError(
+        f"Seed video file not found for {storage_path}: {src}. "
+        "Run `poetry run papyrus videos seed` first or upload the object to S3."
+    )
+
+
+def s3_object_exists(bucket: str, storage_path: str) -> bool:
+    result = subprocess.run(
+        ["aws", "s3api", "head-object", "--bucket", bucket, "--key", storage_path],
+        cwd=PAPYRUS_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def seed_video_source_path(src: str) -> Path | None:
@@ -648,7 +759,7 @@ def seed_video_source_path(src: str) -> Path | None:
     return PAPYRUS_ROOT / (Path("public") / src.lstrip("/") if src.startswith("/") else Path(src))
 
 
-def video_media_metadata(asset: dict[str, Any]) -> dict[str, Any]:
+def video_media_metadata(asset: dict[str, Any], *, article_slug: str | None = None) -> dict[str, Any]:
     metadata: dict[str, Any] = {"sourceUrl": asset.get("src")}
     poster = normalize_string(asset.get("posterSrc"))
     if poster:
@@ -656,17 +767,9 @@ def video_media_metadata(asset: dict[str, Any]) -> dict[str, Any]:
     duration = asset.get("durationSeconds")
     if isinstance(duration, (int, float)):
         metadata["durationSeconds"] = duration
-    theme_variants = nested_get(asset, "themeVariants")
-    if isinstance(theme_variants, dict):
-        variants: dict[str, Any] = {}
-        light = theme_variants.get("light")
-        if isinstance(light, dict) and normalize_string(light.get("src")):
-            variants["light"] = {"sourceUrl": light["src"]}
-        dark = theme_variants.get("dark")
-        if isinstance(dark, dict) and normalize_string(dark.get("src")):
-            variants["dark"] = {"sourceUrl": dark["src"]}
-        if variants:
-            metadata["themeVariants"] = variants
+    theme_variants = build_video_theme_variants_metadata(asset, article_slug=article_slug)
+    if theme_variants:
+        metadata["themeVariants"] = theme_variants
     return metadata
 
 
