@@ -19,6 +19,7 @@ export type SeedEditionContent = {
   description: string;
   publishDate: string;
   suppressNewsDeskAppendix?: boolean;
+  sectionSubtitles?: Record<string, string>;
   video?: ArticleVideoAsset;
   houseAds?: SeedHouseAd[];
   articles: Article[];

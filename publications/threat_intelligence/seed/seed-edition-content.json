@@ -16,6 +16,14 @@
       "light": { "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4" }
     }
   },
+  "sectionSubtitles": {
+    "Mission": "How attacker capability is shifting—and what defenders should revisit before the next incident.",
+    "Newsroom": "How this desk turns curated signals, evidence, and expert judgment into practical briefings.",
+    "Cloud": "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
+    "Azure": "Microsoft identity and data paths—and the controls that keep admin access temporary and visible.",
+    "AI": "OpenAI workspaces, keys, connectors, and actions treated as production access boundaries.",
+    "Gaming & Consumer": "Personal blast-radius separation when games, mods, and launchers are software from strangers."
+  },
   "articles": [
     {
       "slug": "the-balance-of-power-is-shifting",

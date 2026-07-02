@@ -168,6 +168,18 @@ def build_seed_edition_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
     publish_date = str(payload["publishDate"])
     item_ids = [article["slug"] for article in payload["articles"]]
+    metadata: dict[str, Any] = {
+        "source": "fixture-seed",
+        "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
+        **(
+            {"editionVideo": build_edition_video_metadata(payload, payload["video"])}
+            if isinstance(payload.get("video"), dict)
+            else {}
+        ),
+    }
+    sections = build_seed_sections(payload["articles"], payload.get("sectionSubtitles"))
+    if sections:
+        metadata["sections"] = sections
     return {
         "id": payload["id"],
         "slug": payload["slug"],
@@ -175,18 +187,43 @@ def seed_edition_config(payload: dict[str, Any]) -> dict[str, Any]:
         "description": payload["description"],
         "publishDate": publish_date,
         "publishedAt": f"{publish_date}T12:00:00.000Z",
-        "metadata": {
-            "source": "fixture-seed",
-            "suppressNewsDeskAppendix": payload.get("suppressNewsDeskAppendix") is True,
-            **(
-                {"editionVideo": build_edition_video_metadata(payload, payload["video"])}
-                if isinstance(payload.get("video"), dict)
-                else {}
-            ),
-        },
+        "metadata": metadata,
         "articleOrder": item_ids,
         "layoutPlan": apply_seed_house_ads(create_seed_edition_layout_plan(payload["articles"]), payload.get("houseAds")),
     }
+
+
+def build_seed_sections(articles: list[dict[str, Any]], section_subtitles: Any) -> list[dict[str, Any]]:
+    subtitles = section_subtitles if isinstance(section_subtitles, dict) else {}
+    sections: list[dict[str, Any]] = []
+    sections_by_key: dict[str, dict[str, Any]] = {}
+    for article in articles:
+        label = normalize_string(article.get("section")) or "General"
+        key = create_section_key(label)
+        slug = str(article["slug"])
+        existing = sections_by_key.get(key)
+        if existing:
+            if slug not in existing["itemIds"]:
+                existing["itemIds"].append(slug)
+            continue
+        section: dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "itemIds": [slug],
+        }
+        subtitle = normalize_string(subtitles.get(label))
+        if subtitle:
+            section["description"] = subtitle
+        sections_by_key[key] = section
+        sections.append(section)
+    return sections
+
+
+def create_section_key(value: str) -> str:
+    normalized = value.strip().lower().replace("&", " and ")
+    key = re.sub(r"[^a-z0-9]+", "-", normalized)
+    key = re.sub(r"(^-+|-+$)", "", key)
+    return key or "general"
 
 
 def apply_seed_house_ads(layout_plan: dict[str, Any], house_ads: Any) -> dict[str, Any]:
@@ -344,8 +381,8 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
             "type": "image",
             "role": ",".join(asset.get("roles") or ["lead", "continuation", "continuationInset"]),
             "sortKey": media_sort_key,
-            "storagePath": uploaded["storagePath"],
-            "externalUrl": asset.get("src"),
+            "storagePath": uploaded["storagePath"] or None,
+            "externalUrl": normalize_string(asset.get("src")) or None,
             "alt": asset.get("alt"),
             "caption": asset.get("caption") or asset.get("credit"),
             "credit": asset.get("credit"),
@@ -359,7 +396,7 @@ def seed_article_records(article: dict[str, Any], index: int, edition_config: di
             "maxHeight": nested_get(asset, "layout", "maxHeight"),
             "crop": nested_get(asset, "layout", "crop"),
             "wrapsText": nested_get(asset, "layout", "wrapsText"),
-            "metadata": to_aws_json(media_metadata(asset, theme_variants)),
+            "metadata": to_aws_json(media_metadata(asset, theme_variants, article_slug=str(article["slug"]))),
         }
         records.append(record("MediaAsset", {"id": media_id, "itemId": item_id, **common}))
         records.append(
@@ -491,6 +528,8 @@ def upload_seed_media(payload: dict[str, Any], *, bucket: str) -> None:
 
 
 def upload_seed_image(article: dict[str, Any], asset: dict[str, Any], index: int, *, bucket: str) -> None:
+    if not normalize_string(asset.get("src")):
+        return
     metadata = seed_image_upload_metadata(article, asset, index)
     source = seed_image_source_path(asset["src"])
     content_type = metadata["contentType"]
@@ -538,16 +577,22 @@ def aws_s3_cp(source_path: str, bucket: str, storage_path: str, content_type: st
 
 
 def seed_image_upload_metadata(article: dict[str, Any], asset: dict[str, Any], index: int) -> dict[str, Any]:
-    content_type = content_type_for_source(asset["src"])
-    extension = image_extension(content_type, asset["src"])
     layout = asset.get("layout") or {}
     preferred_height = layout.get("preferredHeight")
     aspect_ratio = layout.get("aspectRatio")
+    dimensions = {
+        "width": round(aspect_ratio * preferred_height) if aspect_ratio and preferred_height else None,
+        "height": preferred_height,
+    }
+    src = normalize_string(asset.get("src"))
+    if not src:
+        return {"storagePath": "", "contentType": None, **dimensions}
+    content_type = content_type_for_source(src)
+    extension = image_extension(content_type, src)
     return {
         "storagePath": f"media/articles/{article['slug']}/{index + 1:02d}-{asset['id']}.{extension}",
         "contentType": content_type,
-        "width": round(aspect_ratio * preferred_height) if aspect_ratio and preferred_height else None,
-        "height": preferred_height,
+        **dimensions,
     }
 
 
@@ -581,11 +626,12 @@ def article_image_assets(article: dict[str, Any]) -> list[dict[str, Any]]:
     assets = [asset for asset in article.get("assets") or [] if asset.get("type") == "image"]
     if assets:
         return assets
-    if not isinstance(article.get("image"), dict) or not normalize_string(article["image"].get("src")):
+    image = article.get("image")
+    if not isinstance(image, dict):
         return []
     return [
         {
-            **article["image"],
+            **image,
             "id": f"{article['slug']}-primary-image",
             "type": "image",
             "roles": ["lead", "continuation", "continuationInset"],
@@ -751,12 +797,33 @@ def s3_object_exists(bucket: str, storage_path: str) -> bool:
 
 
 def seed_video_source_path(src: str) -> Path | None:
-    if re.match(r"^https?://", src):
+    return resolve_local_seed_file_path(src)
+
+
+def seed_image_source_path(src: str) -> Path | None:
+    return resolve_local_seed_file_path(src)
+
+
+def resolve_local_seed_file_path(src: str) -> Path | None:
+    normalized = normalize_string(src)
+    if not normalized:
         return None
-    path = Path(src)
+    if re.match(r"^https?://", normalized):
+        return None
+    path = Path(normalized)
     if path.is_absolute() and path.exists():
         return path
-    return PAPYRUS_ROOT / (Path("public") / src.lstrip("/") if src.startswith("/") else Path(src))
+    if normalized.startswith("/seed-art/threat-intelligence/"):
+        ti_path = (
+            PAPYRUS_ROOT
+            / "publications"
+            / "threat_intelligence"
+            / "seed-art"
+            / normalized.removeprefix("/seed-art/threat-intelligence/")
+        )
+        if ti_path.exists():
+            return ti_path
+    return PAPYRUS_ROOT / (Path("public") / normalized.lstrip("/") if normalized.startswith("/") else Path(normalized))
 
 
 def video_media_metadata(asset: dict[str, Any], *, article_slug: str | None = None) -> dict[str, Any]:
@@ -771,15 +838,6 @@ def video_media_metadata(asset: dict[str, Any], *, article_slug: str | None = No
     if theme_variants:
         metadata["themeVariants"] = theme_variants
     return metadata
-
-
-def seed_image_source_path(src: str) -> Path | None:
-    if re.match(r"^https?://", src):
-        return None
-    path = Path(src)
-    if path.is_absolute() and path.exists():
-        return path
-    return PAPYRUS_ROOT / (Path("public") / src.lstrip("/") if src.startswith("/") else Path(src))
 
 
 def content_type_for_source(src: str) -> str:
@@ -846,10 +904,7 @@ def create_seed_edition_layout_plan(articles: list[dict[str, Any]]) -> dict[str,
 
 
 def article_has_image(article: dict[str, Any]) -> bool:
-    assets = article.get("assets") if isinstance(article.get("assets"), list) else []
-    return any(asset.get("type") == "image" and normalize_string(asset.get("src")) for asset in assets) or bool(
-        normalize_string((article.get("image") or {}).get("src") if isinstance(article.get("image"), dict) else None)
-    )
+    return len(article_image_assets(article)) > 0
 
 
 def seed_front_block(item_id: str, index: int, has_image: bool) -> dict[str, Any]:
@@ -1209,8 +1264,18 @@ def published_item_id(item_id: str) -> str:
     return f"published-{item_id}"
 
 
-def media_metadata(asset: dict[str, Any], theme_variants: dict[str, Any] | None = None) -> dict[str, Any]:
-    metadata = {"sourceUrl": asset.get("src")}
+def media_metadata(
+    asset: dict[str, Any],
+    theme_variants: dict[str, Any] | None = None,
+    *,
+    article_slug: str | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    src = normalize_string(asset.get("src"))
+    if src:
+        metadata["sourceUrl"] = src
+    elif article_slug:
+        metadata["pictogramSlug"] = article_slug
     inline_float = nested_get(asset, "layout", "inlineFloat")
     if inline_float:
         metadata["inlineFloat"] = inline_float

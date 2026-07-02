@@ -22,7 +22,7 @@ from papyrus_content.papyrus_config import (
     resolve_public_site_base_url,
     resolve_topics_ignore_terms,
 )
-from papyrus_content.seed_edition import build_seed_edition_records, load_seed_payload, seed_edition_config
+from papyrus_content.seed_edition import build_seed_edition_records, create_section_key, load_seed_payload, seed_edition_config
 from papyrus_content.source_readiness import reference_source_readiness
 from papyrus_content.steering import load_steering_config, require_corpus_config, resolve_corpus_local_path
 
@@ -68,6 +68,43 @@ class PapyrusContentTests(unittest.TestCase):
                     if block.get("itemId"):
                         referenced.add(block["itemId"])
         self.assertFalse(referenced - article_ids)
+
+    def test_threat_intelligence_seed_edition_sections_include_subtitles(self) -> None:
+        payload = load_seed_payload(
+            REPO_ROOT / "publications" / "threat_intelligence" / "seed" / "seed-edition-content.json"
+        )
+        config = seed_edition_config(payload)
+        sections = config["metadata"]["sections"]
+        self.assertEqual(len(sections), 6)
+        by_key = {section["key"]: section for section in sections}
+        self.assertEqual(create_section_key("Gaming & Consumer"), "gaming-and-consumer")
+        self.assertIn("gaming-and-consumer", by_key)
+        mission = by_key["mission"]
+        self.assertEqual(mission["label"], "Mission")
+        self.assertIn("attacker capability", mission["description"])
+        self.assertEqual(len(mission["itemIds"]), 3)
+        self.assertEqual(
+            by_key["cloud"]["description"],
+            "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
+        )
+
+    def test_threat_intelligence_seed_edition_writes_pictogram_image_media(self) -> None:
+        payload = load_seed_payload(
+            REPO_ROOT / "publications" / "threat_intelligence" / "seed" / "seed-edition-content.json"
+        )
+        records = build_seed_edition_records(payload)
+        media_records = [record["expected"] for record in records if record["modelName"] == "MediaAsset"]
+        pictogram_media = [
+            record
+            for record in media_records
+            if record.get("type") == "image"
+            and json.loads(record["metadata"]).get("pictogramSlug") == "the-balance-of-power-is-shifting"
+        ]
+        self.assertEqual(len(pictogram_media), 1)
+        metadata = json.loads(pictogram_media[0]["metadata"])
+        self.assertEqual(metadata["pictogramSlug"], "the-balance-of-power-is-shifting")
+        self.assertNotIn("sourceUrl", metadata)
+        self.assertNotIn("storagePath", pictogram_media[0])
 
     def test_analysis_profiles_load(self) -> None:
         from papyrus_content.analysis_profiles import load_analysis_profiles, summarize_analysis_profiles

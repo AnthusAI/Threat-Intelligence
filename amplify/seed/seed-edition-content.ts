@@ -1,4 +1,5 @@
 import type { Article } from "../../lib/articles";
+import { createSectionKey } from "../../lib/edition-sections";
 import { getSeedEditionContentSource, type SeedHouseAd } from "./seed-profile";
 
 const seedContentSource = getSeedEditionContentSource();
@@ -21,6 +22,7 @@ export type SeedEditionConfig = {
 export function getSeedEditionConfig(): SeedEditionConfig {
   const publishDate = seedContent.publishDate;
   const itemIds = seedEditionArticles.map((article) => article.slug);
+  const sections = buildSeedSections(seedEditionArticles, seedContent.sectionSubtitles);
   return {
     id: seedContent.id,
     slug: seedContent.slug,
@@ -32,10 +34,41 @@ export function getSeedEditionConfig(): SeedEditionConfig {
       source: "fixture-seed",
       suppressNewsDeskAppendix: seedContent.suppressNewsDeskAppendix === true,
       ...(seedContent.video ? { editionVideo: seedContent.video } : {}),
+      ...(sections.length > 0 ? { sections } : {}),
     },
     articleOrder: itemIds,
     layoutPlan: applySeedHouseAds(createSeedEditionLayoutPlan(seedEditionArticles), seedContent.houseAds),
   };
+}
+
+type SeedSectionRecord = {
+  key: string;
+  label: string;
+  description?: string;
+  itemIds: string[];
+};
+
+function buildSeedSections(articles: Article[], sectionSubtitles?: Record<string, string>): SeedSectionRecord[] {
+  const sections: SeedSectionRecord[] = [];
+  const sectionsByKey = new Map<string, SeedSectionRecord>();
+  for (const article of articles) {
+    const label = article.section?.trim() || "General";
+    const key = createSectionKey(label);
+    const existing = sectionsByKey.get(key);
+    if (existing) {
+      if (!existing.itemIds.includes(article.slug)) existing.itemIds.push(article.slug);
+      continue;
+    }
+    const section: SeedSectionRecord = {
+      key,
+      label,
+      itemIds: [article.slug],
+      ...(sectionSubtitles?.[label] ? { description: sectionSubtitles[label] } : {}),
+    };
+    sectionsByKey.set(key, section);
+    sections.push(section);
+  }
+  return sections;
 }
 
 export function getSeedEditionProfileInfo() {

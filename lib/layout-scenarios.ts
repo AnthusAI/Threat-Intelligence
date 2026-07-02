@@ -1,6 +1,6 @@
 import { type Article, type ArticleVideoAsset, articles, editionDate } from "./articles";
 import type { EditionContent, NewsDeskAppendix } from "./content-types";
-import { createEditionSectionPlan } from "./edition-sections";
+import { buildEditionSectionsFromArticles, createEditionSectionPlan } from "./edition-sections";
 import { createDefaultEditionLayoutPlan, type EditionLayoutPlan } from "./layout-plan";
 import { articleToPublicationItem, cloneArticle } from "./publication-items";
 import { SITE_BRAND } from "./site-brand";
@@ -167,11 +167,21 @@ const rawLayoutScenarios: RawLayoutScenario[] = [
 
 export const layoutScenarios: LayoutScenario[] = rawLayoutScenarios.map((scenario) => ({
   ...scenario,
-  sections: scenario.sections ?? createEditionSectionPlan(scenario.items),
+  sections:
+    scenario.sections ??
+    (scenario.scenarioId === DEFAULT_LAYOUT_SCENARIO_ID
+      ? buildEditionSectionsFromArticles(scenario.items, getDefaultScenarioSectionSubtitles())
+      : createEditionSectionPlan(scenario.items)),
 }));
 
 export function getLayoutScenario(id: string | null | undefined): LayoutScenario {
   return layoutScenarios.find((scenario) => scenario.id === id) ?? layoutScenarios[0];
+}
+
+function getDefaultScenarioSectionSubtitles(): Record<string, string> | null {
+  if (SITE_BRAND.id !== "threat-intelligence") return null;
+  const subtitles = (threatIntelligenceSeedContent as { sectionSubtitles?: Record<string, string> }).sectionSubtitles;
+  return subtitles && Object.keys(subtitles).length > 0 ? subtitles : null;
 }
 
 function getDefaultScenarioSeed(): {

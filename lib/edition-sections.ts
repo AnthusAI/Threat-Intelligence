@@ -4,7 +4,13 @@ import type { PublicationItem } from "./publication-items";
 export function createEditionSectionPlan(items: PublicationItem[], explicitSections?: unknown): EditionSection[] {
   const explicit = normalizeExplicitSections(explicitSections, items);
   if (explicit.length > 0) return explicit;
+  return buildEditionSectionsFromArticles(items);
+}
 
+export function buildEditionSectionsFromArticles(
+  items: PublicationItem[],
+  sectionSubtitles?: Record<string, string> | null,
+): EditionSection[] {
   const sections = new Map<string, EditionSection>();
   for (const item of items) {
     const label = normalizeSectionLabel(item.section);
@@ -17,6 +23,7 @@ export function createEditionSectionPlan(items: PublicationItem[], explicitSecti
     sections.set(key, {
       key,
       label,
+      description: sectionSubtitles?.[label] ?? undefined,
       itemIds: [item.slug],
     });
   }
@@ -71,7 +78,7 @@ function normalizeSectionEntry(entry: unknown, itemSlugs: Set<string>): EditionS
   return {
     key,
     label,
-    description: readString(record.description),
+    description: readString(record.description) ?? readString(record.subtitle),
     itemIds,
   };
 }
