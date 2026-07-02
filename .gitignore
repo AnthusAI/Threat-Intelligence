@@ -21,6 +21,7 @@ corpora/*
 .papyrus-runs/
 .papyrus/
 videoml-work/
+.videoml/
 public/videoml/
 publications/threat_intelligence/seed-art/videos/*.mp4
 AGENTS.local.md
