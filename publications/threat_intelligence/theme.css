@@ -736,10 +736,6 @@
   width: 100%;
 }
 
-:root[data-site-brand="threat-intelligence"] .blog-sections > .blog-section:first-child > .presentation-section-header {
-  margin-bottom: 0;
-}
-
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header__band {
   align-items: center;
   display: grid;
@@ -1437,10 +1433,6 @@
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header {
     margin-bottom: calc(var(--ti-rhythm) * 9);
-  }
-
-  :root[data-site-brand="threat-intelligence"] .blog-sections > .blog-section:first-child > .presentation-section-header {
-    margin-bottom: 0;
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] {
