@@ -3,7 +3,7 @@
 
 /* Shared --ti-* tokens (were scattered in :root, @media dark, .dark-theme blocks) */
 :root {
-  --ti-alarm-red: var(--tomato-11);
+  --ti-alarm-red: var(--danger);
   --ti-section-rule: var(--ti-alarm-red);
 }
 
@@ -14,7 +14,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-papyrus-theme="light"]):not(.light-theme) {
-    --ti-alarm-red: var(--tomato-9);
+    --ti-alarm-red: var(--danger);
     --ti-pictogram-edge: var(--slate-6);
     --ti-pictogram-node: var(--slate-5);
     --ti-pictogram-throb: var(--tomato-8);
@@ -26,7 +26,7 @@
 
 :root.dark-theme,
 :root[data-papyrus-theme="dark"] {
-  --ti-alarm-red: var(--tomato-9);
+  --ti-alarm-red: var(--danger);
 }
 
 /* Main TI brand block (was lines 10139-11541 of globals.css) */
@@ -57,7 +57,7 @@
   --surface-foreground: var(--sand-11);
   --danger: var(--tomato-9);
   --danger-foreground: var(--sand-1);
-  --ti-alarm-red: var(--tomato-11);
+  --ti-alarm-red: var(--danger);
   --ti-pictogram-edge: var(--slate-8);
   --ti-pictogram-node: var(--slate-8);
   --ti-pictogram-muted: var(--slate-6);
@@ -169,7 +169,7 @@
     --surface-foreground: var(--sand-11);
     --destructive-foreground: var(--sand-12);
     --danger-foreground: var(--destructive-foreground);
-    --ti-alarm-red: var(--tomato-9);
+    --ti-alarm-red: var(--danger);
     --ti-pictogram-edge: var(--slate-6);
     --ti-pictogram-node: var(--slate-5);
     --ti-pictogram-muted: var(--slate-7);
@@ -225,7 +225,7 @@
   --surface-foreground: var(--sand-11);
   --destructive-foreground: var(--sand-12);
   --danger-foreground: var(--destructive-foreground);
-  --ti-alarm-red: var(--tomato-9);
+  --ti-alarm-red: var(--danger);
   --ti-pictogram-edge: var(--slate-6);
   --ti-pictogram-node: var(--slate-5);
   --ti-pictogram-muted: var(--slate-7);
@@ -790,8 +790,8 @@
   background: var(--background);
   color: var(--foreground);
   display: inline-flex;
-  font-family: var(--site-display-font);
-  font-size: calc(var(--threat-intelligence-section-rule-height) * var(--threat-intelligence-section-label-scale));
+  font-family: var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: var(--ti-masthead-font-size);
   font-weight: 900;
   grid-column: 2;
   grid-row: 1;
@@ -799,7 +799,7 @@
   justify-content: center;
   justify-self: center;
   letter-spacing: 0;
-  line-height: var(--ti-secondary-headline-line-box);
+  line-height: var(--threat-intelligence-section-rule-height);
   margin: 0;
   padding: 0 var(--threat-intelligence-section-label-pad-x);
   text-transform: uppercase;
@@ -808,7 +808,7 @@
 
 @supports (text-box-trim: trim-both) {
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header__band p {
-    font-size: calc(var(--threat-intelligence-section-rule-height) * var(--threat-intelligence-section-label-scale-trimmed));
+    font-size: var(--ti-masthead-font-size);
     text-box-edge: cap alphabetic;
     text-box-trim: trim-both;
   }

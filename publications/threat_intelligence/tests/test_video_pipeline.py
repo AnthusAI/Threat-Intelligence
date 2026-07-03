@@ -54,6 +54,61 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         title_index = xml.index('id="title"')
         self.assertLess(hook_index, title_index)
 
+    def test_build_babulus_xml_uses_authored_scenes_with_post_roll(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_babulus_xml
+
+        article = {
+            "slug": "the-balance-of-power-is-shifting",
+            "headline": "Sample Headline",
+            "section": "Mission",
+            "excerpt": "Legacy excerpt.",
+            "pullQuotes": ["Legacy quote."],
+            "video": {
+                "scenes": [
+                    {"kind": "quote", "quote": "Opening quote, isn't it.", "voice": "Opening voice."},
+                    {
+                        "kind": "slide",
+                        "eyebrow": "Mission",
+                        "title": "Second Scene",
+                        "subtitle": "Second subtitle",
+                        "pictogram": "the-balance-of-power-is-shifting",
+                        "voice": "Second voice.",
+                    },
+                ]
+            },
+        }
+        xml = build_babulus_xml(article, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn('id="scene-1"', xml)
+        self.assertIn('id="scene-2"', xml)
+        self.assertIn('id="post-roll"', xml)
+        self.assertLess(xml.index('id="scene-1"'), xml.index('id="scene-2"'))
+        self.assertLess(xml.index('id="scene-2"'), xml.index('id="post-roll"'))
+        self.assertIn("Opening quote, isn&#39;t it.", xml)
+        self.assertIn("Opening voice.", xml)
+        self.assertIn("pictogramSlug", xml)
+        self.assertIn("THREAT INTELLIGENCE", xml)
+        self.assertNotIn('id="hook"', xml)
+        self.assertNotIn('id="body-excerpt"', xml)
+        self.assertNotIn("Legacy excerpt.", xml)
+        self.assertNotIn("Legacy quote.", xml)
+
+    def test_build_edition_overview_xml_uses_authored_scenes(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
+
+        payload = load_ti_seed_payload()
+        payload["video"] = dict(payload.get("video") or {})
+        payload["video"]["scenes"] = [
+            {"kind": "quote", "quote": "Edition scene quote.", "voice": "Edition scene voice."},
+            {"kind": "slide", "title": "Edition Scene Two", "voice": "Edition scene two voice."},
+        ]
+        xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn('id="scene-1"', xml)
+        self.assertIn('id="scene-2"', xml)
+        self.assertIn('id="post-roll"', xml)
+        self.assertNotIn("edition-teaser", xml)
+        self.assertNotIn("spotlight-1", xml)
+        self.assertNotIn('id="hook"', xml)
+
     def test_build_edition_overview_xml_uses_edition_hook_with_fallback(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
 

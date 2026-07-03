@@ -238,9 +238,8 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
       width: size.width,
       height: size.height,
       obstacles,
-      rhythm,
     });
-  }, [obstacles, rhythm, size.height, size.width]);
+  }, [obstacles, size.height, size.width]);
 
   const animationLayoutKey = `${size.width}:${size.height}`;
   const compromiseSequence = useMemo(() => {
