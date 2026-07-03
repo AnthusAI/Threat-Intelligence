@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Threat Intelligence Video Preview</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap"
+      data-inter-font="true"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+
+      #preview-root {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="preview-root"></div>
+    <script src="/videoml/vendor/react.production.min.js"></script>
+    <script src="/videoml/vendor/react-dom.production.min.js"></script>
+    <script src="/videoml/ti-preview-bundle.js?v=20260702-preview-fallback"></script>
+    <script>
+      const root = document.getElementById("preview-root");
+      const params = new URLSearchParams(window.location.search);
+      let cleanup = null;
+
+      function readPayload(overrides) {
+        const target = overrides?.target || params.get("target") || "";
+        const theme = overrides?.theme || params.get("theme") || "light";
+        const audioSrc = overrides?.audio || params.get("audio") || "";
+        const rhythmOverlay = params.get("overlay") === "1" || params.get("rhythm") === "1";
+        const storageKey = target ? `ti-preview:${target}` : "";
+        const xml = storageKey ? sessionStorage.getItem(storageKey) : null;
+        return { target, theme, xml, audioSrc, rhythmOverlay };
+      }
+
+      function mountPreview(payload) {
+        if (!payload || typeof payload.xml !== "string" || !payload.xml.trim()) {
+          root.innerHTML =
+            '<div style="color:#eee;font:14px/1.4 system-ui,sans-serif;padding:24px;">No VideoML DSL available for preview.</div>';
+          return;
+        }
+        if (typeof cleanup === "function") {
+          cleanup();
+          cleanup = null;
+        }
+        root.innerHTML = "";
+        if (typeof window.mountTiPreview !== "function") {
+          root.innerHTML =
+            '<div style="color:#eee;font:14px/1.4 system-ui,sans-serif;padding:24px;">Preview bundle failed to load. Run <code>npm run videoml:preview-bundle</code>.</div>';
+          return;
+        }
+        cleanup = window.mountTiPreview(root, {
+          xml: payload.xml,
+          theme: payload.theme || "light",
+          audioSrc: payload.audioSrc || undefined,
+          autoPlay: false,
+          rhythmOverlay: Boolean(payload.rhythmOverlay),
+        });
+      }
+
+      function loadFromSession(overrides) {
+        mountPreview(readPayload(overrides));
+      }
+
+      window.addEventListener("message", (event) => {
+        const payload = event.data;
+        if (!payload) return;
+        if (payload.kind === "ti-preview") {
+          mountPreview(payload);
+          return;
+        }
+        if (payload.kind === "ti-preview-refresh") {
+          loadFromSession(payload);
+        }
+      });
+
+      const boot = () => loadFromSession();
+      if (typeof window.mountTiPreview === "function") {
+        boot();
+      } else {
+        const readyTimer = window.setInterval(() => {
+          if (typeof window.mountTiPreview !== "function") return;
+          window.clearInterval(readyTimer);
+          boot();
+        }, 50);
+      }
+
+      if (window.parent !== window) {
+        window.parent.postMessage({ kind: "ti-preview-ready" }, "*");
+      }
+    </script>
+  </body>
+</html>

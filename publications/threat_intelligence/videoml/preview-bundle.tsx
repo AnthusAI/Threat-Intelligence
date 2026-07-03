@@ -185,7 +185,7 @@ function scriptDuration(script: ScriptData): number {
   return typeof lastScene.endSec === "number" && lastScene.endSec > 0 ? lastScene.endSec : 10;
 }
 
-function TiPreviewPlayer({ script, width, height, autoPlay = true, audioSrc, rhythmOverlay = false }: TiPreviewPlayerProps) {
+function TiPreviewPlayer({ script, width, height, autoPlay = false, audioSrc, rhythmOverlay = false }: TiPreviewPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
@@ -574,7 +574,7 @@ function mountTiPreview(container: HTMLElement, options: TiPreviewMountOptions):
   root.render(
     <TiPreviewPlayer
       audioSrc={options.audioSrc}
-      autoPlay={options.autoPlay ?? true}
+      autoPlay={options.autoPlay ?? false}
       height={height}
       rhythmOverlay={options.rhythmOverlay ?? false}
       script={script}
