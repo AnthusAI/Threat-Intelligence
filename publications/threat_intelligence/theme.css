@@ -591,11 +591,12 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .blog-page-background {
-  --ti-pictogram-edge: var(--slate-8);
-  --ti-pictogram-node: var(--slate-8);
-  --ti-pictogram-throb: var(--tomato-8);
-  --ti-pictogram-core-glow: var(--ti-alarm-red);
-  --ti-pictogram-compromised: var(--ti-alarm-red);
+  --ti-pictogram-edge: var(--muted-foreground);
+  --ti-pictogram-node: var(--muted-foreground);
+  --ti-pictogram-throb: var(--danger);
+  --ti-pictogram-core-glow: var(--danger);
+  --ti-pictogram-compromised: var(--danger);
+  --ti-pictogram-accent-glow: var(--danger);
   --ti-pictogram-compromised-stroke: var(--sand-1);
   height: calc(var(--ti-row-height) * 24);
   left: auto;
@@ -610,17 +611,23 @@
 }
 
 :root[data-site-brand="threat-intelligence"][data-papyrus-theme="dark"] .blog-page-background {
-  --ti-pictogram-edge: var(--slate-6);
-  --ti-pictogram-node: var(--slate-5);
-  --ti-pictogram-core-glow: var(--ti-alarm-red);
+  --ti-pictogram-edge: var(--muted-foreground);
+  --ti-pictogram-node: var(--muted-foreground);
+  --ti-pictogram-throb: var(--danger);
+  --ti-pictogram-core-glow: var(--danger);
+  --ti-pictogram-compromised: var(--danger);
+  --ti-pictogram-accent-glow: var(--danger);
   --ti-pictogram-compromised-stroke: var(--sand-2);
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-site-brand="threat-intelligence"]:not([data-papyrus-theme="light"]) .blog-page-background {
-    --ti-pictogram-edge: var(--slate-6);
-    --ti-pictogram-node: var(--slate-5);
-    --ti-pictogram-core-glow: var(--ti-alarm-red);
+    --ti-pictogram-edge: var(--muted-foreground);
+    --ti-pictogram-node: var(--muted-foreground);
+    --ti-pictogram-throb: var(--danger);
+    --ti-pictogram-core-glow: var(--danger);
+    --ti-pictogram-compromised: var(--danger);
+    --ti-pictogram-accent-glow: var(--danger);
     --ti-pictogram-compromised-stroke: var(--sand-2);
   }
 }
