@@ -20,8 +20,8 @@ const STEP_GAP_MS = 36;
 const START_DELAY_MS = 40;
 const COMPROMISE_TRANSITION_S = COMPROMISE_MS / 1000;
 const THROB_TRANSITION_S = 0.21;
-const BREACH_RING_DELAYS_S = [0, 0.6, 1.2];
 const BREACH_RING_DURATION_S = 2.4;
+const COMPROMISED_NODE_RADIUS_MULTIPLIER = 1.2;
 
 type PictogramColors = {
   edge: string;
@@ -91,52 +91,14 @@ function CoreBreachEffect({
   filterId,
   prefersReducedMotion,
   scale,
-  layer,
 }: {
   coreNode: LayoutDefenseNode;
   colors: PictogramColors;
   filterId: string;
   prefersReducedMotion: boolean;
   scale: number;
-  layer: "rings" | "halo";
 }) {
-  const ringStartRadius = coreNode.radius * 1.2;
-  const ringEndRadius = coreNode.radius * 3;
-  const haloRadius = coreNode.radius * 1.85;
-
-  if (layer === "rings") {
-    return (
-      <g className="blog-page-background__breach-rings" style={{ color: colors.coreGlow }}>
-        {BREACH_RING_DELAYS_S.map((delay) => (
-          <motion.circle
-            animate={
-              prefersReducedMotion
-                ? { fillOpacity: 0.22, r: ringEndRadius * 0.75 }
-                : {
-                    fillOpacity: [0.45, 0],
-                    r: [ringStartRadius, ringEndRadius],
-                  }
-            }
-            cx={coreNode.x}
-            cy={coreNode.y}
-            fill="currentColor"
-            initial={false}
-            key={`breach-ring-${delay}`}
-            transition={
-              prefersReducedMotion
-                ? { duration: 0 }
-                : {
-                    delay,
-                    duration: BREACH_RING_DURATION_S,
-                    ease: "easeOut",
-                    repeat: Infinity,
-                  }
-            }
-          />
-        ))}
-      </g>
-    );
-  }
+  const haloRadius = coreNode.radius * 2.35;
 
   const blurStdDeviation = Math.max(5, scale * 0.45);
   return (
@@ -367,7 +329,6 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
               colors={colors}
               coreNode={coreNode}
               filterId={coreBreachFilterId}
-              layer="rings"
               prefersReducedMotion={prefersReducedMotion}
               scale={graphLayout.scale}
             />
@@ -376,12 +337,7 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
             {graphLayout.nodes.map((node) => {
               const isCompromised = compromisedNodes.has(node.id);
               const isThrobbing = throbbingStep?.kind === "node" && throbbingStep.nodeId === node.id;
-              const isCore = node.role === "core";
-              const coreBreachedNode = isCore && coreBreached;
-              const coreStrokeWidth = isCore ? Math.max(4, graphLayout.scale * 1.5) : 0;
-              const breachedCoreStrokeWidth = isCore
-                ? Math.max(coreStrokeWidth * 1.35, graphLayout.scale * 2)
-                : 0;
+              const compromisedRadius = isCompromised ? node.radius * COMPROMISED_NODE_RADIUS_MULTIPLIER : node.radius;
               return (
                 <motion.circle
                   animate={{
@@ -390,15 +346,7 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
                       : isThrobbing
                         ? [colors.node, colors.throb, colors.node]
                         : colors.node,
-                    r: node.radius,
-                    stroke: coreBreachedNode || (isCompromised && isCore)
-                      ? colors.compromisedStroke
-                      : "transparent",
-                    strokeWidth: coreBreachedNode
-                      ? breachedCoreStrokeWidth
-                      : isCompromised && isCore
-                        ? coreStrokeWidth
-                        : 0,
+                    r: compromisedRadius,
                   }}
                   cx={node.x}
                   cy={node.y}
@@ -406,7 +354,7 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
                   fill={isCompromised ? colors.compromised : colors.node}
                   initial={false}
                   key={node.id}
-                  r={node.radius}
+                  r={compromisedRadius}
                   transition={
                     isThrobbing
                       ? { duration: THROB_TRANSITION_S, ease: "easeInOut", repeat: 1 }
@@ -416,16 +364,6 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
               );
             })}
           </g>
-          {coreBreached && coreNode ? (
-            <CoreBreachEffect
-              colors={colors}
-              coreNode={coreNode}
-              filterId={coreBreachFilterId}
-              layer="halo"
-              prefersReducedMotion={prefersReducedMotion}
-              scale={graphLayout.scale}
-            />
-          ) : null}
         </svg>
       ) : null}
     </div>
