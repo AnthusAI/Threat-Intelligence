@@ -16,10 +16,12 @@ export type BlogTextStyle = {
 export const TI_RHYTHM_UNIT = 4;
 export const TI_COPY_ROW_MULTIPLE = 4;
 export const TI_PAINT_BUFFER_PX = 2;
-/* Body copy font size as a fraction of the row height, kept constant so the
-   text scale tracks the vertical grid when the rhythm unit changes. The
-   original ratio was 18px / 28px (9/14). */
-export const TI_BLOG_FONT_SIZE_ROW_RATIO = 9 / 14;
+/* Threat Intelligence body and excerpt copy must never fall below the section
+   subheading scale. At the default 16px rhythm row, that means an 18px font
+   set on a two-row (32px) line box so multi-line copy always keeps one blank
+   rhythm row between lines. */
+export const TI_BLOG_FONT_SIZE_ROW_RATIO = 18 / 16;
+export const TI_BLOG_LINE_HEIGHT_ROWS = 2;
 
 export function createVerticalRhythm(rowHeight: number, paintBuffer = TI_PAINT_BUFFER_PX): VerticalRhythm {
   const paintHeight = rowHeight + paintBuffer;
@@ -36,10 +38,16 @@ export function createThreatIntelligenceRhythm(): VerticalRhythm {
 
 export function createThreatIntelligenceBlogTextStyle(fontFamily: string): BlogTextStyle {
   const rhythm = createThreatIntelligenceRhythm();
+  const lineHeight = rhythm.rowHeight * TI_BLOG_LINE_HEIGHT_ROWS;
   return {
     fontSize: rhythm.rowHeight * TI_BLOG_FONT_SIZE_ROW_RATIO,
-    lineHeight: rhythm.rowHeight,
-    linePaintHeight: rhythm.paintHeight,
+    lineHeight,
+    /* The measured blog excerpt renderer clips each line to linePaintHeight.
+       Once copy was raised to the 18px / 32px minimum policy, the old
+       one-row paint box (18px) started chopping off the bottom of the glyphs.
+       Use the full two-row line box for paint so measured lines match the
+       visible CSS line box and never clip descenders or lower halves. */
+    linePaintHeight: lineHeight,
     fontFamily,
   };
 }
