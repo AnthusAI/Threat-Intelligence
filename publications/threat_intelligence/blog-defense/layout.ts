@@ -1,8 +1,4 @@
 import {
-  snapRhythmCoordinate,
-  type VerticalRhythm,
-} from "../../../lib/blog-rhythm";
-import {
   BLOG_DEFENSE_ARM_PITCH,
   BLOG_DEFENSE_CORE_NODE_ID,
   BLOG_DEFENSE_EDGES,
@@ -24,8 +20,6 @@ export type LayoutDefenseGraphInput = {
   width: number;
   height: number;
   obstacles?: LayoutRect[];
-  padX?: number;
-  rhythm?: VerticalRhythm;
 };
 
 export type LayoutDefenseNode = BlogDefenseNode;
@@ -56,6 +50,7 @@ function uniformNodeRadius(scale: number): number {
 const TOP_EDGE_INSET = 4;
 const RIGHT_EDGE_INSET = 3;
 const BOTTOM_EDGE_INSET = 2;
+const LEFT_EDGE_INSET = 4;
 
 // Static shoulder edges are skipped and rebuilt dynamically so the arms can
 // re-target surviving halo nodes after obstacle culling. When nothing is
@@ -167,12 +162,11 @@ type BoundsChecker = (x: number, y: number) => boolean;
 function makeBoundsChecker(input: {
   width: number;
   height: number;
-  padX: number;
   nodeRadius: number;
 }): BoundsChecker {
-  const { width, height, padX, nodeRadius } = input;
+  const { width, height, nodeRadius } = input;
   return (x, y) => (
-    x > padX + nodeRadius
+    x > LEFT_EDGE_INSET + nodeRadius
     && x <= width - nodeRadius - RIGHT_EDGE_INSET + 0.5
     && y >= TOP_EDGE_INSET + nodeRadius - 0.5
     && y <= height - nodeRadius - BOTTOM_EDGE_INSET
@@ -349,9 +343,6 @@ function extendMarginRail(input: {
 export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefenseGraphResult {
   const width = Math.max(1, input.width);
   const height = Math.max(1, input.height);
-  const rhythm = input.rhythm;
-  const snap = (value: number) => (rhythm ? snapRhythmCoordinate(value, rhythm) : value);
-  const padX = snap(input.padX ?? (rhythm ? rhythm.rowHeight * 2 : 18));
   // Obstacles are real measured DOM rects, not rendered/snapped grid
   // elements — grid-snapping them here only adds asymmetric drift on top of
   // whatever tight buffer the caller already applied, with no crispness
@@ -374,7 +365,7 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
   const scale = Math.max(0.42, Math.min(1.18, baseScale * scaleBoost));
   const nodeRadius = uniformNodeRadius(scale);
   const pitch = BLOG_DEFENSE_ARM_PITCH * scale;
-  const inBounds = makeBoundsChecker({ width, height, padX, nodeRadius });
+  const inBounds = makeBoundsChecker({ width, height, nodeRadius });
   const anchor = bestCoreAnchor({
     width,
     scale,

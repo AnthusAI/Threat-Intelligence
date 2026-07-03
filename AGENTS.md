@@ -717,6 +717,7 @@ To change rendering:
 - Sandbox seed video S3 upload is gated by `PAPYRUS_SEED_VIDEOS=1`. Default seed still writes video metadata with local `externalUrl` paths.
 - Worktrees without `.papyrus/config.yaml` should set `PAPYRUS_CONFIG` to the main clone config path before running the video pipeline.
 - Threat Intelligence videos use **flat solid background colors** matching the blog dark-mode paper (`#191918`). Do not use gradient backgrounds in `TI_BACKGROUND_PROPS` or scene styles — the TI brand language is flat color, not SaaS-style gradients. Pictogram frames, quote cards, and CTA slides all sit on the same flat paper.
+- Threat Intelligence blog page uses **strict rhythm**. Vertical spacing, margins, padding, and line boxes must snap to whole `--ti-row-height` units (or 0). Do not use half-row offsets for core copy/CTA stack spacing.
 
 ## Verification Checklist
 

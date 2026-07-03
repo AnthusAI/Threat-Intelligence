@@ -464,6 +464,62 @@ def branded_title_slide_layer(
     )
 
 
+def authored_video_scenes(video_meta: Any) -> list[dict[str, Any]]:
+    if not isinstance(video_meta, dict):
+        return []
+    scenes = video_meta.get("scenes")
+    if not isinstance(scenes, list):
+        return []
+    return [scene for scene in scenes if isinstance(scene, dict)]
+
+
+def authored_scene_xml(
+    scene: dict[str, Any],
+    index: int,
+    *,
+    default_attribution: str,
+    scene_renderer,
+) -> str:
+    kind = str(scene.get("kind") or "slide").strip().lower()
+    voice_text = str(scene.get("voice") or "").strip()
+    if not voice_text:
+        raise ValueError(f"Authored video scene {index} is missing voice narration.")
+    scene_id = f"scene-{index}"
+    cue = f"""<cue id="{scene_id}-cue">
+      <voice>{escape(voice_text)}</voice>
+    </cue>"""
+    if kind == "quote":
+        quote = str(scene.get("quote") or "").strip()
+        if not quote:
+            raise ValueError(f"Authored quote scene {index} is missing its quote text.")
+        attribution = str(scene.get("attribution") or default_attribution).strip()
+        layer = quote_card_layer(quote=quote, attribution=attribution)
+        return scene_renderer(scene_id, str(scene.get("title") or "Quote"), layer, cue)
+    if kind != "slide":
+        raise ValueError(f"Authored video scene {index} has unknown kind: {kind!r}")
+    layer = branded_title_slide_layer(
+        pictogram_slug=str(scene.get("pictogram") or "").strip() or None,
+        eyebrow=str(scene.get("eyebrow") or "").strip() or None,
+        title=str(scene.get("title") or "").strip() or None,
+        subtitle=str(scene.get("subtitle") or "").strip() or None,
+        horizontal_align="left",
+    )
+    return scene_renderer(scene_id, str(scene.get("title") or f"Scene {index}"), layer, cue)
+
+
+def post_roll_scene(slide_date: str, scene_renderer) -> str:
+    """The standardized branding block. Appended by the pipeline to every
+    scenes-driven video; never authored per-video."""
+    return scene_renderer(
+        "post-roll",
+        "Post-roll",
+        closing_cta_layer(slide_date=slide_date),
+        f"""<cue id="post-roll-cue">
+      <voice>{escape(closing_cta_voice(slide_date))}</voice>
+    </cue>""",
+    )
+
+
 def build_babulus_xml(
     article: dict[str, Any],
     *,
@@ -486,6 +542,22 @@ def build_babulus_xml(
 
     def _scene(scene_id: str, scene_title: str, content_layer: str, cue_xml: str) -> str:
         return render_scene(scene_id, scene_title, content_layer, cue_xml, styles=styles, background_props=bg_props)
+
+    authored = authored_video_scenes(article.get("video"))
+    if authored:
+        # Video-form article: authored content scenes, then the standard post-roll.
+        scene_blocks = [
+            authored_scene_xml(scene, index + 1, default_attribution=section, scene_renderer=_scene)
+            for index, scene in enumerate(authored)
+        ]
+        scene_blocks.append(post_roll_scene(slide_date, _scene))
+        body = "\n\n".join(scene_blocks)
+        return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
+  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+
+{body}
+</vml>
+"""
 
     title_cue_parts = [f"<voice>{escape(headline)}</voice>"]
     if deck:
@@ -598,6 +670,22 @@ def build_edition_overview_xml(
 
     def _scene(scene_id: str, scene_title: str, content_layer: str, cue_xml: str) -> str:
         return render_scene(scene_id, scene_title, content_layer, cue_xml, styles=styles, background_props=bg_props)
+
+    authored = authored_video_scenes(edition.get("video"))
+    if authored:
+        # Long-format edition video: authored content scenes, then the standard post-roll.
+        scene_blocks = [
+            authored_scene_xml(scene, index + 1, default_attribution=title, scene_renderer=_scene)
+            for index, scene in enumerate(authored)
+        ]
+        scene_blocks.append(post_roll_scene(slide_date, _scene))
+        body = "\n\n".join(scene_blocks)
+        return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
+  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+
+{body}
+</vml>
+"""
 
     teaser_voice = (
         f"{description} "

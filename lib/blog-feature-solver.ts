@@ -2,7 +2,6 @@ import type { ArticleImageAsset } from "./articles";
 import type { PublicationItem } from "./publication-items";
 import {
   createThreatIntelligenceRhythm,
-  getLineStackHeight,
   getMeasuredTextHeight,
   reserveRhythmRows,
   snapDownToRhythm,
@@ -36,29 +35,23 @@ export type SolveFeaturedItemInput = {
   itemIndex?: number;
 };
 
-// Must stay above the `@media (max-width: 1024px)` breakpoint in theme.css
-// that forces .presentation-item--blog onto a single grid column. Below that
-// width there is no second column for a floated image to sit in, so picking
-// "obstacle" mode there reserves a narrow text width for a side-by-side
-// layout the grid never actually renders, leaving text cramped on the left
-// with the image stranded below it instead of alongside it.
-const OBSTACLE_MIN_VIEWPORT = 1025;
-const OBSTACLE_MAX_VIEWPORT = 1099;
-const FEATURED_IMAGE_WIDTH_RATIOS = [0.36, 0.38, 0.4, 0.42, 0.44];
-const FLOAT_IMAGE_WIDTH_RATIO = 0.36;
-const LEAD_GAP_ROWS = 6;
+const FLOAT_IMAGE_WIDTH_RATIO = 0.32;
+const FLOAT_IMAGE_MIN_PHONE_ROWS = 6;
+const FLOAT_IMAGE_MIN_DESKTOP_ROWS = 8;
+const FLOAT_COPY_MIN_PHONE_ROWS = 11;
+const FLOAT_COPY_MIN_DESKTOP_ROWS = 14;
+const LEAD_GAP_ROWS = 2;
+const LEAD_GAP_ROWS_NARROW = 1;
 const DEFAULT_GAP_ROWS = 4;
 
 export function getFeaturedLayoutMode(viewportWidth: number, hasImage: boolean): FeaturedLayoutMode {
   if (!hasImage) return "stacked";
-  if (viewportWidth >= OBSTACLE_MIN_VIEWPORT && viewportWidth <= OBSTACLE_MAX_VIEWPORT) return "obstacle";
-  if (viewportWidth > OBSTACLE_MAX_VIEWPORT) return "float";
-  return "stacked";
+  return "float";
 }
 
 export function solveFeaturedItem(input: SolveFeaturedItemInput): SolvedFeaturedItem {
   const rhythm = input.rhythm ?? createThreatIntelligenceRhythm();
-  const gap = rhythmLengthRows(input.itemIndex === 0 ? LEAD_GAP_ROWS : DEFAULT_GAP_ROWS, rhythm);
+  const gap = getFeaturedLayoutGap(input.viewportWidth, input.itemIndex, rhythm);
   const mode = getFeaturedLayoutMode(input.viewportWidth, true);
   const prepared = prepareWithSegments(input.text, `${input.textStyle.fontSize}px ${input.textStyle.fontFamily}`, {
     whiteSpace: "pre-wrap",
@@ -69,6 +62,7 @@ export function solveFeaturedItem(input: SolveFeaturedItemInput): SolvedFeatured
     return solveObstacleFeaturedItem({
       prepared,
       containerWidth: input.containerWidth,
+      viewportWidth: input.viewportWidth,
       rhythm,
       textStyle: input.textStyle,
       aspectRatio,
@@ -81,6 +75,7 @@ export function solveFeaturedItem(input: SolveFeaturedItemInput): SolvedFeatured
     return solveFloatFeaturedItem({
       prepared,
       containerWidth: input.containerWidth,
+      viewportWidth: input.viewportWidth,
       rhythm,
       textStyle: input.textStyle,
       aspectRatio,
@@ -111,6 +106,7 @@ export function solveFeaturedItem(input: SolveFeaturedItemInput): SolvedFeatured
 type PreparedSolveInput = {
   prepared: ReturnType<typeof prepareWithSegments>;
   containerWidth: number;
+  viewportWidth: number;
   rhythm: VerticalRhythm;
   textStyle: BlogTextStyle;
   aspectRatio: number;
@@ -119,6 +115,7 @@ type PreparedSolveInput = {
 };
 
 function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedItem {
+  const maxImageWidth = getFloatImageWidth(input);
   let best: {
     score: number;
     textLines: TextLine[];
@@ -129,10 +126,9 @@ function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedIte
     hasMore: boolean;
   } | null = null;
 
-  for (const ratio of FEATURED_IMAGE_WIDTH_RATIOS) {
-    const imageWidth = snapDownToRhythm(Math.round(input.containerWidth * ratio), input.rhythm);
+  for (const imageWidth of getObstacleImageWidths(maxImageWidth, input.rhythm)) {
     const copyWidth = Math.max(
-      input.rhythm.rowHeight * 8,
+      getFloatCopyMinimum(input.viewportWidth, input.rhythm),
       input.containerWidth - imageWidth - input.gap,
     );
     const minHeight = input.imageLayout?.minHeight ?? input.rhythm.rowHeight * 6;
@@ -179,7 +175,7 @@ function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedIte
     }
 
     const whitespace = Math.max(0, candidateHeight - getMeasuredTextHeight(result.lines));
-    const score = 50_000 - whitespace * 1.4 - Math.abs(candidateHeight - imageHeight) * 0.35 - Math.abs(ratio - 0.4) * 120;
+    const score = 50_000 - whitespace * 1.4 - Math.abs(candidateHeight - imageHeight) * 0.35 - Math.abs(maxImageWidth - imageWidth) * 0.2;
     const candidate = {
       score,
       textLines: result.lines,
@@ -196,7 +192,7 @@ function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedIte
     mode: "obstacle",
     textLines: best?.textLines ?? [],
     imageHeight: best?.imageHeight ?? input.rhythm.rowHeight * 6,
-    imageWidth: best?.imageWidth ?? snapDownToRhythm(Math.round(input.containerWidth * 0.4), input.rhythm),
+    imageWidth: best?.imageWidth ?? maxImageWidth,
     copyWidth: best?.copyWidth ?? input.containerWidth,
     textFrameHeight: best?.textFrameHeight ?? 0,
     hasMore: best?.hasMore ?? false,
@@ -205,8 +201,8 @@ function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedIte
 }
 
 function solveFloatFeaturedItem(input: PreparedSolveInput): SolvedFeaturedItem {
-  const imageWidth = snapDownToRhythm(Math.round(input.containerWidth * FLOAT_IMAGE_WIDTH_RATIO), input.rhythm);
-  const copyWidth = Math.max(input.rhythm.rowHeight * 8, input.containerWidth - imageWidth - input.gap);
+  const imageWidth = getFloatImageWidth(input);
+  const copyWidth = Math.max(getFloatCopyMinimum(input.viewportWidth, input.rhythm), input.containerWidth - imageWidth - input.gap);
   const imageHeight = snapImageHeight(imageWidth / input.aspectRatio, input.rhythm, input.imageLayout);
   const lines = layoutAllTextLines({
     prepared: input.prepared,
@@ -229,6 +225,41 @@ function solveFloatFeaturedItem(input: PreparedSolveInput): SolvedFeaturedItem {
   };
 }
 
+function getFeaturedLayoutGap(viewportWidth: number, itemIndex: number | undefined, rhythm: VerticalRhythm): number {
+  if (itemIndex === 0) {
+    return rhythmLengthRows(viewportWidth <= 600 ? LEAD_GAP_ROWS_NARROW : LEAD_GAP_ROWS, rhythm);
+  }
+  return rhythmLengthRows(DEFAULT_GAP_ROWS, rhythm);
+}
+
+function getFloatImageWidth(input: PreparedSolveInput): number {
+  const preferred = snapDownToRhythm(Math.round(input.containerWidth * FLOAT_IMAGE_WIDTH_RATIO), input.rhythm);
+  const viewportCap = snapDownToRhythm(Math.floor(input.viewportWidth / 3), input.rhythm);
+  const copyCap = snapDownToRhythm(
+    Math.max(0, input.containerWidth - input.gap - getFloatCopyMinimum(input.viewportWidth, input.rhythm)),
+    input.rhythm,
+  );
+  const softMinimum = getFloatImageMinimum(input.viewportWidth, input.rhythm);
+  const hardMinimum = rhythmLengthRows(5, input.rhythm);
+  const hardMaximum = Math.max(hardMinimum, Math.min(viewportCap, copyCap > 0 ? copyCap : viewportCap));
+
+  if (hardMaximum <= softMinimum) return hardMaximum;
+  return clamp(Math.min(preferred, hardMaximum), softMinimum, hardMaximum);
+}
+
+function getFloatImageMinimum(viewportWidth: number, rhythm: VerticalRhythm): number {
+  return rhythmLengthRows(viewportWidth <= 600 ? FLOAT_IMAGE_MIN_PHONE_ROWS : FLOAT_IMAGE_MIN_DESKTOP_ROWS, rhythm);
+}
+
+function getFloatCopyMinimum(viewportWidth: number, rhythm: VerticalRhythm): number {
+  return rhythmLengthRows(viewportWidth <= 600 ? FLOAT_COPY_MIN_PHONE_ROWS : FLOAT_COPY_MIN_DESKTOP_ROWS, rhythm);
+}
+
+function getObstacleImageWidths(maximum: number, rhythm: VerticalRhythm): number[] {
+  const candidateRows = [0, 1, 2].map((offset) => Math.max(rhythm.rowHeight * 5, maximum - (offset * rhythm.rowHeight)));
+  return Array.from(new Set(candidateRows));
+}
+
 function snapImageHeight(
   naturalHeight: number,
   rhythm: VerticalRhythm,
@@ -237,7 +268,7 @@ function snapImageHeight(
   const minHeight = layout?.minHeight ?? rhythm.rowHeight * 6;
   const maxHeight = layout?.maxHeight ?? rhythm.rowHeight * 24;
   return layout?.crop === "contain"
-    ? snapPreservedImageHeightToRhythm(naturalHeight, rhythm, minHeight, maxHeight)
+    ? snapPreservedImageHeightToRhythm(naturalHeight, rhythm, Math.min(minHeight, naturalHeight), maxHeight)
     : snapPreferredHeightToRhythm(naturalHeight, rhythm, minHeight, maxHeight);
 }
 
@@ -248,6 +279,10 @@ function getImageAspectRatio(asset: ArticleImageAsset): number {
 
 function rhythmLengthRows(rows: number, rhythm: VerticalRhythm): number {
   return rows * rhythm.rowHeight;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function isFeaturedBlogItem(item: PublicationItem, index?: number, mode?: string): boolean {

@@ -1,19 +1,27 @@
 # Produce Video (Threat Intelligence / Papyrus seed editions)
 
-Use this skill when generating or updating narrated MP4 briefings for Threat Intelligence seed
-editions, article summary videos, or edition overview teasers.
+Use this skill when generating or updating narrated MP4 videos for Threat Intelligence seed
+editions: video-form articles and the long-format edition video.
 
 ## Purpose
 
-Threat Intelligence videos are **teaser briefings**, not generic motion graphics:
+Threat Intelligence videos are **the article in video form** — not teasers, not previews, not
+generic motion graphics. A viewer who presses play gets the article's full argument, adapted for
+the ear:
 
-- **Edition overview** (`edition-overview.mp4`): ~1 minute teaser for the latest issue.
-  Cold-opens with the first lead article's strongest pull quote, then edition title + first lead
-  pictogram, then "In this edition" headline list, spotlights each lead article with its pictogram,
-  and closes with a dated CTA.
-- **Article briefings** (`<slug>.mp4`): ~60–90 second summaries for lead-pictogram articles.
-  Cold-opens with the strongest pull quote, then headline/deck, excerpt, optional second quote,
-  and a dated CTA.
+- **Article videos** (`<slug>.mp4`): the article itself as a ~2–3 minute video. Same substance,
+  same pictograms and styling, same quotes — adapted per format, not word-for-word. Written **in
+  tandem** with the article body: when the body changes, revisit the video scenes in the same
+  change.
+- **Edition overview** (`edition-overview.mp4`): a long-format video presenting the content of
+  the whole edition — every article covered, edited down but substantive (minutes, not seconds;
+  not a one-line-per-article summary). Reuses each article's pictogram and strongest quote; lead
+  articles get fuller segments. Assembled by condensing the article videos' scenes after those
+  exist.
+
+**No pre-roll.** The first scene is article content, given to the viewer "for free" — never
+"welcome to another edition of…", never a masthead. All branding lives in the standardized
+**post-roll** the pipeline appends (see below).
 
 Voice tone: practical, calm, editorial — “mission briefing” not marketing hype.
 
@@ -130,19 +138,57 @@ Do not ship scenes with `<voice>` cues only.
 
 ## Content policy
 
-### Scene order
+### Authoring `video.scenes` (video-form articles)
 
-**Article briefings:** hook (cold-open pull quote, if present) → title (pictogram + section eyebrow + headline + deck) → briefing excerpt → second pull quote (if present) → closing CTA.
+A `video` block (article or edition) with a `"scenes"` array is rendered scene-by-scene, in
+order, with the standard post-roll appended by the pipeline. Two scene kinds, mapped onto the
+existing components — no new browser components needed:
 
-**Edition overview:** hook (edition `video.hook`; falls back to first lead article's `pullQuotes[0]`) → title (edition title + first lead pictogram + tagline) → edition teaser (date + "In this edition" + headline list) → six spotlights → closing CTA.
+```json
+{ "kind": "quote", "quote": "…", "attribution": "Mission", "voice": "…" }
+{ "kind": "slide", "eyebrow": "…", "title": "…", "subtitle": "…", "pictogram": "slug-or-omit", "voice": "…" }
+```
+
+- `quote` → `quote-card`. `slide` → `ti-title-slide` (pictogram/eyebrow-rule) or `title-slide`.
+- `voice` is required on every scene: it is the narration. Display fields are what's on screen —
+  short, poster-legible, not a transcript of the voice. Same substance, adapted per medium.
+- Scene ids are auto-generated (`scene-1`, `scene-2`, …). Do **not** author a closing/branding
+  scene — the pipeline appends the post-roll.
+
+Writing rules for scenes:
+
+1. **Cold-open into content.** Scene 1 is article substance — usually the article's
+   `pullQuotes[0]` as a quote scene. It is also the index poster (see poster rule below).
+2. **Cover the full argument.** Target ~350–450 spoken words (~2–2.5 min) per article video:
+   opening claim, the concrete example/scenario, the key metaphor or quote beats, the shift, the
+   "what to check now" checks (condensed to spoken form), the article's closing thought. Edit the
+   body down for the ear — don't read it verbatim, and don't drop its substance.
+3. **A headline slide early is content, not branding** — an article opens with its headline. But
+   its voice narrates the claim (headline + deck adapted); it never speaks the publication name
+   as a welcome.
+4. **Quote scenes follow the verbatim policy**: any displayed quote must occur verbatim in the
+   article body.
+5. **The echo rule applies between adjacent scenes** (see below) — read the whole voice script
+   aloud in order before rendering.
+6. **In tandem:** article body edits and scene edits ship together. A body change that makes a
+   scene stale is a bug in the change.
+
+### Scene order (legacy fallback — articles without `video.scenes`)
+
+Articles that have not yet been converted render the legacy teaser structure:
+
+**Article briefings:** hook (cold-open pull quote, if present) → title (pictogram + section eyebrow + headline + deck) → briefing excerpt → second pull quote (if present) → post-roll.
+
+**Edition overview:** hook (edition `video.hook`; falls back to first lead article's `pullQuotes[0]`) → title (edition title + first lead pictogram + tagline) → edition teaser (date + "In this edition" + headline list) → six spotlights → post-roll. This fallback stands until the long-format edition scenes are authored.
 
 **Reader placement:** edition overview video on the blog index just above the first section header; article videos on index cards below excerpt/pictogram; article pages show video above title/deck with pictogram in body.
 
-No separate brand-only intro scene on edition overview.
+No separate brand-only intro scene anywhere.
 
 ### Writing for narration (seed copy contract)
 
-Every narrated word comes from seed JSON fields. Scene → source:
+For scenes-driven videos, narration is the authored `voice` fields. For the **legacy fallback**,
+every narrated word comes from seed JSON fields. Scene → source:
 
 | Scene | Voice source |
 |-------|--------------|
@@ -151,9 +197,10 @@ Every narrated word comes from seed JSON fields. Scene → source:
 | Briefing (article videos) | full `excerpt` |
 | Overview spotlight | `headline` + **first sentence** of `excerpt` (fallback: `deck`) |
 | Overview teaser | edition `description` + fixed "This edition features…" line |
-| Closing | fixed CTA (see below) |
+| Post-roll | fixed CTA (see below) |
 
-Rules that follow from this:
+Rules that follow from this (the echo rule, poster rule, and verbatim-quote policy apply to
+authored scenes just as much as to the fallback):
 
 - **First-sentence contract.** The pipeline's sentence splitter breaks on `.` `!` `?` — but NOT on em dashes or semicolons. A lead article's excerpt must land a complete thought (setup *and* payoff) before its first period, or the spotlight tease dangles and the scene cuts mid-idea. Join two-beat hooks with an em dash or semicolon:
   - ✗ `"The engineer left in January. The workspace invite … are all still live."` → spotlight speaks only *"The engineer left in January."*
@@ -170,11 +217,14 @@ Rules that follow from this:
 
 Before rendering, proofread what will be *spoken*, not just what the JSON says:
 
-1. Simulate the full voice script for the overview and all six briefings (replicate `first_sentence()` / `truncate_display()` from `video_pipeline.py` in a scratch script) and read it end-to-end. Check: no dangling spotlight teases, no word pile-ups across adjacent scenes, spotlight subtitles ≤ 180 chars.
-2. The edition's topic and vocabulary constraints apply to narrated words too — narration is public content. Run the same vocabulary checks used for article copy against every field the videos read (`headline`, `deck`, `excerpt`, `pullQuotes`, `description`).
-3. Confirm the worktree's seed JSON narration fields match the canonical main-repo copy. The render reads the worktree file and will happily speak stale copy.
+1. Simulate the full voice script for every video — authored `scenes[].voice` in order plus post-roll, and the legacy fields for unconverted videos — and read it end-to-end. Check: no dangling teases, no word pile-ups across adjacent scenes, ~350–450 spoken words per article video, spotlight subtitles ≤ 180 chars (legacy).
+2. The edition's topic and vocabulary constraints apply to narrated words too — narration is public content. Run the same vocabulary checks used for article copy against every field the videos read (`scenes[].voice`, `scenes[].quote`, `headline`, `deck`, `excerpt`, `pullQuotes`, `description`).
+3. Verify quote-scene text (and `pullQuotes`) still occurs verbatim in the article body — body edits can silently orphan a quote. If rendering from a git worktree, confirm its seed JSON matches the canonical copy first.
 
-### Closing CTA (every video)
+### Post-roll (every video)
+
+The one branding block, standardized and **pipeline-appended** (`post_roll_scene()` in
+`video_pipeline.py`) — never authored per-video, never varied per-video:
 
 Slide: eyebrow `Learn more — {edition date} edition`, title `THREAT INTELLIGENCE` in tomato red (`--ti-alarm-red`), subtitle = tagline.
 
@@ -184,8 +234,11 @@ Edition date comes from seed `publishDate` (formatted as `July 4, 2026` on slide
 
 ### Other rules
 
-- **Article voice** uses excerpt + pull quotes only; do not read the full article body.
+- **Article videos say what the article says.** Adapted for the ear, not read verbatim — but the
+  video must not add claims the article doesn't make, and must not drop the article's checks.
 - Do not invent facts, incidents, or vendor claims not present in seed article copy.
+- After re-rendering, re-measure and update `durationSeconds` (and captions/alt text if the
+  format changed) in the seed `video` blocks.
 - Keep OpenAI keys in `.papyrus/config.yaml` (`openai.api_key`) or `OPENAI_API_KEY`; never commit keys.
 
 ## Commands
@@ -220,6 +273,8 @@ Upload during Amplify seed: `PAPYRUS_SEED_VIDEOS=1 npm run seed:amplify`
 - Edition video: top-level `video` block in
   `publications/threat_intelligence/seed/seed-edition-content.json`
 - Article videos: per-article `video` blocks on the six lead-pictogram articles
+- `video.scenes` (article or edition) = the authored video-form script; absent → legacy fallback.
+  Exemplar: the Balance article (`the-balance-of-power-is-shifting`).
 - Edition video is copied into `Edition.metadata.editionVideo` during seed
 - Blog reader shows edition video below the masthead via `EditionContent.editionVideo`
 
@@ -236,5 +291,6 @@ Upload during Amplify seed: `PAPYRUS_SEED_VIDEOS=1 npm run seed:amplify`
 Future pipeline options — listed so nobody mistakes them for current behavior:
 
 - **`--script-only` dry run**: a mode that prints the assembled voice script for all videos without TTS or render cost, making the pre-render script check a one-command step instead of a scratch script.
-- **`video.voiceHook` override**: an optional per-article seed field to override the spotlight tease when the ideal index excerpt and the ideal spoken tease diverge, instead of bending one surface to fit the other. Until it exists, the first-sentence contract above is the compromise.
-- **Overview spotlight cadence**: six identical headline+tease title-slide scenes in a row is the video version of index-page monotony. If the overview starts to feel flat, consider varying the scene type partway through (e.g., a quote-card for one spotlight) rather than adding more words.
+- ~~`video.voiceHook` override~~ — superseded by authored `video.scenes`, which decouple narration from index copy entirely.
+- **Overview spotlight cadence** (legacy fallback only): six identical headline+tease scenes in a row is monotonous; the authored long-format edition scenes solve this by design — vary quote and slide scenes per segment.
+- **Long-format edition scenes**: once all six article `video.scenes` exist, author the edition overview's scenes by condensing them — one segment per article (headline slide + strongest beat), lead articles fuller, reusing pictograms and quotes verbatim.
