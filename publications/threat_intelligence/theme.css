@@ -92,7 +92,6 @@
   --ti-secondary-headline-font-size: calc(var(--ti-rhythm) * 6);
   --ti-lead-headline-line-box: calc(var(--ti-rhythm) * 8);
   --ti-lead-headline-font-size: calc(var(--ti-rhythm) * 8);
-  --ti-section-band-height: var(--ti-secondary-headline-line-box);
   --ti-section-label-scale: 1.34;
   --ti-section-label-scale-trimmed: 1.48;
   --ti-masthead-word-line-box: calc(var(--ti-row-height) * 4);
@@ -553,7 +552,7 @@
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-edition-video {
   grid-column: 1 / -1;
-  margin: calc(var(--ti-row-height) * 2) auto calc(var(--ti-row-height) * 6);
+  margin: calc(var(--ti-row-height) * 2) auto calc(var(--ti-row-height) * 2);
   max-width: var(--ti-blog-rail-width);
   width: var(--ti-blog-rail-width);
 }
@@ -599,6 +598,8 @@
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog {
   --ti-blog-rail-width: min(100%, var(--ti-blog-rail-max-width));
   --ti-blog-rail-margin: max(0px, calc((100% - var(--ti-blog-rail-width)) * 0.5));
+  /* Track the responsive masthead word line box so section headers match H1 height. */
+  --ti-section-band-height: var(--ti-masthead-word-line-box);
 
   background: var(--background);
   isolation: isolate;
@@ -755,6 +756,7 @@
   margin-bottom: var(--ti-section-content-gap);
   min-height: 0;
   padding: 0;
+  width: 100%;
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header__band {
@@ -812,11 +814,11 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header span {
-  align-self: center;
+  align-self: stretch;
   color: var(--ti-body-color);
   font-size: var(--ti-copy-font-size);
   line-height: var(--ti-copy-line-height);
-  max-width: calc(var(--ti-rhythm) * 84);
+  max-width: none;
   padding: 0;
   text-align: center;
   width: 100%;
@@ -1338,7 +1340,6 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header span {
-    align-self: start;
     text-align: left;
   }
 

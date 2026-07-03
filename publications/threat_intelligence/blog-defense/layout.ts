@@ -297,8 +297,12 @@ function buildArmAttachmentEdges(input: {
 }
 
 // Extend a margin rail one pitch at a time until it reaches the container
-// boundary or an obstacle, so the single-file line runs the full margin
-// regardless of container proportions.
+// boundary, so the single-file line runs the full margin regardless of
+// container proportions. A step blocked by an obstacle is skipped rather
+// than treated as the end of the rail: the walk keeps advancing toward the
+// boundary and resumes emitting nodes as soon as it's clear again, so one
+// transient obstacle only opens a small gap instead of truncating everything
+// beyond it.
 function extendMarginRail(input: {
   seed: LayoutDefenseNode;
   stepX: number;
@@ -324,18 +328,21 @@ function extendMarginRail(input: {
     obstacles,
   } = input;
   let previous = seed;
-  for (let index = 0; ; index += 1) {
-    const x = previous.x + stepX;
-    const y = previous.y + stepY;
+  let emitted = 0;
+  for (let step = 1; ; step += 1) {
+    const x = seed.x + stepX * step;
+    const y = seed.y + stepY * step;
     if (!withinBounds(x, y)) break;
-    if (nodeIntersectsObstacles(x, y, seed.radius + 2, obstacles)) break;
-    if (edgeIntersectsObstacles(previous.x, previous.y, x, y, obstacles)) break;
-    const node = makeNode(index, x, y);
+    if (nodeIntersectsObstacles(x, y, seed.radius + 2, obstacles)) continue;
+    const node = makeNode(emitted, x, y);
     positionedNodes.set(node.id, node);
-    const edgeId = `${idPrefix}_chain_${index}`;
-    edges.push(buildEdgeRecord(previous, node, edgeId));
-    usedEdgeIds.add(edgeId);
+    if (!edgeIntersectsObstacles(previous.x, previous.y, x, y, obstacles)) {
+      const edgeId = `${idPrefix}_chain_${emitted}`;
+      edges.push(buildEdgeRecord(previous, node, edgeId));
+      usedEdgeIds.add(edgeId);
+    }
     previous = node;
+    emitted += 1;
   }
 }
 
@@ -345,12 +352,11 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
   const rhythm = input.rhythm;
   const snap = (value: number) => (rhythm ? snapRhythmCoordinate(value, rhythm) : value);
   const padX = snap(input.padX ?? (rhythm ? rhythm.rowHeight * 2 : 18));
-  const obstacles = (input.obstacles ?? []).map((obstacle) => ({
-    x: snap(obstacle.x),
-    y: snap(obstacle.y),
-    width: snap(obstacle.width),
-    height: snap(obstacle.height),
-  }));
+  // Obstacles are real measured DOM rects, not rendered/snapped grid
+  // elements — grid-snapping them here only adds asymmetric drift on top of
+  // whatever tight buffer the caller already applied, with no crispness
+  // benefit (unlike node/edge coordinates, obstacle rects are never drawn).
+  const obstacles = input.obstacles ?? [];
   const core = templateNodeById(BLOG_DEFENSE_CORE_NODE_ID) ?? BLOG_DEFENSE_NODES[0];
   const baseScale = Math.min(width / BLOG_DEFENSE_VIEWBOX_WIDTH, height / BLOG_DEFENSE_VIEWBOX_HEIGHT);
   const scaleBoost = width >= 720

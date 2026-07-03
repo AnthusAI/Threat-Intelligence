@@ -563,7 +563,10 @@ function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHea
             x: intersectionLeft - backgroundRect.left,
             y: intersectionTop - backgroundRect.top,
             width,
-            height: Math.max(BLOG_RHYTHM.rowHeight, Math.ceil(height / BLOG_RHYTHM.rowHeight) * BLOG_RHYTHM.rowHeight),
+            // A tight buffer around the exact measured glyph box: enough to keep
+            // graph ink off the text without inflating to a full rhythm row,
+            // which would make the obstacle far taller than the real line.
+            height: height + BLOG_RHYTHM.paintBuffer * 2,
           });
         }
       }

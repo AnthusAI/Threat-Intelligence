@@ -475,6 +475,39 @@ const corridorVisible = desktopLayout.nodes
 assert.ok(corridorVisible.length >= 1, "at least one right-corridor node should survive");
 assert.ok(corridorVisible[0].x > 640, "corridor should stay in right margin");
 
+// A transient obstacle mid-rail must only open a small gap in the margin
+// extension, not truncate everything beyond it — the walk should resume and
+// still reach the far side of the container.
+const tallExtensionYs = tallExtension.map((node) => node.y).sort((a, b) => a - b);
+const gapObstacleTop = tallExtensionYs[Math.floor(tallExtensionYs.length / 2)] - tallPitch * 0.4;
+const gapObstacleHeight = tallPitch * 1.2;
+const obstructedTallLayout = layoutDefenseGraph({
+  width: 720,
+  height: 900,
+  obstacles: [
+    { x: tallRail.x - tallRail.radius - 4, y: gapObstacleTop, width: tallRail.radius * 2 + 8, height: gapObstacleHeight },
+  ],
+});
+const obstructedExtension = obstructedTallLayout.nodes.filter((node) => node.id.startsWith("corridor_ext_"));
+const beforeGap = obstructedExtension.filter((node) => node.y < gapObstacleTop);
+const afterGap = obstructedExtension.filter((node) => node.y > gapObstacleTop + gapObstacleHeight);
+assert.ok(beforeGap.length >= 1, "nodes before a transient mid-rail obstacle should survive");
+assert.ok(
+  afterGap.length >= 1,
+  "the rail must resume past a transient obstacle instead of stopping forever",
+);
+const obstructedDeepest = Math.max(...obstructedExtension.map((node) => node.y));
+assert.ok(
+  obstructedDeepest >= 900 - tallPitch - 10,
+  `rail should still reach the container bottom past the gap (deepest ${obstructedDeepest.toFixed(1)})`,
+);
+assert.ok(
+  obstructedExtension.every((node) => (
+    node.y < gapObstacleTop - node.radius || node.y > gapObstacleTop + gapObstacleHeight + node.radius
+  )),
+  "no surviving node should overlap the obstacle band",
+);
+
 // --- obstacle culling ----------------------------------------------------
 
 const blockedLayout = layoutDefenseGraph({

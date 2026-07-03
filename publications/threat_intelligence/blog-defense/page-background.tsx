@@ -204,13 +204,11 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
       if (width > 0 && height > 0) {
         setSize((current) => (current.width === width && current.height === height ? current : { width, height }));
       }
-      const padding = rhythm.rowHeight;
-      setObstacles(headerObstacles.map((obstacle) => ({
-        x: Math.max(0, obstacle.x - padding),
-        y: Math.max(0, obstacle.y - padding),
-        width: obstacle.width + padding * 2,
-        height: obstacle.height + padding * 2,
-      })));
+      // headerObstacles are already tight to the measured text (see
+      // useBlogHeaderObstacles); the per-check radius/inflate buffers in
+      // layoutDefenseGraph provide the small remaining clearance, so no
+      // extra padding is added here.
+      setObstacles(headerObstacles);
     };
 
     update();
