@@ -30,5 +30,12 @@ if (!babulus?.registerComponent) {
   throw new Error("Babulus browser bundle did not initialize window.Babulus.registerComponent.");
 }
 
-babulus.registerComponent("TiTitleSlide", TiTitleSlide);
-babulus.registerComponent("TiQuoteCard", TiQuoteCard);
+const registerTiComponent = <Props extends Record<string, unknown>>(
+  name: string,
+  component: React.ComponentType<Props>,
+) => {
+  babulus.registerComponent(name, component as React.ComponentType<Record<string, unknown>>);
+};
+
+registerTiComponent("TiTitleSlide", TiTitleSlide);
+registerTiComponent("TiQuoteCard", TiQuoteCard);

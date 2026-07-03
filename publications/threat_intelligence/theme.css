@@ -111,7 +111,7 @@
   --ti-stack-gap: var(--ti-rhythm);
   /* One blank rhythm row between wrapped section-nav flex lines. */
   --ti-section-nav-gap: var(--ti-row-height);
-  --ti-section-content-gap: calc(var(--ti-rhythm) * 7);
+  --ti-section-content-gap: calc(var(--ti-rhythm) * 11);
   --ti-section-stack-gap: calc(var(--ti-rhythm) * 12);
   --ti-footer-card-min-height: calc(var(--ti-rhythm) * 20);
   --ti-headline-color: var(--sand-12);
@@ -1435,7 +1435,7 @@
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header {
-    margin-bottom: calc(var(--ti-rhythm) * 5);
+    margin-bottom: calc(var(--ti-rhythm) * 9);
   }
 
   :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item--blog[data-item-index="0"] {

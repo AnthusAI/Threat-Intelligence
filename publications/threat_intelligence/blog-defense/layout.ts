@@ -364,7 +364,14 @@ export function layoutDefenseGraph(input: LayoutDefenseGraphInput): LayoutDefens
     : width >= 520
       ? 1.05
       : 1.02;
-  const scale = Math.max(0.48, Math.min(1.18, baseScale * scaleBoost));
+  // The floor only needs to stay high enough that the closest pair of nodes
+  // anywhere in the template (halo_nw and left_b0's shoulder wedge, ~22.6
+  // template units apart) don't overlap once node radius bottoms out at its
+  // own floor (4.4px): 22.6 * 0.42 = 9.5 > 2 * 4.4. Below ~720px-wide
+  // containers baseScale can undershoot a much higher floor, which used to
+  // clip whole rail segments against the padding/edge bounds even though
+  // nothing was actually obstructing them — the template just didn't fit.
+  const scale = Math.max(0.42, Math.min(1.18, baseScale * scaleBoost));
   const nodeRadius = uniformNodeRadius(scale);
   const pitch = BLOG_DEFENSE_ARM_PITCH * scale;
   const inBounds = makeBoundsChecker({ width, height, padX, nodeRadius });

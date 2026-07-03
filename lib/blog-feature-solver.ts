@@ -36,7 +36,13 @@ export type SolveFeaturedItemInput = {
   itemIndex?: number;
 };
 
-const OBSTACLE_MIN_VIEWPORT = 640;
+// Must stay above the `@media (max-width: 1024px)` breakpoint in theme.css
+// that forces .presentation-item--blog onto a single grid column. Below that
+// width there is no second column for a floated image to sit in, so picking
+// "obstacle" mode there reserves a narrow text width for a side-by-side
+// layout the grid never actually renders, leaving text cramped on the left
+// with the image stranded below it instead of alongside it.
+const OBSTACLE_MIN_VIEWPORT = 1025;
 const OBSTACLE_MAX_VIEWPORT = 1099;
 const FEATURED_IMAGE_WIDTH_RATIOS = [0.36, 0.38, 0.4, 0.42, 0.44];
 const FLOAT_IMAGE_WIDTH_RATIO = 0.36;
