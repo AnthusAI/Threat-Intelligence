@@ -10,6 +10,7 @@ import {
   createThreatIntelligenceBlogTextStyle,
   createThreatIntelligenceRhythm,
   getMeasuredTextHeight,
+  reserveRhythmRows,
   TI_COPY_ROW_MULTIPLE,
 } from "../lib/blog-rhythm";
 import {
@@ -27,6 +28,7 @@ import type { ArticleVideoAsset } from "../lib/articles";
 import type { VideoScriptRef } from "../lib/video-script";
 import { SITE_BRAND, enforcePresentation } from "../lib/site-brand";
 import { ArticleVideoFigure } from "./article-video";
+import { PresentationRhythmHRule } from "./presentation-rhythm-hrule";
 import { BlogPageBackground } from "../publications/threat_intelligence/blog-defense/page-background";
 import { Newspaper } from "./newspaper";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
@@ -167,16 +169,28 @@ function BlogPresentation({
               </div>
               {section.description ? <span>{section.description}</span> : null}
             </header>
-            {getEditionSectionItems(section, content.items).map((item, index) => (
-              <PresentationItem
-                editionBasePath={editionBasePath}
-                index={index}
-                item={item}
-                key={item.slug}
-                mode="blog"
-                videoScript={content.videoScripts?.[item.slug] ?? null}
-              />
-            ))}
+            {getEditionSectionItems(section, content.items).flatMap((item, index) => {
+              const elements = [];
+              if (index > 0) {
+                elements.push(
+                  <PresentationRhythmHRule
+                    hideInSecondaryPair={index === 2}
+                    key={`hrule-before-${item.slug}`}
+                  />,
+                );
+              }
+              elements.push(
+                <PresentationItem
+                  editionBasePath={editionBasePath}
+                  index={index}
+                  item={item}
+                  key={item.slug}
+                  mode="blog"
+                  videoScript={content.videoScripts?.[item.slug] ?? null}
+                />,
+              );
+              return elements;
+            })}
           </section>
         ))}
       </div>
@@ -362,7 +376,7 @@ function PresentationItem({
       ...textStyle,
     });
   }, [containerWidth, featuredLayout, frameWidth, text, textStyle]);
-  const textHeight = featuredLayout?.textFrameHeight ?? getMeasuredTextHeight(lines);
+  const textHeight = featuredLayout?.textFrameHeight ?? reserveRhythmRows(getMeasuredTextHeight(lines), BLOG_RHYTHM);
   const layoutMode = featuredLayout?.mode ?? "stacked";
   const directHref = editionBasePath ? `${editionBasePath}/${encodeURIComponent(item.slug)}` : `/articles/${encodeURIComponent(item.slug)}`;
   const itemStyle = featuredLayout
@@ -407,7 +421,10 @@ function PresentationItem({
             >
               <MeasuredPresentationLines lines={lines} />
             </div>
-            <Link className="presentation-item__cta" href={directHref}>
+            <Link
+              className="presentation-item__cta"
+              href={directHref}
+            >
               Read Article
             </Link>
           </div>
@@ -527,6 +544,7 @@ function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHea
       if (!backgroundRect) return;
 
       const selectors = [
+        ".presentation-header__eyebrow",
         ".presentation-header__word",
         ".presentation-header__meta",
         ".presentation-header__subtitle",
