@@ -25,6 +25,14 @@ export type SolvedFeaturedItem = {
   gap: number;
 };
 
+export type SolvedFeaturedFloatGeometry = {
+  mode: "float";
+  imageHeight: number;
+  imageWidth: number;
+  copyWidth: number;
+  gap: number;
+};
+
 export type SolveFeaturedItemInput = {
   text: string;
   containerWidth: number;
@@ -32,6 +40,14 @@ export type SolveFeaturedItemInput = {
   rhythm?: VerticalRhythm;
   textStyle: BlogTextStyle;
   imageAsset: ArticleImageAsset;
+  itemIndex?: number;
+};
+
+export type SolveFeaturedFloatGeometryInput = {
+  containerWidth: number;
+  viewportWidth: number;
+  rhythm?: VerticalRhythm;
+  imageAsset: Pick<ArticleImageAsset, "layout">;
   itemIndex?: number;
 };
 
@@ -201,12 +217,10 @@ function solveObstacleFeaturedItem(input: PreparedSolveInput): SolvedFeaturedIte
 }
 
 function solveFloatFeaturedItem(input: PreparedSolveInput): SolvedFeaturedItem {
-  const imageWidth = getFloatImageWidth(input);
-  const copyWidth = Math.max(getFloatCopyMinimum(input.viewportWidth, input.rhythm), input.containerWidth - imageWidth - input.gap);
-  const imageHeight = snapImageHeight(imageWidth / input.aspectRatio, input.rhythm, input.imageLayout);
+  const geometry = computeFloatGeometry(input);
   const lines = layoutAllTextLines({
     prepared: input.prepared,
-    maxWidth: copyWidth,
+    maxWidth: geometry.copyWidth,
     lineHeight: input.textStyle.lineHeight,
     linePaintHeight: input.textStyle.linePaintHeight,
     fontSize: input.textStyle.fontSize,
@@ -216,11 +230,56 @@ function solveFloatFeaturedItem(input: PreparedSolveInput): SolvedFeaturedItem {
   return {
     mode: "float",
     textLines: lines,
+    imageHeight: geometry.imageHeight,
+    imageWidth: geometry.imageWidth,
+    copyWidth: geometry.copyWidth,
+    textFrameHeight: reserveRhythmRows(getMeasuredTextHeight(lines), input.rhythm),
+    hasMore: false,
+    gap: geometry.gap,
+  };
+}
+
+/**
+ * Geometry-only float solve for article pages (and any consumer that renders
+ * flowing body copy rather than Pretext-measured excerpt lines). Shares the
+ * same width/height/gap math as the edition-index lead float.
+ */
+export function solveFeaturedFloatGeometry(input: SolveFeaturedFloatGeometryInput): SolvedFeaturedFloatGeometry {
+  const rhythm = input.rhythm ?? createThreatIntelligenceRhythm();
+  const gap = getFeaturedLayoutGap(input.viewportWidth, input.itemIndex, rhythm);
+  return {
+    mode: "float",
+    ...computeFloatGeometry({
+      containerWidth: input.containerWidth,
+      viewportWidth: input.viewportWidth,
+      rhythm,
+      gap,
+      aspectRatio: getImageAspectRatio(input.imageAsset),
+      imageLayout: input.imageAsset.layout,
+    }),
+  };
+}
+
+type FloatGeometryInput = {
+  containerWidth: number;
+  viewportWidth: number;
+  rhythm: VerticalRhythm;
+  gap: number;
+  aspectRatio: number;
+  imageLayout?: ArticleImageAsset["layout"];
+};
+
+function computeFloatGeometry(input: FloatGeometryInput): Omit<SolvedFeaturedFloatGeometry, "mode"> {
+  const imageWidth = getFloatImageWidth(input);
+  const copyWidth = Math.max(
+    getFloatCopyMinimum(input.viewportWidth, input.rhythm),
+    input.containerWidth - imageWidth - input.gap,
+  );
+  const imageHeight = snapImageHeight(imageWidth / input.aspectRatio, input.rhythm, input.imageLayout);
+  return {
     imageHeight,
     imageWidth,
     copyWidth,
-    textFrameHeight: reserveRhythmRows(getMeasuredTextHeight(lines), input.rhythm),
-    hasMore: false,
     gap: input.gap,
   };
 }
@@ -232,7 +291,7 @@ function getFeaturedLayoutGap(viewportWidth: number, itemIndex: number | undefin
   return rhythmLengthRows(DEFAULT_GAP_ROWS, rhythm);
 }
 
-function getFloatImageWidth(input: PreparedSolveInput): number {
+function getFloatImageWidth(input: Pick<FloatGeometryInput, "containerWidth" | "viewportWidth" | "rhythm" | "gap">): number {
   const preferred = snapDownToRhythm(Math.round(input.containerWidth * FLOAT_IMAGE_WIDTH_RATIO), input.rhythm);
   const viewportCap = snapDownToRhythm(Math.floor(input.viewportWidth / 3), input.rhythm);
   const copyCap = snapDownToRhythm(
@@ -272,7 +331,7 @@ function snapImageHeight(
     : snapPreferredHeightToRhythm(naturalHeight, rhythm, minHeight, maxHeight);
 }
 
-function getImageAspectRatio(asset: ArticleImageAsset): number {
+function getImageAspectRatio(asset: Pick<ArticleImageAsset, "layout">): number {
   if (asset.layout?.aspectRatio) return asset.layout.aspectRatio;
   return 1;
 }
