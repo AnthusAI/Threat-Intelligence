@@ -215,7 +215,7 @@ function TiPreviewPlayer({ script, width, height, autoPlay = false, audioSrc, rh
       }),
     [audioBlocked, audioDuration, audioProgressObserved, audioSrc, currentTime, isPlaying, scriptDerivedDuration],
   );
-  const { controlLabel, duration, hasAudioSource, useAudioClock, visualTime } = playbackState;
+  const { duration, hasAudioSource, useAudioClock, visualTime } = playbackState;
 
   const currentFrame = Math.floor(visualTime * fps);
   const sceneBackground = script.scenes?.[0]?.styles?.background;
@@ -405,26 +405,71 @@ function TiPreviewPlayer({ script, width, height, autoPlay = false, audioSrc, rh
     };
   }, [applyTime, duration, hasAudioSource, isPlaying, pauseAudio, playAudio, useAudioClock]);
 
-  const togglePlayback = async () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      lastTimestampRef.current = undefined;
-      return;
-    }
-
+  const startPlayback = useCallback(async () => {
     if (hasAudioSource) {
       await playAudio();
     }
-
     setIsPlaying(true);
     lastTimestampRef.current = undefined;
-  };
+  }, [hasAudioSource, playAudio]);
 
-  const handleSeek = (nextTime: number) => {
-    applyTime(nextTime);
-    seekAudio(nextTime);
+  const stopPlayback = useCallback(() => {
+    setIsPlaying(false);
     lastTimestampRef.current = undefined;
-  };
+  }, []);
+
+  const handleSeek = useCallback(
+    (nextTime: number) => {
+      applyTime(nextTime);
+      seekAudio(nextTime);
+      lastTimestampRef.current = undefined;
+    },
+    [applyTime, seekAudio],
+  );
+
+  const lastBroadcastRef = useRef<{ currentTime: number; duration: number } | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || window.parent === window) return;
+    const roundedTime = Math.round(currentTime * 10) / 10;
+    const roundedDuration = Math.round(duration * 10) / 10;
+    const previous = lastBroadcastRef.current;
+    if (
+      previous &&
+      previous.currentTime === roundedTime &&
+      previous.duration === roundedDuration
+    ) {
+      return;
+    }
+    lastBroadcastRef.current = { currentTime: roundedTime, duration: roundedDuration };
+    window.parent.postMessage(
+      {
+        kind: "ti-preview-time",
+        currentTime: roundedTime,
+        duration: roundedDuration,
+      },
+      "*",
+    );
+  }, [currentTime, duration]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const payload = event.data;
+      if (!payload || typeof payload !== "object") return;
+      if (payload.kind === "ti-preview-play") {
+        void startPlayback();
+        return;
+      }
+      if (payload.kind === "ti-preview-pause") {
+        stopPlayback();
+        return;
+      }
+      if (payload.kind === "ti-preview-seek" && typeof payload.time === "number") {
+        handleSeek(payload.time);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [handleSeek, startPlayback, stopPlayback]);
 
   return (
     <div
@@ -489,69 +534,6 @@ function TiPreviewPlayer({ script, width, height, autoPlay = false, audioSrc, rh
             />
           ) : null}
         </div>
-      </div>
-      <div
-        style={{
-          alignItems: "center",
-          background: "linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.88))",
-          bottom: 0,
-          color: "#eee",
-          display: "flex",
-          fontFamily: "system-ui, sans-serif",
-          fontSize: 12,
-          gap: 8,
-          left: 0,
-          padding: "18px 12px 8px",
-          pointerEvents: "none",
-          position: "absolute",
-          right: 0,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            void togglePlayback();
-          }}
-          style={{
-            background: "#333",
-            border: "1px solid #555",
-            borderRadius: 4,
-            color: "#fff",
-            cursor: "pointer",
-            pointerEvents: "auto",
-            padding: "4px 10px",
-          }}
-        >
-          {controlLabel}
-        </button>
-        <input
-          aria-label="Seek preview"
-          max={duration}
-          min={0}
-          onChange={(event) => {
-            handleSeek(Number(event.target.value));
-          }}
-          step={1 / fps}
-          style={{ flex: 1, pointerEvents: "auto" }}
-          type="range"
-          value={currentTime}
-        />
-        <span style={{ minWidth: 72, textAlign: "right" }}>
-          {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
-        </span>
-        <span
-          style={{
-            background: "#e54d2e",
-            borderRadius: 4,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "0.06em",
-            padding: "2px 6px",
-            textTransform: "uppercase",
-          }}
-        >
-          Preview
-        </span>
       </div>
     </div>
   );

@@ -107,6 +107,12 @@ Babulus caches TTS segments by text content hash, not visual styles. Since the v
 
 ## Pictograms (required)
 
+**Every article has a registered pictogram** (all 18, not just the video leads) — one metaphor,
+one accent element, one motion beat, in the shared 320×320 line-art language. New articles get a
+pictogram in the same change that adds them; `test-pictograms.cjs` enforces registry coverage
+against the seed edition. Edition-overview slides reference each article's pictogram via the
+scene `pictogram` field.
+
 Every article video scene should show the article **React pictogram** (same components as the blog):
 
 - Source of truth: article **slug** → registry in [`lib/threat-intelligence-pictograms.ts`](../../lib/threat-intelligence-pictograms.ts) and SVG art in [`components/pictograms/pictogram-art.tsx`](../../components/pictograms/pictogram-art.tsx)

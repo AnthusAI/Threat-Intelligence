@@ -15,6 +15,7 @@ import {
   type PublicationItemType,
 } from "./publication-items";
 import { SITE_BRAND } from "./site-brand";
+import { shouldFetchVideoScripts } from "./video-mode";
 import { parseVideoScriptRef, videomlItemSlug, type VideoScriptRef } from "./video-script";
 
 const AUTH_MODE = "apiKey";
@@ -189,7 +190,7 @@ export const graphqlContentRepository: ContentRepository = {
   },
 
   async loadVideoScript(targetSlug: string) {
-    if (process.env.NODE_ENV !== "development") return null;
+    if (!shouldFetchVideoScripts()) return null;
     const item = await getItemBySlug(videomlItemSlug(targetSlug));
     if (!item || item.type !== "videoml" || item.status !== "published") return null;
     return parseVideoScriptRef(item);
@@ -346,7 +347,7 @@ async function loadEditionVideoScripts(
   items: PublicationItem[],
   editionVideo: ArticleVideoAsset | null,
 ): Promise<Record<string, VideoScriptRef> | undefined> {
-  if (process.env.NODE_ENV !== "development") return undefined;
+  if (!shouldFetchVideoScripts()) return undefined;
 
   const targets = new Set<string>();
   if (editionVideo) targets.add("edition-overview");

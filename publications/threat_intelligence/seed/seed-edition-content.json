@@ -12,7 +12,7 @@
     "caption": "The edition in video form.",
     "credit": "Anthus Threat Intelligence video",
     "hook": "The attackers have changed. Your assumptions haven't. Start here.",
-    "durationSeconds": 340,
+    "durationSeconds": 373,
     "themeVariants": {
       "light": {
         "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4"
@@ -52,6 +52,7 @@
         "eyebrow": "Mission",
         "title": "The New Sensitive Data Estate",
         "subtitle": "Embeddings, prompt logs, notebooks, evaluation sets, traces — value that doesn't look like a database.",
+        "pictogram": "the-new-sensitive-data-estate",
         "voice": "The new sensitive data estate. AI work does not just consume sensitive data — it creates new forms of it: embeddings, prompt logs, notebooks, evaluation sets, traces. The derivatives can be worth as much as the source, and the estate grows through normal work. Treat artifacts by what they can reveal. The first control is knowing what now exists."
       },
       {
@@ -59,6 +60,7 @@
         "eyebrow": "Mission",
         "title": "From Lessons Learned to Defenses Checked",
         "subtitle": "An incident report is a bill someone else already paid.",
+        "pictogram": "from-lessons-learned-to-defenses-checked",
         "voice": "From lessons learned to defenses checked. An incident report is a bill someone else already paid. The editorial pattern here is fixed: identify the trend, explain the failure mode, extract the lesson, and translate it into checks a team can actually run — because the useful question is what the defender can inspect before the lesson becomes personal."
       },
       {
@@ -74,6 +76,7 @@
         "eyebrow": "Newsroom",
         "title": "The Knowledge Base Beneath the Newsroom",
         "subtitle": "New research inherits the actors, assets, and open questions earlier work established.",
+        "pictogram": "the-knowledge-base-beneath-the-newsroom",
         "voice": "The knowledge base beneath the newsroom. New research does not start from a blank prompt. Accepted sources, extracted entities, and a semantic graph let each assignment inherit what earlier work established. A graph can suggest that two incidents rhyme. An editor still decides whether the rhyme means anything."
       },
       {
@@ -81,6 +84,7 @@
         "eyebrow": "Newsroom",
         "title": "From Signals to Practical Advice",
         "subtitle": "Research, reporting, drafting, and review — handoffs that keep evidence auditable.",
+        "pictogram": "from-signals-to-practical-advice",
         "voice": "From signals to practical advice. Research, reporting, drafting, and review are different jobs with different constraints. Researcher agents find, reporters frame, copywriters make it readable, and experienced security judgment decides what ships — handoffs that keep evidence and uncertainty intact."
       },
       {
@@ -96,6 +100,7 @@
         "eyebrow": "Cloud",
         "title": "Build the AWS Findings Pipeline",
         "subtitle": "Detection is the easy half.",
+        "pictogram": "build-the-aws-exposure-control-stack",
         "voice": "Build the AWS findings pipeline. Detection is the easy half. Every high-risk finding class needs a routing rule, an owner, an expiring exception path, and proof of closure — coverage is not the same as operations."
       },
       {
@@ -103,6 +108,7 @@
         "eyebrow": "Cloud",
         "title": "Find PII Risk in Your S3 Buckets",
         "subtitle": "The risky bucket is the one where sensitive content and reachable access overlap.",
+        "pictogram": "find-pii-risk-in-s3-buckets",
         "voice": "Find PII risk in your S3 buckets. Somewhere in the estate is a migration bucket that never got deleted. Use discovery to find likely PII, then prioritize where sensitive content and reachable access overlap — and give every risky bucket an owner."
       },
       {
@@ -118,6 +124,7 @@
         "eyebrow": "Azure",
         "title": "Make Azure Admin Access Expire",
         "subtitle": "Ask who can activate power, not only who currently holds it.",
+        "pictogram": "make-azure-privilege-temporary",
         "voice": "Make Azure admin access expire. Permanent privilege turns yesterday's exception into tomorrow's compromise path. The privilege review should ask who can activate power, not only who currently holds it — powerful access should be explicit when needed, visible while active, and gone when the reason ends."
       },
       {
@@ -125,6 +132,7 @@
         "eyebrow": "Azure",
         "title": "Classify Azure Data Where Access Paths Reach It",
         "subtitle": "Security work starts when classification meets identity and network reality.",
+        "pictogram": "find-sensitive-data-paths-in-azure",
         "voice": "Classify Azure data where access paths reach it. A catalog tells you where sensitive data may live; security work starts when classification meets identity and network reality. The useful output is a list of reachable data paths to close or narrow."
       },
       {
@@ -140,6 +148,7 @@
         "eyebrow": "AI",
         "title": "Scope OpenAI Keys to One Job",
         "subtitle": "One workload, one owner, one clean revocation path.",
+        "pictogram": "shrink-openai-api-key-blast-radius",
         "voice": "Scope OpenAI keys to one job. The prototype key that quietly became load-bearing cannot be rotated without breaking something nobody can name in advance. A key should have one job, one owner, and one clean revocation path."
       },
       {
@@ -147,6 +156,7 @@
         "eyebrow": "AI",
         "title": "Control ChatGPT Connectors and Actions",
         "subtitle": "A connector turns looking into asking.",
+        "pictogram": "control-chatgpt-workspace-access-and-connected-data",
         "voice": "Control ChatGPT connectors and actions. A connector turns looking into asking: connected AI inherits the permissions of connected systems. It should inherit deliberate, reviewed, revocable access — never accidental access."
       },
       {
@@ -162,6 +172,7 @@
         "eyebrow": "Gaming & Consumer",
         "title": "Separate Game Accounts From Real Life",
         "subtitle": "Account separation is boring because it works.",
+        "pictogram": "separate-game-accounts-from-real-life",
         "voice": "Separate game accounts from real life. Skins and save files are what an attacker takes first; the recovery inbox, the saved card, and the reused password are why they stay. Account separation is boring because it works."
       },
       {
@@ -169,6 +180,7 @@
         "eyebrow": "Gaming & Consumer",
         "title": "Treat Mods and Launchers Like Untrusted Code",
         "subtitle": "Every mod loader is a small supply chain decision.",
+        "pictogram": "treat-mods-and-launchers-like-untrusted-code",
         "voice": "Treat mods and launchers like untrusted code. Every mod loader is a small supply chain decision. Only install experiments inside an environment you are willing to rebuild."
       }
     ]
@@ -209,7 +221,7 @@
         "alt": "Video edition of The Balance of Power Is Shifting",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 160,
+        "durationSeconds": 186,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/the-balance-of-power-is-shifting-light.mp4"
@@ -308,6 +320,19 @@
       "excerpt": "AI/ML programs do not merely consume sensitive data; they create new forms of it. Around every governed training corpus grows a quieter estate of derivatives — notebooks that still hold sampled production records months after the experiment ended, embedding indexes that reveal semantic relationships, prompt logs that expose business logic, evaluation sets that encode exactly what the organization fears its system will mishandle. These artifacts rarely look like databases. They look like buckets, vector indexes, caches, transcripts, dashboard exports, and piles of operational logs kept because they were useful during development. The estate grows through normal work, which is what makes it hard to see: the security model still watches the original source systems while the pipeline quietly builds new stores of concentrated context, often faster than governance can name them. The defensive principle is to treat AI/ML artifacts according to what they can reveal, not their file extension or team boundary. That means inventorying the derivatives, mapping access by task rather than team, and giving every useful log and working copy a real expiration date.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
+      "image": {
+        "alt": "A governed data cylinder with three derivatives — notebook, logs, vector cluster — drifting off it.",
+        "caption": "AI work creates new sensitive derivatives worth as much as the source.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "A model project can create a sensitive data estate faster than governance can name it.",
         "The first control is knowing what now exists."
@@ -334,6 +359,19 @@
       "excerpt": "Threat intelligence fails when it stops at the dramatic part of an incident — the exposure, the bypass, the chain — and never reaches the part that changes what a defender does. This piece argues that every breach writeup is a bill someone else already paid, and the useful question is not which vendor was involved but which class of asset made the failure possible: identity, data movement, retrieval, logging, or human review. If that class exists in your environment, the lesson applies even when every product name differs. Anthus Threat Intelligence treats the AI/ML security space as a living body of evidence where individual attacks gain value when connected to the others, so the publication follows a fixed editorial pattern: identify the trend, explain the failure mode, extract the defensive lesson, and translate it into checks a team can actually run. The piece closes with what to check now — keep a lessons register you could defend, with each entry tied to an asset, a control, an owner, and a last-checked date, and separate confidence from urgency so investigation and immediate control work can both proceed. The first obligation is modest and strict: every article should help you defend something you are responsible for.",
       "byline": "Anthus AI Solutions",
       "dateline": "MISSION",
+      "image": {
+        "alt": "An incident starburst fading as checklist ticks land one by one.",
+        "caption": "Each lesson becomes a check a team can actually run.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The useful question is what the defender can inspect before the lesson becomes personal.",
         "We want intelligence that changes behavior."
@@ -378,7 +416,7 @@
         "alt": "Video edition of How Our Newsroom Learns",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 150,
+        "durationSeconds": 159,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/how-our-newsroom-learns-light.mp4"
@@ -475,6 +513,19 @@
       "excerpt": "A useful AI newsroom cannot treat every assignment as a blank prompt. Threat intelligence depends on continuity, so the newsroom needs a working memory: accepted references with provenance, extracted entities, recorded relationships, and an ontology that distinguishes an attacker from a tool, a technique from a control failure, and a real risk from a similar-sounding one. Human curation decides what enters that memory and what stays outside the trusted record. Once material is accepted and structured, the newsroom can cluster related incidents, spot repeated control failures, compare new evidence against known patterns, and watch topics grow more connected over time. The graph does not replace editorial judgment; it gives judgment better instruments, while an editor still decides whether a suggested rhyme means anything. The payoff is inheritance: new research starts with the actors, assets, and unresolved questions earlier work already established, so a reporter, copywriter, or trend analysis inherits reviewed context instead of rebuilding it from scratch.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
+      "image": {
+        "alt": "A document held up by a graph beneath the newsroom floor; a new node joins and its context rises.",
+        "caption": "New research inherits the actors, assets, and open questions earlier work established.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The knowledge base is the newsroom's working memory.",
         "A graph lets new research inherit old context."
@@ -500,6 +551,19 @@
       "excerpt": "A continuous AI newsroom runs on a pipeline, not a single prompt. Finding sources, reporting a trend, drafting guidance, and deciding whether to publish are different jobs with different constraints, and collapsing them into one thread destroys the audit trail. Researcher agents handle breadth and orientation: monitoring a beat, surfacing source material, and preparing candidate evidence against the existing knowledge base. Reporter agents turn selected research into structured context that names the angle, the source trail, the open questions, the risk flags, and the practical reason the topic matters, making uncertainty visible instead of burying it in confident prose. Copywriter agents convert approved evidence and editorial direction into copy a reader can scan and apply, without inventing the story. Expert steering runs through every stage, deciding which trends deserve attention, which sources are credible, which claims need restraint, and which recommendations are concrete enough to act on. Trend analysis preserves weak signals across time so patterns become visible when they form. The output has to stay practical: what assumption changed, what asset class is affected, what control deserves review, and what a defender can check now. Inspect your own AI-assisted workflows for structured handoffs; if research, drafting, and review all live in one conversational thread, evidence and uncertainty will be impossible to audit later.",
       "byline": "Anthus AI Solutions",
       "dateline": "NEWSROOM",
+      "image": {
+        "alt": "A packet hopping four stations — find, frame, write, judge — and shipping with a check stamp.",
+        "caption": "Research, reporting, drafting, and review are different jobs with different constraints.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The handoffs matter as much as the models.",
         "Every stage should make the final advice more accountable."
@@ -543,7 +607,7 @@
         "alt": "Video edition of Turn AWS Findings Into an Exposure Queue",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 155,
+        "durationSeconds": 169,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/audit-aws-exposure-before-attackers-do-light.mp4"
@@ -641,6 +705,19 @@
       "excerpt": "AWS ships a broad detection surface — Security Hub, GuardDuty, Config, IAM Access Analyzer, CloudTrail, CloudWatch, Macie, Detective — but turning those services on is the easy half of exposure control. The harder and more consequential work is the findings pipeline that sits behind them: a workflow that routes every signal to a named owner, sets a remediation expectation, separates active threat from posture drift, deduplicates without losing the account, region, and owner that make a fix possible, and gives every exception an expiration date. Findings without that pipeline become permanent background noise, and suppression without ownership is just deferred exposure. Coverage is not the same as operations. The piece walks through what each layer actually contributes, why organization metadata — workload owners, environment labels, production status — determines how fast a finding must move, and what to check now both in the services and in the workflow around them. The AWS control stack is not a product list; it is a workflow that turns cloud signals into decisions, assignments, and measurable reductions in exposure.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
+      "image": {
+        "alt": "Findings falling through a funnel into an ordered queue; the first item pops out to an owner.",
+        "caption": "Detection is the easy half; routing and closure are the work.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "The stack is only useful when findings move from signal to owner to closure.",
         "Coverage is not the same as operations; every high-risk AWS signal needs a path to action."
@@ -668,6 +745,19 @@
       "excerpt": "S3 PII risk is not a discovery problem on its own; it is an overlap problem. Macie will tell you which buckets likely hold sensitive data, but that list only becomes security work when it changes decisions about access, retention, ownership, or remediation. The bucket that matters is the one where sensitive content and reachable access meet: likely PII plus broad roles plus unclear retention plus no owner should outrank a well-owned bucket with narrow access and documented retention. A useful review combines Macie discovery with exposure — Block Public Access, bucket policies, access points, cross-account and external principals, replication paths — and then checks whether the same identities can decrypt the data through key policies and grants. Ownership and retention close the loop, because a bucket with no owner is a bucket where nobody is making the risk decision. S3 is not the whole PII problem, but it is the right place to start: it is where exports, logs, analytics, backups, and forgotten copies of sensitive data tend to land.",
       "byline": "Anthus AI Solutions",
       "dateline": "AWS",
+      "image": {
+        "alt": "A magnifier sweeping a bucket grid; one bucket lights at the sensitivity-meets-reachability overlap.",
+        "caption": "The risky bucket is where sensitive content and reachable access overlap.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Sensitive data discovery becomes security work only when it changes access, retention, ownership, or remediation decisions.",
         "The risky bucket is the one where sensitive content and reachable access overlap."
@@ -713,7 +803,7 @@
         "alt": "Video edition of Map Azure Attack Paths Through Identity",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 155,
+        "durationSeconds": 168,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/audit-azure-blast-radius-before-attackers-do-light.mp4"
@@ -812,6 +902,19 @@
       "excerpt": "Standing Azure admin access is a durable target for adversaries, and the remedy is to make privilege temporary, justified, and visible. Separate active access from activatable access: a user with no active role may still be eligible to activate one through Privileged Identity Management, and a review that only asks who holds power right now will miss the contractor whose project ended months ago but remains eligible. Review Entra roles and Azure RBAC together, because Global Administrator, Privileged Role Administrator, Owner, and subscription-level roles combine into more power than any single list shows, and scope matters as much as role — a management group assignment reaches far more than one scoped to a resource group. Protect both activation and use with Conditional Access: strong authentication, trusted devices, sign-in risk checks, and narrow exceptions. Run access reviews on privileged users, power-conveying groups, guests, and emergency exceptions, and remove whatever has no current business reason. Govern break-glass accounts as exceptional, and extend the same discipline to service principals, managed identities, and CI/CD systems. The goal is not to make administration painful — it is to make powerful access explicit when needed, visible while active, and gone when the reason for it ends.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
+      "image": {
+        "alt": "A key inside a countdown ring; the arc depletes and a brief approval re-lights it.",
+        "caption": "Powerful access should be explicit when needed and gone when the reason ends.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Permanent privilege turns yesterday's exception into tomorrow's compromise path.",
         "The privilege review should ask who can activate power, not only who currently holds it."
@@ -838,6 +941,19 @@
       "excerpt": "Azure data classification in Microsoft Purview is a starting point, not a finding. A container labeled regulated and neatly cataloged still becomes a risk when it is reachable through a long-lived SAS token, a broad service principal, or a storage account key with no owner. The security work begins when classification meets identity and network reality: Azure RBAC and Entra group scope, service principals and managed identities, Key Vault access, storage account keys, SAS expiry, private endpoints, firewall rules, and public network exposure. Defender for Cloud and Defender for Storage help prioritize attack paths and storage sensitivity, but only when joined to ownership and a remediation workflow. Storage accumulates the most exposure — blob containers, file shares, analytics exports, and abandoned transfer locations — so the useful question is not whether data is labeled but whether the path to it is controlled. The deliverable is a list of reachable sensitive-data paths to close or narrow, with named owners and retention decisions. Classification is the starting signal; reduced reachability is the outcome.",
       "byline": "Anthus AI Solutions",
       "dateline": "AZURE",
+      "image": {
+        "alt": "An accent route drawing itself from an identity figure through two gates to a classification-tagged cylinder.",
+        "caption": "Security work starts where classification meets identity and network reality.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Sensitive data matters most where an access path can actually reach it.",
         "Classification should feed remediation, not sit apart from identity and network review."
@@ -883,7 +999,7 @@
         "alt": "Video edition of Govern OpenAI Workspaces Like Access Boundaries",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 155,
+        "durationSeconds": 153,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure-light.mp4"
@@ -981,6 +1097,19 @@
       "excerpt": "An OpenAI API key should represent one job, one owner, and one clean revocation path. The prototype key that quietly became load-bearing — powering a production feature, two internal tools, and a demo nobody remembers — is sprawl, not sophistication, and sprawl is what turns small problems into big ones. Shrink the blast radius by separating production, development, experiments, demos, and client work into distinct projects so a prototype key has no path into production usage or unrelated customer data. Run automation on service accounts owned by the systems they serve rather than individuals who change roles or leave. Restrict each key to the least authority the workload needs, keep keys server-side out of browsers, apps, notebooks, and repos, and store them in a secrets manager with a rotation path you have actually practiced. Monitor usage by project and workload, set budgets and rate limits to bound damage and surface anomalies, and prefer short-lived workload identity federation over static secrets that live forever in deployment history. Check your project boundaries, key permissions, owner records, rotation dates, and revocation procedure now.",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
+      "image": {
+        "alt": "Four dashed connections retracting until one solid accent line remains: one key, one job.",
+        "caption": "A key should have one job, one owner, one clean revocation path.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "A key should have one job, one owner, and one clean revocation path.",
         "Sprawl, not sophistication, is what turns small problems into big ones."
@@ -1007,6 +1136,19 @@
       "excerpt": "Once a ChatGPT workspace connects to drives, repositories, calendars, and actions, security stops being a login problem and becomes a reach problem. The workspace inherits whatever sharing, scopes, and permissions already exist in the connected systems, so an over-shared HR folder that went unnoticed for years becomes conversational — anyone who can ask can now find it. Connector governance is the first control: decide which connectors are allowed, who can enable them, which groups can use them, and what approval a new app needs before it reaches company data. Review OAuth scopes, stale grants, personal installs, and connected-app ownership, because broad or abandoned permissions give the workspace more reach than admins intended. Actions that send messages, change records, or trigger workflows need approval rules, logs, and boundaries matched to their consequence. Keep workspace owners, admins, builders, and users in distinct roles, and make audit logs routine reading. The rule is simple: connected AI should inherit deliberate, reviewed, revocable access, not accidental exposure.",
       "byline": "Anthus AI Solutions",
       "dateline": "AI",
+      "image": {
+        "alt": "Plug-lines from a chat bubble passing through gate valves; approved gates solidify, the unapproved one X's.",
+        "caption": "Connected AI should inherit deliberate, reviewed, revocable access.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Connected AI inherits the permissions of connected systems.",
         "Workspace security is not just who can log in; it is what the workspace can reach and do."
@@ -1052,7 +1194,7 @@
         "alt": "Video edition of How to Play Games Securely",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 155,
+        "durationSeconds": 153,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/how-to-play-games-securely-light.mp4"
@@ -1142,6 +1284,19 @@
       "excerpt": "A stolen game account is rarely the worst thing that happens — the worst thing is what it leads into. Game accounts become serious when they bridge into real life through shared passwords, a recovery inbox that also controls banking, a broad payment method left attached, or permissive OAuth grants to Discord, streaming services, and community bots. The overall message is compartmentalization. Use unique passwords for every store, launcher, and platform; enable MFA; store recovery codes off the gaming machine; and never reuse the password that guards your primary email, finances, or work. Treat payment paths the same way: prefer limited methods, prepaid balances, virtual cards, and purchase approvals over broad standing access. Prune stale connected apps and OAuth permissions that ask for more than they need. Most importantly, isolate the recovery path — a dedicated gaming email or alias keeps a bad game-account incident from becoming a bridge into banking, cloud drives, or password resets. The goal is not paranoia but containment: a recoverable nuisance, not a doorway into the rest of your life.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
+      "image": {
+        "alt": "Two account circles with a broken dashed bridge; an attacker spark dies at the gap.",
+        "caption": "Account separation is boring because it works.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "A game account should not be a shortcut into the rest of your life.",
         "Account separation is boring because it works."
@@ -1168,6 +1323,19 @@
       "excerpt": "Mod loaders, private-server patches, overlays, trainers, reshade bundles, and controller utilities are the riskiest software in most gaming setups, and they arrive through community links rather than review or signing. Treat every one of them as a supply chain decision: prefer official stores, original project pages, signed releases, and checksums, and be skeptical of urgent fixes, cracked builds, private links, and installers that ask you to disable security controls. Scrutinize privilege demands separately, since some tools genuinely need deep access while others ask for admin only because the installer is sloppy. The practical answer is isolation: a dedicated gaming account, a separate machine, or a disposable install for high-risk experiments, with work files, financial records, SSH keys, and primary browser profiles kept outside that zone. Keep saves and configuration backed up separately, store recovery codes off the experiment machine, and choose your rebuild line in advance so a suspicious tool triggers a wipe rather than a forensic argument. None of this means avoiding mods; it means installing them where a bad choice cannot inherit your banking, work, identity, and long-term secrets.",
       "byline": "Anthus AI Solutions",
       "dateline": "GAMING",
+      "image": {
+        "alt": "A puzzle piece descending into a dashed quarantine box; padlocked valuables sit outside it.",
+        "caption": "Every mod loader is a small supply chain decision.",
+        "credit": "Anthus Threat Intelligence diagram",
+        "layout": {
+          "minHeight": 220,
+          "preferredHeight": 360,
+          "maxHeight": 520,
+          "aspectRatio": 1,
+          "crop": "contain",
+          "wrapsText": true
+        }
+      },
       "pullQuotes": [
         "Every mod loader is a small supply chain decision.",
         "Only install experiments inside an environment you are willing to rebuild."

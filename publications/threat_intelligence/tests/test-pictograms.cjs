@@ -17,14 +17,12 @@ const presentationSource = read("components/presentation-shell.tsx");
 const articleSource = read("components/article-page.tsx");
 const backgroundSource = read("publications/threat_intelligence/blog-defense/page-background.tsx");
 
-for (const slug of [
-  "the-balance-of-power-is-shifting",
-  "how-our-newsroom-learns",
-  "audit-aws-exposure-before-attackers-do",
-  "audit-azure-blast-radius-before-attackers-do",
-  "treat-openai-accounts-like-production-infrastructure",
-  "how-to-play-games-securely",
-]) {
+// Every article in the seed edition must have a registered pictogram.
+const seedContent = JSON.parse(read("publications/threat_intelligence/seed/seed-edition-content.json"));
+const articleSlugs = seedContent.articles.map((article) => article.slug);
+assert(articleSlugs.length >= 18, `Expected at least 18 seed articles, found ${articleSlugs.length}`);
+
+for (const slug of articleSlugs) {
   assert(slugSource.includes(`"${slug}"`), `Missing pictogram slug ${slug}`);
   assert(artSource.includes(`"${slug}"`), `Missing pictogram art registry entry for ${slug}`);
 }
