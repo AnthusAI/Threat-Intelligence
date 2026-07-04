@@ -11,6 +11,7 @@ export type SiteBrand = {
   mastheadSubtitle: string;
   mastheadEyebrow?: string;
   mastheadTagline?: string;
+  mastheadTaglineLines?: string[];
   backToHomeLabel: string;
   articleTitleSuffix: string;
   placeholderByline: string;
