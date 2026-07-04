@@ -12,7 +12,7 @@ sections:
     sortOrder: 1
 
   - id: cloud
-    title: Cloud
+    title: AWS
     shortTitle: Platform Exposure
     type: canonical
     editorialMission: Cover cloud platform security for AI/ML workloads—storage exposure, identity boundaries, encryption posture, data discovery, and cross-account sharing.

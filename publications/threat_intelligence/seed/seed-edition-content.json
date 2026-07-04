@@ -89,7 +89,7 @@
       },
       {
         "kind": "slide",
-        "eyebrow": "Cloud",
+        "eyebrow": "AWS",
         "title": "Turn AWS Findings Into an Exposure Queue",
         "subtitle": "Four ordinary findings. One path.",
         "pictogram": "audit-aws-exposure-before-attackers-do",
@@ -97,7 +97,7 @@
       },
       {
         "kind": "slide",
-        "eyebrow": "Cloud",
+        "eyebrow": "AWS",
         "title": "Build the AWS Findings Pipeline",
         "subtitle": "Detection is the easy half.",
         "pictogram": "build-the-aws-exposure-control-stack",
@@ -105,7 +105,7 @@
       },
       {
         "kind": "slide",
-        "eyebrow": "Cloud",
+        "eyebrow": "AWS",
         "title": "Find PII Risk in Your S3 Buckets",
         "subtitle": "The risky bucket is the one where sensitive content and reachable access overlap.",
         "pictogram": "find-pii-risk-in-s3-buckets",
@@ -188,7 +188,7 @@
   "sectionSubtitles": {
     "Mission": "How attacker capability is shifting—and what defenders should revisit before the next incident.",
     "Newsroom": "How this desk turns curated signals, evidence, and expert judgment into practical briefings.",
-    "Cloud": "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
+    "AWS": "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
     "Azure": "Microsoft identity and data paths—and the controls that keep admin access temporary and visible.",
     "AI": "OpenAI workspaces, keys, connectors, and actions treated as production access boundaries.",
     "Gaming": "Personal blast-radius separation when games, mods, and launchers are software from strangers."
@@ -583,7 +583,7 @@
     {
       "slug": "audit-aws-exposure-before-attackers-do",
       "shortSlug": "AWS",
-      "section": "Cloud",
+      "section": "AWS",
       "headline": "Turn AWS Findings Into an Exposure Queue",
       "deck": "AWS risk rarely arrives as one finding. It shows up when identity, data, key policy, and logging gaps line up across accounts — and the work is to see the line-up first.",
       "excerpt": "AWS defense is correlation work. A single finding rarely matters on its own — what matters is the path it forms when it lines up with a broad identity, a permissive key policy, sensitive data, or a region where logging was never fully enabled. The article argues that reviewing findings one dashboard at a time no longer counts as a review, because automated adversaries can do the joining work quickly now and enumeration is cheap across IAM, S3, endpoints, and organization structure. Instead of chasing inventory hygiene, defenders should build a ranked exposure queue: a prioritized set of paths where someone could reach something valuable, expand privilege, or hide activity. Start with coverage so every production account feeds one findings pipeline and every high-risk finding has an owner who can remediate it, then review the intersections together — public and cross-account access, high-privilege identities, sensitive S3 data, key policies, missing trails, and active threat signals — instead of leaving them split across separate dashboards, people, and schedules.",
@@ -617,12 +617,12 @@
           {
             "kind": "quote",
             "quote": "Four ordinary findings. One path.",
-            "attribution": "Cloud",
+            "attribution": "AWS",
             "voice": "Four ordinary findings. One path."
           },
           {
             "kind": "slide",
-            "eyebrow": "Cloud",
+            "eyebrow": "AWS",
             "title": "Turn AWS Findings Into an Exposure Queue",
             "subtitle": "AWS risk shows up when identity, data, key policy, and logging gaps line up across accounts.",
             "pictogram": "audit-aws-exposure-before-attackers-do",
@@ -659,7 +659,7 @@
           {
             "kind": "quote",
             "quote": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards.",
-            "attribution": "Cloud",
+            "attribution": "AWS",
             "voice": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards."
           },
           {
@@ -699,7 +699,7 @@
     {
       "slug": "build-the-aws-exposure-control-stack",
       "shortSlug": "STACK",
-      "section": "Cloud",
+      "section": "AWS",
       "headline": "Build the AWS Findings Pipeline",
       "deck": "Detection is the easy half. A findings pipeline routes signals into ownership, escalation, and closure — so exposure actually goes down.",
       "excerpt": "AWS ships a broad detection surface — Security Hub, GuardDuty, Config, IAM Access Analyzer, CloudTrail, CloudWatch, Macie, Detective — but turning those services on is the easy half of exposure control. The harder and more consequential work is the findings pipeline that sits behind them: a workflow that routes every signal to a named owner, sets a remediation expectation, separates active threat from posture drift, deduplicates without losing the account, region, and owner that make a fix possible, and gives every exception an expiration date. Findings without that pipeline become permanent background noise, and suppression without ownership is just deferred exposure. Coverage is not the same as operations. The piece walks through what each layer actually contributes, why organization metadata — workload owners, environment labels, production status — determines how fast a finding must move, and what to check now both in the services and in the workflow around them. The AWS control stack is not a product list; it is a workflow that turns cloud signals into decisions, assignments, and measurable reductions in exposure.",
@@ -739,7 +739,7 @@
     {
       "slug": "find-pii-risk-in-s3-buckets",
       "shortSlug": "S3PII",
-      "section": "Cloud",
+      "section": "AWS",
       "headline": "Find PII Risk in Your S3 Buckets",
       "deck": "Which S3 buckets hold PII, and which of those can actually be reached? The overlap is where the work is.",
       "excerpt": "S3 PII risk is not a discovery problem on its own; it is an overlap problem. Macie will tell you which buckets likely hold sensitive data, but that list only becomes security work when it changes decisions about access, retention, ownership, or remediation. The bucket that matters is the one where sensitive content and reachable access meet: likely PII plus broad roles plus unclear retention plus no owner should outrank a well-owned bucket with narrow access and documented retention. A useful review combines Macie discovery with exposure — Block Public Access, bucket policies, access points, cross-account and external principals, replication paths — and then checks whether the same identities can decrypt the data through key policies and grants. Ownership and retention close the loop, because a bucket with no owner is a bucket where nobody is making the risk decision. S3 is not the whole PII problem, but it is the right place to start: it is where exports, logs, analytics, backups, and forgotten copies of sensitive data tend to land.",

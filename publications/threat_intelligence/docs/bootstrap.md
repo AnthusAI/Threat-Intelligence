@@ -7,7 +7,7 @@ Anthus Threat Intelligence uses the standard Papyrus publication bootstrap path 
 | File | Purpose |
 |------|---------|
 | `corpora/papyrus-publication-doctrine.yml` | Global mission and policy |
-| `corpora/papyrus-newsroom-sections.yml` | TI desk definitions (Mission, Cloud, Data & AI Assets, …) |
+| `corpora/papyrus-newsroom-sections.yml` | TI desk definitions (Mission, AWS, Data & AI Assets, …) |
 | `corpora/papyrus-steering.yml` | Canonical corpus `threat-intelligence` |
 | `corpora/papyrus-public-topics.yml` | Public topic teasers |
 | `corpora/papyrus-analysis-profiles.yml` | Biblicus re-index profiles for TI |
@@ -114,7 +114,7 @@ PYTHONPATH=src python -m papyrus.cli knowledge vector-index --action sync
 | id | title |
 |----|-------|
 | `mission` | Mission |
-| `cloud` | Cloud |
+| `cloud` | AWS |
 | `data-ai-assets` | Data & AI Assets |
 | `identity-access` | Identity & Access |
 | `incidents-research` | Incidents & Research |
