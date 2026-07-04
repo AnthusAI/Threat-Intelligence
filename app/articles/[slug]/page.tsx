@@ -30,5 +30,5 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
   const [article, videoScript] = await Promise.all([getCachedArticle(slug), getCachedVideoScript(slug)]);
   if (!article) notFound();
 
-  return <ArticlePageView article={article} backHref="/" videoScript={videoScript} />;
+  return <ArticlePageView article={article} videoScript={videoScript} />;
 }

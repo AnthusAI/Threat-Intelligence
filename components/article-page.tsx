@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import type { CSSProperties, ReactNode, RefObject } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Article, ArticleImage, ArticleVideoAsset } from "../lib/articles";
 import { solveFeaturedFloatGeometry } from "../lib/blog-feature-solver";
@@ -9,23 +8,22 @@ import { createThreatIntelligenceRhythm } from "../lib/blog-rhythm";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { getPublicationItemVideoAsset } from "../lib/publication-items";
-import { SITE_BRAND } from "../lib/site-brand";
 import type { VideoScriptRef } from "../lib/video-script";
 import { ArticleVideoFigure } from "./article-video";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
+import { PresentationHeader, type PresentationHeaderSection } from "./presentation-header";
 
 export type ArticlePageEditionFooter = {
   editionBasePath: string;
   entries: PresentationFooterEntry[];
+  sections: PresentationHeaderSection[];
   subtitle: string;
   title?: string;
 };
 
 type ArticlePageViewProps = {
   article: Article;
-  backHref: string;
-  backLabel?: string;
   editionFooter?: ArticlePageEditionFooter;
   editionDate?: string;
   videoScript?: VideoScriptRef | null;
@@ -35,21 +33,17 @@ const BLOG_RHYTHM = createThreatIntelligenceRhythm();
 
 export function ArticlePageView({
   article,
-  backHref,
-  backLabel = SITE_BRAND.backToHomeLabel,
   editionFooter,
   editionDate,
   videoScript = null,
 }: ArticlePageViewProps) {
-  const articleDate = editionDate ? formatArticleDate(editionDate) : null;
   const image = article.image ?? null;
 
   return (
     <ArticlePageShell
-      backHref={backHref}
-      backLabel={backLabel}
       body={article.body}
       deck={article.deck}
+      editionDate={editionDate}
       editionFooter={editionFooter}
       headline={article.headline}
       image={image}
@@ -57,21 +51,12 @@ export function ArticlePageView({
       slug={article.slug}
       video={article.video ?? null}
       videoScript={videoScript}
-      byline={
-        <>
-          <span>{article.byline}</span>
-          <span>{article.dateline}</span>
-          {articleDate ? <time dateTime={editionDate}>{articleDate}</time> : null}
-        </>
-      }
     />
   );
 }
 
 type ItemPageViewProps = {
   item: PublicationItem;
-  backHref: string;
-  backLabel?: string;
   editionFooter?: ArticlePageEditionFooter;
   editionDate?: string;
   videoScript?: VideoScriptRef | null;
@@ -79,8 +64,6 @@ type ItemPageViewProps = {
 
 export function ItemPageView({
   item,
-  backHref,
-  backLabel = "Back to edition",
   editionFooter,
   editionDate,
   videoScript = null,
@@ -89,8 +72,6 @@ export function ItemPageView({
     return (
       <ArticlePageView
         article={item}
-        backHref={backHref}
-        backLabel={backLabel}
         editionFooter={editionFooter}
         editionDate={editionDate}
         videoScript={videoScript}
@@ -98,16 +79,14 @@ export function ItemPageView({
     );
   }
 
-  const itemDate = editionDate ? formatArticleDate(editionDate) : null;
   const itemVideo = getPublicationItemVideoAsset(item);
   const image = item.image ?? null;
 
   return (
     <ArticlePageShell
-      backHref={backHref}
-      backLabel={backLabel}
       body={item.body ?? []}
       deck={item.deck}
+      editionDate={editionDate}
       editionFooter={editionFooter}
       headline={item.title}
       image={image}
@@ -116,17 +95,14 @@ export function ItemPageView({
       slug={item.slug}
       video={itemVideo ?? null}
       videoScript={videoScript}
-      byline={itemDate ? <time dateTime={editionDate}>{itemDate}</time> : null}
     />
   );
 }
 
 type ArticlePageShellProps = {
-  backHref: string;
-  backLabel: string;
   body: string[];
-  byline: ReactNode;
   deck?: string;
+  editionDate?: string;
   editionFooter?: ArticlePageEditionFooter;
   headline: string;
   image: ArticleImage | null;
@@ -138,11 +114,9 @@ type ArticlePageShellProps = {
 };
 
 function ArticlePageShell({
-  backHref,
-  backLabel,
   body,
-  byline,
   deck,
+  editionDate,
   editionFooter,
   headline,
   image,
@@ -179,10 +153,11 @@ function ArticlePageShell({
 
   return (
     <main className={getArticleShellClassName(editionFooter)}>
-      <nav className="article-nav">
-        <Link href={backHref}>{backLabel}</Link>
-        <span>{section}</span>
-      </nav>
+      <PresentationHeader
+        editionBasePath={editionFooter?.editionBasePath}
+        editionDate={editionDate}
+        sections={editionFooter?.sections}
+      />
       <article
         className={articleClassName}
         data-feature-layout={hasImage ? (floatGeometry?.mode ?? "float") : undefined}
@@ -200,13 +175,7 @@ function ArticlePageShell({
           <p className="story-label">{section}</p>
           <h1>{headline}</h1>
           {deck ? <p className="article-deck">{deck}</p> : null}
-          {byline ? <div className="story-byline">{byline}</div> : null}
         </header>
-        <div className={hasImage ? "article-body article-float-grid__body" : "article-body"}>
-          {body.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
         {image ? (
           <div className="presentation-item__media article-float-grid__media">
             <PictogramFigure
@@ -225,6 +194,11 @@ function ArticlePageShell({
             />
           </div>
         ) : null}
+        <div className={hasImage ? "article-body article-float-grid__body" : "article-body"}>
+          {body.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
       </article>
       {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
     </main>
@@ -245,20 +219,6 @@ function ArticleEditionFooter({ footer }: { footer: ArticlePageEditionFooter }) 
 
 function getArticleShellClassName(editionFooter: ArticlePageEditionFooter | undefined): string {
   return editionFooter ? "article-shell article-shell--edition" : "article-shell";
-}
-
-function formatArticleDate(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) return value;
-
-  const date = new Date(`${normalized}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(date);
 }
 
 function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {

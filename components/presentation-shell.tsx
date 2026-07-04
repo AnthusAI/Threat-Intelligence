@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findEditionSection, getEditionSectionItems } from "../lib/edition-sections";
-import { getEditionSectionPath } from "../lib/edition-routes";
 import { buildPresentationFooterEntries, type PresentationFooterEntry } from "../lib/presentation-footer";
 import {
   createThreatIntelligenceBlogTextStyle,
@@ -33,6 +32,7 @@ import { BlogPageBackground } from "../publications/threat_intelligence/blog-def
 import { Newspaper } from "./newspaper";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
+import { getSectionAnchorId, PresentationHeader } from "./presentation-header";
 import { readLocalReaderSettings, resolveReaderSettings, subscribeReaderSettingsChanges } from "./reader-settings";
 import { useRhythmOverlay } from "./use-rhythm-overlay";
 
@@ -48,6 +48,10 @@ type PresentationShellProps = {
 export type PresentationTarget =
   | { kind: "edition" }
   | { kind: "section"; sectionKey: string };
+
+type PapyrusTestWindow = Window & typeof globalThis & {
+  __PAPYRUS_SCENARIO__?: string;
+};
 
 const PRESENTATION_TEXT_FONT = SITE_BRAND.textFont;
 const BLOG_TEXT_STYLE = createThreatIntelligenceBlogTextStyle(PRESENTATION_TEXT_FONT);
@@ -138,6 +142,12 @@ function BlogPresentation({
   const showRhythmOverlay = useRhythmOverlay();
   const headerObstacles = useBlogHeaderObstacles(pageRef);
   usePresentationTargetScroll(targetSection);
+  useEffect(() => {
+    (window as PapyrusTestWindow).__PAPYRUS_SCENARIO__ = content.scenarioId;
+    return () => {
+      delete (window as PapyrusTestWindow).__PAPYRUS_SCENARIO__;
+    };
+  }, [content.scenarioId]);
   return (
     <main
       className="presentation-page presentation-page--blog blog-rhythm-shell"
@@ -152,8 +162,13 @@ function BlogPresentation({
       } as CSSProperties}
     >
       <BlogPageBackground headerObstacles={headerObstacles} pageRef={pageRef} rhythm={BLOG_RHYTHM} />
-      <PresentationHeader content={content} />
-      <SectionNavigation content={content} editionBasePath={editionBasePath} />
+      <PresentationHeader
+        description={content.description}
+        editionBasePath={editionBasePath}
+        editionDate={content.editionDate}
+        sections={content.sections}
+        title={content.title}
+      />
       <div className="blog-sections" ref={contentRef}>
         {sections.map((section, sectionIndex) => (
           <section className="blog-section" data-edition-section={section.key} id={getSectionAnchorId(section.key)} key={section.key}>
@@ -219,8 +234,13 @@ function MagazinePresentation({
   usePresentationTargetScroll(targetSection);
   return (
     <main className="presentation-page presentation-page--magazine" data-presentation-engine="magazine">
-      <PresentationHeader content={content} />
-      <SectionNavigation content={content} editionBasePath={editionBasePath} />
+      <PresentationHeader
+        description={content.description}
+        editionBasePath={editionBasePath}
+        editionDate={content.editionDate}
+        sections={content.sections}
+        title={content.title}
+      />
       <div className="magazine-sections">
         {sections.map((section) => {
           const items = getEditionSectionItems(section, content.items);
@@ -267,69 +287,6 @@ function EditionOverviewVideo({
   );
 }
 
-function PresentationHeader({ content }: { content: EditionContent }) {
-  const title = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadTitle : content.title;
-  const subtitle = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadSubtitle : content.description;
-  const eyebrow = SITE_BRAND.mastheadEyebrow ?? null;
-  const tagline = SITE_BRAND.mastheadTagline ?? null;
-  const displayDate = SITE_BRAND.mastheadDateFormat === "formatted"
-    ? formatMastheadDate(content.editionDate)
-    : content.editionDate;
-
-  // Split the eyebrow into a leading word (rendered in the foreground color)
-  // and the remaining words (rendered in the muted foreground-subtle color).
-  // e.g. "Anthus AI Solutions" -> "Anthus" + "AI Solutions".
-  const eyebrowParts = eyebrow ? splitEyebrow(eyebrow) : null;
-
-  return (
-    <header className="presentation-header">
-      <div className="presentation-header__copy-stack">
-        {eyebrowParts ? (
-          <span className="presentation-header__eyebrow">
-            <span className="presentation-header__eyebrow-strong">{eyebrowParts.lead}</span>
-            {eyebrowParts.rest ? (
-              <span className="presentation-header__eyebrow-muted">{eyebrowParts.rest}</span>
-            ) : null}
-          </span>
-        ) : null}
-        <h1>
-          {SITE_BRAND.mastheadWordSplit
-            ? title.split(/\s+/).map((word) => (
-                <span className="presentation-header__word" key={word}>
-                  <span className="presentation-header__word-text">{word}</span>
-                </span>
-              ))
-            : title}
-        </h1>
-        <div className="presentation-header__meta">
-          {subtitle && !eyebrow ? <span className="presentation-header__subtitle">{subtitle}</span> : null}
-          <p className="presentation-header__date">{displayDate}</p>
-        </div>
-      </div>
-      {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
-    </header>
-  );
-}
-
-function splitEyebrow(text: string): { lead: string; rest: string } {
-  const trimmed = text.trim();
-  const firstSpace = trimmed.indexOf(" ");
-  if (firstSpace === -1) return { lead: trimmed, rest: "" };
-  return { lead: trimmed.slice(0, firstSpace), rest: trimmed.slice(firstSpace + 1) };
-}
-
-function SectionNavigation({ content, editionBasePath }: { content: EditionContent; editionBasePath?: string }) {
-  return (
-    <nav className="presentation-section-nav" aria-label="Edition sections">
-      {content.sections.map((section) => (
-        <Link href={getSectionHref(content, section, editionBasePath)} key={section.key}>
-          {section.label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
-
 function PresentationItem({
   editionBasePath,
   index,
@@ -353,9 +310,9 @@ function PresentationItem({
   const textStyle = mode === "blog" ? BLOG_TEXT_STYLE : MAGAZINE_TEXT_STYLE;
   const text = getPresentationBodyText(item, mode);
   const itemRole = getPresentationItemRole(mode, index);
-  const isFeaturedBlogLead = mode === "blog" && index === 0 && Boolean(image);
+  const isFeaturedBlogItem = mode === "blog" && Boolean(image);
   const featuredLayout = useMemo(() => {
-    if (!isFeaturedBlogLead || !containerWidth || !image) return null;
+    if (!isFeaturedBlogItem || !containerWidth || !image) return null;
     return solveFeaturedItem({
       text,
       containerWidth,
@@ -365,7 +322,7 @@ function PresentationItem({
       imageAsset: image,
       itemIndex: index,
     });
-  }, [containerWidth, image, index, isFeaturedBlogLead, text, textStyle, viewportWidth]);
+  }, [containerWidth, image, index, isFeaturedBlogItem, text, textStyle, viewportWidth]);
   const lines = useMemo(() => {
     if (featuredLayout) return featuredLayout.textLines;
     const maxWidth = frameWidth || containerWidth;
@@ -384,6 +341,7 @@ function PresentationItem({
         "--feature-copy-width": `${featuredLayout.copyWidth}px`,
         "--feature-image-width": `${featuredLayout.imageWidth}px`,
         "--feature-image-height": `${featuredLayout.imageHeight}px`,
+        "--feature-media-height": `${featuredLayout.mediaHeight}px`,
         "--feature-text-frame-height": `${featuredLayout.textFrameHeight}px`,
         "--feature-layout-gap": `${featuredLayout.gap}px`,
       } as CSSProperties)
@@ -392,7 +350,7 @@ function PresentationItem({
   return (
     <article
       className={`presentation-item presentation-item--${mode}`}
-      data-feature-layout={isFeaturedBlogLead ? layoutMode : undefined}
+      data-feature-layout={isFeaturedBlogItem ? layoutMode : undefined}
       data-item-id={item.slug}
       data-item-index={index}
       data-item-role={itemRole}
@@ -413,6 +371,23 @@ function PresentationItem({
         </header>
         {mode === "blog" ? (
           <div className="presentation-item__body">
+            {image ? (
+              <div className="presentation-item__media">
+                <PictogramFigure
+                  alt={image.alt}
+                  caption={image.caption}
+                  credit={image.credit}
+                  figureClassName="presentation-item__image"
+                  frameHeight={featuredLayout?.imageHeight}
+                  frameWidth={featuredLayout?.imageWidth}
+                  layout={image.layout}
+                  sizes="(max-width: 900px) 100vw, 760px"
+                  slug={item.slug}
+                  src={image.src}
+                  themeVariants={image.themeVariants}
+                />
+              </div>
+            ) : null}
             <div
               className="presentation-item__text-frame"
               data-layout-mode={layoutMode}
@@ -434,7 +409,7 @@ function PresentationItem({
           </div>
         )}
       </div>
-      {image ? (
+      {image && mode !== "blog" ? (
         <div className="presentation-item__media">
           <PictogramFigure
             alt={image.alt}
@@ -444,7 +419,7 @@ function PresentationItem({
             frameHeight={featuredLayout?.imageHeight}
             frameWidth={featuredLayout?.imageWidth}
             layout={image.layout}
-            sizes={mode === "blog" ? "(max-width: 900px) 100vw, 760px" : "(max-width: 900px) 100vw, 50vw"}
+            sizes="(max-width: 900px) 100vw, 50vw"
             slug={item.slug}
             src={image.src}
             themeVariants={image.themeVariants}
@@ -619,20 +594,6 @@ function usePresentationTargetScroll(targetSection: EditionSection | undefined) 
   }, [targetSection]);
 }
 
-function getSectionHref(content: EditionContent, section: EditionSection, editionBasePath?: string): string {
-  if (SITE_BRAND.sectionLinkStrategy === "anchor") {
-    const anchor = `#${getSectionAnchorId(section.key)}`;
-    return editionBasePath ? `${editionBasePath}${anchor}` : anchor;
-  }
-  if (editionBasePath) return `${editionBasePath}/section/${encodeURIComponent(section.key)}`;
-  const datedPath = getEditionSectionPath(content.editionDate, section.key);
-  return datedPath.startsWith("//") ? `#${getSectionAnchorId(section.key)}` : datedPath;
-}
-
-function getSectionAnchorId(sectionKey: string): string {
-  return `section-${sectionKey}`;
-}
-
 function getPresentationTitle(item: PublicationItem): string {
   return item.type === "article" ? item.headline : item.title;
 }
@@ -653,18 +614,6 @@ function parseItemAnchorHash(hash: string): string | null {
   } catch {
     return null;
   }
-}
-
-function formatMastheadDate(value: string): string {
-  const normalized = value?.trim();
-  if (!normalized) return value;
-  const date = new Date(`${normalized}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
 }
 
 function getBlogFooterSectionHref(entry: PresentationFooterEntry, editionBasePath?: string): string {
