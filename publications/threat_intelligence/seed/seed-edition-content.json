@@ -8,16 +8,170 @@
   "suppressNewsDeskAppendix": true,
   "video": {
     "src": "/seed-art/threat-intelligence/videos/edition-overview.mp4",
-    "alt": "Edition overview video for Anthus Threat Intelligence",
-    "caption": "Teaser for the latest Anthus Threat Intelligence edition.",
+    "alt": "Edition video for Anthus Threat Intelligence",
+    "caption": "The edition in video form.",
     "credit": "Anthus Threat Intelligence video",
     "hook": "The attackers have changed. Your assumptions haven't. Start here.",
-    "durationSeconds": 65,
+    "durationSeconds": 340,
     "themeVariants": {
       "light": {
         "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4"
       }
-    }
+    },
+    "scenes": [
+      {
+        "kind": "quote",
+        "quote": "The attackers have changed. Your assumptions haven't. Start here.",
+        "attribution": "Anthus Threat Intelligence",
+        "voice": "The attackers have changed. Your assumptions haven't. Start here."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "July 4, 2026",
+        "title": "Anthus Threat Intelligence",
+        "subtitle": "How attacker capability is shifting — and what defenders should do about it.",
+        "pictogram": "the-balance-of-power-is-shifting",
+        "voice": "Who can come after you, how often, and how patiently — AI is shifting all three. This edition maps that shift and what defenders should do about it: the mission, the newsroom behind it, and practical checks across AWS, Azure, AI platforms, and personal security at home."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Mission",
+        "title": "The Balance of Power Is Shifting",
+        "subtitle": "Attackers used to run out of time, skill, and patience. With AI, they don't.",
+        "pictogram": "the-balance-of-power-is-shifting",
+        "voice": "First, the mission. The balance of power is shifting. Every security program rests on an assumption it rarely writes down: most attackers will give up. AI changes that bargain. Reconnaissance, phishing, profiling, and persistence get cheap and repeatable, so ordinary criminal operators can behave like far more capable teams — more viable threat actors, more targets, more patience per dollar."
+      },
+      {
+        "kind": "quote",
+        "quote": "Controls built for casual attackers cannot be treated as boundaries anymore.",
+        "attribution": "Mission",
+        "voice": "Controls built for casual attackers cannot be treated as boundaries anymore."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Mission",
+        "title": "The New Sensitive Data Estate",
+        "subtitle": "Embeddings, prompt logs, notebooks, evaluation sets, traces — value that doesn't look like a database.",
+        "voice": "The new sensitive data estate. AI work does not just consume sensitive data — it creates new forms of it: embeddings, prompt logs, notebooks, evaluation sets, traces. The derivatives can be worth as much as the source, and the estate grows through normal work. Treat artifacts by what they can reveal. The first control is knowing what now exists."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Mission",
+        "title": "From Lessons Learned to Defenses Checked",
+        "subtitle": "An incident report is a bill someone else already paid.",
+        "voice": "From lessons learned to defenses checked. An incident report is a bill someone else already paid. The editorial pattern here is fixed: identify the trend, explain the failure mode, extract the lesson, and translate it into checks a team can actually run — because the useful question is what the defender can inspect before the lesson becomes personal."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Newsroom",
+        "title": "How Our Newsroom Learns",
+        "subtitle": "Expert judgment steering. AI doing the patient watching.",
+        "pictogram": "how-our-newsroom-learns",
+        "voice": "Behind the publication: how our newsroom learns. Attackers no longer get tired, so defenders need persistence in how they learn. Seasoned experts set direction, constrained AI does the patient watching, and the newsroom keeps learning between articles — a defensive system for turning noise into checks."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Newsroom",
+        "title": "The Knowledge Base Beneath the Newsroom",
+        "subtitle": "New research inherits the actors, assets, and open questions earlier work established.",
+        "voice": "The knowledge base beneath the newsroom. New research does not start from a blank prompt. Accepted sources, extracted entities, and a semantic graph let each assignment inherit what earlier work established. A graph can suggest that two incidents rhyme. An editor still decides whether the rhyme means anything."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Newsroom",
+        "title": "From Signals to Practical Advice",
+        "subtitle": "Research, reporting, drafting, and review — handoffs that keep evidence auditable.",
+        "voice": "From signals to practical advice. Research, reporting, drafting, and review are different jobs with different constraints. Researcher agents find, reporters frame, copywriters make it readable, and experienced security judgment decides what ships — handoffs that keep evidence and uncertainty intact."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Cloud",
+        "title": "Turn AWS Findings Into an Exposure Queue",
+        "subtitle": "Four ordinary findings. One path.",
+        "pictogram": "audit-aws-exposure-before-attackers-do",
+        "voice": "On to the cloud desks. Turn AWS findings into an exposure queue. Four ordinary findings, one path: AWS defense is correlation work, and each service answers only one question. The value is joining them into a ranked queue of paths — with owners and closure — instead of separate dashboards on separate schedules."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Cloud",
+        "title": "Build the AWS Findings Pipeline",
+        "subtitle": "Detection is the easy half.",
+        "voice": "Build the AWS findings pipeline. Detection is the easy half. Every high-risk finding class needs a routing rule, an owner, an expiring exception path, and proof of closure — coverage is not the same as operations."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Cloud",
+        "title": "Find PII Risk in Your S3 Buckets",
+        "subtitle": "The risky bucket is the one where sensitive content and reachable access overlap.",
+        "voice": "Find PII risk in your S3 buckets. Somewhere in the estate is a migration bucket that never got deleted. Use discovery to find likely PII, then prioritize where sensitive content and reachable access overlap — and give every risky bucket an owner."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Azure",
+        "title": "Map Azure Attack Paths Through Identity",
+        "subtitle": "In Azure, the path often starts with identity and ends at data.",
+        "pictogram": "audit-azure-blast-radius-before-attackers-do",
+        "voice": "Map Azure attack paths through identity. In Azure the path often starts with identity and ends at data. A stale guest, an over-powered group, a hurried app permission — none is an incident on its own; chained, they are a route. The output should be a path map: which identities cross boundaries, and which single control breaks the chain."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Azure",
+        "title": "Make Azure Admin Access Expire",
+        "subtitle": "Ask who can activate power, not only who currently holds it.",
+        "voice": "Make Azure admin access expire. Permanent privilege turns yesterday's exception into tomorrow's compromise path. The privilege review should ask who can activate power, not only who currently holds it — powerful access should be explicit when needed, visible while active, and gone when the reason ends."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Azure",
+        "title": "Classify Azure Data Where Access Paths Reach It",
+        "subtitle": "Security work starts when classification meets identity and network reality.",
+        "voice": "Classify Azure data where access paths reach it. A catalog tells you where sensitive data may live; security work starts when classification meets identity and network reality. The useful output is a list of reachable data paths to close or narrow."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "AI",
+        "title": "Govern OpenAI Workspaces Like Access Boundaries",
+        "subtitle": "AI access is quiet. That is the problem.",
+        "pictogram": "treat-openai-accounts-like-production-infrastructure",
+        "voice": "The AI desk. Govern OpenAI workspaces like access boundaries. AI access is quiet — that is the problem. Workspaces, projects, keys, connectors, and files decide what AI systems can reach. The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "AI",
+        "title": "Scope OpenAI Keys to One Job",
+        "subtitle": "One workload, one owner, one clean revocation path.",
+        "voice": "Scope OpenAI keys to one job. The prototype key that quietly became load-bearing cannot be rotated without breaking something nobody can name in advance. A key should have one job, one owner, and one clean revocation path."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "AI",
+        "title": "Control ChatGPT Connectors and Actions",
+        "subtitle": "A connector turns looking into asking.",
+        "voice": "Control ChatGPT connectors and actions. A connector turns looking into asking: connected AI inherits the permissions of connected systems. It should inherit deliberate, reviewed, revocable access — never accidental access."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Gaming & Consumer",
+        "title": "How to Play Games Securely",
+        "subtitle": "Games, mods, and launchers are software from strangers.",
+        "pictogram": "how-to-play-games-securely",
+        "voice": "And at home: how to play games securely. Games are software from strangers. The most practical control is separation — keep gaming away from banking, work, and recovery accounts, and make experimentation cheap on a machine that can afford to lose the bet."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Gaming & Consumer",
+        "title": "Separate Game Accounts From Real Life",
+        "subtitle": "Account separation is boring because it works.",
+        "voice": "Separate game accounts from real life. Skins and save files are what an attacker takes first; the recovery inbox, the saved card, and the reused password are why they stay. Account separation is boring because it works."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Gaming & Consumer",
+        "title": "Treat Mods and Launchers Like Untrusted Code",
+        "subtitle": "Every mod loader is a small supply chain decision.",
+        "voice": "Treat mods and launchers like untrusted code. Every mod loader is a small supply chain decision. Only install experiments inside an environment you are willing to rebuild."
+      }
+    ]
   },
   "sectionSubtitles": {
     "Mission": "How attacker capability is shifting—and what defenders should revisit before the next incident.",
@@ -221,15 +375,80 @@
       },
       "video": {
         "src": "/seed-art/threat-intelligence/videos/how-our-newsroom-learns.mp4",
-        "alt": "Video summary of How Our Newsroom Learns",
-        "caption": "1-minute briefing narrated from the article excerpt.",
+        "alt": "Video edition of How Our Newsroom Learns",
+        "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 75,
+        "durationSeconds": 150,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/how-our-newsroom-learns-light.mp4"
           }
-        }
+        },
+        "scenes": [
+          {
+            "kind": "quote",
+            "quote": "If attackers get tireless automation, defenders need tireless analysis.",
+            "attribution": "Newsroom",
+            "voice": "If attackers get tireless automation, defenders need tireless analysis."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Newsroom",
+            "title": "How Our Newsroom Learns",
+            "subtitle": "Expert judgment steering. AI doing the patient watching.",
+            "pictogram": "how-our-newsroom-learns",
+            "voice": "How our newsroom learns. Attackers no longer get tired — so defenders need the same persistence in how they learn, with expert judgment steering and AI doing the patient watching."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The asymmetry",
+            "title": "The watching never stops",
+            "subtitle": "Occasional reports vs. automated discovery, automated testing, and repeated playbooks.",
+            "voice": "Attacker capability is getting cheap, and that changes more than how defenders secure systems. It changes how defenders learn. A security team that reads occasional reports is competing against automated discovery, automated testing, and operators willing to run the same playbook until a path opens. The attacker's advantage is not brilliance. It is that the watching never stops."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The division of labor",
+            "title": "Experts steer. AI watches.",
+            "subtitle": "Direction and credibility from seasoned experts; patient signal work from AI.",
+            "voice": "Our newsroom is built around that problem. Seasoned security experts set the direction — what matters, what is credible, what deserves caution, what would help a real operator. AI systems handle the patient work: watching signals, gathering context, comparing sources, and preparing structured material for review."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Between articles",
+            "title": "Keep learning between articles",
+            "subtitle": "Accumulate memory, preserve evidence, make the next cycle smarter.",
+            "voice": "Papyrus is the workflow system underneath, but the idea is bigger than the software. A defender-side intelligence operation should accumulate memory, preserve evidence, and turn continuous research into decisions a human can inspect. The goal is not to publish more words. It is to keep learning between articles, so each source, trend, and editorial decision makes the next cycle smarter."
+          },
+          {
+            "kind": "quote",
+            "quote": "The newsroom is a defensive system for turning noise into checks.",
+            "attribution": "Newsroom",
+            "voice": "The newsroom is a defensive system for turning noise into checks."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Constrained by design",
+            "title": "Tireless, not the authority",
+            "subtitle": "Long-running research tracks, weak signals, evidence prepared for human judgment.",
+            "voice": "AI is useful here precisely because it is constrained. It can maintain long-running research tracks, work through repetitive comparisons, notice weak signals, and prepare evidence for human judgment. It can be tireless without being the authority."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "What to check now",
+            "title": "Two checks",
+            "subtitle": "Does your learning match attacker persistence? · Judgment for humans, repetition for automation.",
+            "voice": "What to check now. First: ask whether your own security learning has the persistence you now assume attackers have. If AI changed your threat model, it probably needs to change your intelligence workflow too. Second: separate expert judgment from repetitive labor. Humans decide priority, credibility, and action. Automation maintains memory, finds relationships, and prepares the next useful question."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Newsroom",
+            "title": "Expertise, given a continuous surface",
+            "subtitle": "AI as an operating surface for judgment — not a shortcut around it.",
+            "pictogram": "how-our-newsroom-learns",
+            "voice": "This publication is one working example of that adjustment: AI not as a shortcut around expertise, but as a way to give expertise a continuous operating surface — and to keep the resulting advice grounded, current, and easy to act on."
+          }
+        ]
       },
       "pullQuotes": [
         "If attackers get tireless automation, defenders need tireless analysis.",
@@ -321,15 +540,80 @@
       },
       "video": {
         "src": "/seed-art/threat-intelligence/videos/audit-aws-exposure-before-attackers-do.mp4",
-        "alt": "Video summary of Correlate AWS Exposure Signals Before They Chain",
-        "caption": "1-minute briefing narrated from the article excerpt.",
+        "alt": "Video edition of Turn AWS Findings Into an Exposure Queue",
+        "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 75,
+        "durationSeconds": 155,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/audit-aws-exposure-before-attackers-do-light.mp4"
           }
-        }
+        },
+        "scenes": [
+          {
+            "kind": "quote",
+            "quote": "Four ordinary findings. One path.",
+            "attribution": "Cloud",
+            "voice": "Four ordinary findings. One path."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Cloud",
+            "title": "Turn AWS Findings Into an Exposure Queue",
+            "subtitle": "AWS risk shows up when identity, data, key policy, and logging gaps line up across accounts.",
+            "pictogram": "audit-aws-exposure-before-attackers-do",
+            "voice": "Turn AWS findings into an exposure queue. AWS risk rarely arrives as one finding. It shows up when identity, data, key policy, and logging gaps line up across accounts — and the work is to see the line-up first."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "A routine review",
+            "title": "The finding that was a shrug",
+            "subtitle": "An analytics account that can read production. A broad role. A permissive key policy. A logging gap.",
+            "voice": "During a routine review, someone notices that an analytics account can read a bucket in production. Nobody remembers granting the access. On its own, the finding is a shrug — until it sits next to the broad role in that account, the key policy that lets the role decrypt, and the region where logging was never fully enabled."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Correlation work",
+            "title": "One dashboard at a time is not a review",
+            "subtitle": "Enumeration is cheap. The goal is a ranked queue of paths, not inventory hygiene.",
+            "voice": "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity — and automated adversaries can do that joining work quickly now. Enumeration is cheap in AWS. That shifts the goal away from inventory hygiene toward something more pointed: an exposure queue. A ranked set of paths where someone could reach something valuable, expand privilege, or hide activity."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The services",
+            "title": "Each service answers one question",
+            "subtitle": "GuardDuty: happening now? Config: drifted? Access Analyzer: crossing a boundary? CloudTrail: what changed? Macie: how sensitive?",
+            "voice": "Each service answers one question. GuardDuty: is something suspicious happening now? Config: did a resource drift from its expected state? Access Analyzer: is access crossing a boundary nobody intended? CloudTrail and CloudWatch: what changed, and is it visible enough to investigate? Macie adds data-sensitivity context for S3, and Security Hub aggregates — but it gets stronger when enriched with ownership, environment labels, and known exceptions."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Priority",
+            "title": "Priority lives at the intersections",
+            "subtitle": "A broad role is worse near sensitive data. A public path is worse where key policy is permissive.",
+            "voice": "Priority lives at the intersections. A broad role is worse near sensitive data. A public path is worse where key policy is permissive. A suspicious API call is worse where logging is incomplete. And a stale exception is worse in a production account with no owner."
+          },
+          {
+            "kind": "quote",
+            "quote": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards.",
+            "attribution": "Cloud",
+            "voice": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "What to check now",
+            "title": "Coverage, then intersections",
+            "subtitle": "Every account in one pipeline · every high-risk finding owned · reviews joined, not siloed.",
+            "voice": "Start with coverage: every production account feeding the same findings pipeline, excluded regions intentional, and every high-risk finding tied to an owner who can actually remediate it. Then review the intersections together — public and cross-account access, high-privilege identities, sensitive S3 data, key policies, missing trails — instead of leaving them to separate dashboards, separate people, and separate schedules."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The operating question",
+            "title": "Which chain would they build first?",
+            "subtitle": "The answer should already be in the queue, assigned, and moving toward closure.",
+            "pictogram": "audit-aws-exposure-before-attackers-do",
+            "voice": "The operating question is simple: if someone mapped this AWS estate today, which chain would they build first? The answer should already be sitting in the queue, assigned to an owner, and moving toward closure."
+          }
+        ]
       },
       "pullQuotes": [
         "Four ordinary findings. One path.",
@@ -426,15 +710,80 @@
       },
       "video": {
         "src": "/seed-art/threat-intelligence/videos/audit-azure-blast-radius-before-attackers-do.mp4",
-        "alt": "Video summary of Map Azure Attack Paths Through Identity",
-        "caption": "1-minute briefing narrated from the article excerpt.",
+        "alt": "Video edition of Map Azure Attack Paths Through Identity",
+        "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 75,
+        "durationSeconds": 155,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/audit-azure-blast-radius-before-attackers-do-light.mp4"
           }
-        }
+        },
+        "scenes": [
+          {
+            "kind": "quote",
+            "quote": "In Azure, the path often starts with identity and ends at data.",
+            "attribution": "Azure",
+            "voice": "In Azure, the path often starts with identity and ends at data."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Azure",
+            "title": "Map Azure Attack Paths Through Identity",
+            "subtitle": "The question is which identities and workloads can cross boundaries into sensitive systems.",
+            "pictogram": "audit-azure-blast-radius-before-attackers-do",
+            "voice": "Map Azure attack paths through identity. In Azure the center of gravity is identity, and the question is which identities and workloads can cross boundaries into sensitive systems."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Review any tenant",
+            "title": "None of these is an incident",
+            "subtitle": "A stale guest. A group that conveys more power than its name suggests. An app permission granted in a hurry.",
+            "voice": "Review an Azure tenant and you will find them: a guest account from a partnership that ended two years ago, still enabled. A group whose name says reporting and whose role assignments say rather more. An application granted broad permissions during a deadline. None of these is an incident. The question is what they connect to."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The center of gravity",
+            "title": "Map the paths first",
+            "subtitle": "Tenant reconnaissance, role analysis, and path chaining can all be automated now.",
+            "voice": "Azure exposure is not an AWS article with different service names. The center of gravity is Entra identity — users, groups, guests, app registrations, service principals, managed identities, and the scopes where they can act. And the same scarcity collapse applies: reconnaissance, role analysis, and path chaining can all be automated now, so the defensive move is to map the paths first and remove the easy chains."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Identity, then hierarchy",
+            "title": "Entra ID, then Azure RBAC",
+            "subtitle": "Who can sign in, which groups convey power — and where inheritance lands broad roles too high.",
+            "voice": "Start with Entra ID: who can sign in, which accounts are guests, which groups convey power, which applications hold sensitive permissions — and which identities can become privileged through assignment, membership, consent, or eligibility. Then follow Azure RBAC down the hierarchy. Inheritance is convenient for administration, and dangerous when broad roles land higher than the workload actually requires."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Dormant power",
+            "title": "Active access is not the whole story",
+            "subtitle": "PIM eligibility, activation requirements, Conditional Access, break-glass discipline.",
+            "voice": "Privileged Identity Management changes what a review means, because active access is not the whole story. Eligible access, activation requirements, approvers, and review cadence determine whether privilege is controlled or merely dormant. And Conditional Access decides whether an identity path is hard to use or easy to abuse — a powerful role behind weak sign-in controls is still a reachable path."
+          },
+          {
+            "kind": "quote",
+            "quote": "Attack paths matter because separate low-grade weaknesses can become one working route to impact.",
+            "attribution": "Azure",
+            "voice": "Attack paths matter because separate low-grade weaknesses can become one working route to impact."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "What to check now",
+            "title": "The review list",
+            "subtitle": "Global admins · subscription owners · PIM-eligible users · stale guests · service principals · Key Vault access · attack paths ending at sensitive data.",
+            "voice": "Sensitive systems are what make routes matter — Key Vault access, storage keys, SAS tokens, database roles, public exposure. So check now: global administrators, subscription owners, PIM-eligible users, stale guests, service principals with strong permissions, and every Defender for Cloud attack path that ends at sensitive data."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The output",
+            "title": "A path map, not a prettier inventory",
+            "subtitle": "Which identities cross boundaries, what they reach, and which single control breaks the chain.",
+            "pictogram": "audit-azure-blast-radius-before-attackers-do",
+            "voice": "The output should be a path map, not a prettier inventory: which identities can cross boundaries, what they can reach, which sensitive systems sit at the end — and which single control would break the chain."
+          }
+        ]
       },
       "pullQuotes": [
         "In Azure, the path often starts with identity and ends at data.",
@@ -531,15 +880,80 @@
       },
       "video": {
         "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure.mp4",
-        "alt": "Video summary of Govern OpenAI Workspaces Like Access Boundaries",
-        "caption": "1-minute briefing narrated from the article excerpt.",
+        "alt": "Video edition of Govern OpenAI Workspaces Like Access Boundaries",
+        "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 75,
+        "durationSeconds": 155,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure-light.mp4"
           }
-        }
+        },
+        "scenes": [
+          {
+            "kind": "quote",
+            "quote": "AI access is quiet. That is the problem.",
+            "attribution": "AI",
+            "voice": "AI access is quiet. That is the problem."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "AI",
+            "title": "Govern OpenAI Workspaces Like Access Boundaries",
+            "subtitle": "Workspaces, projects, keys, connectors, and files decide who can use AI systems and what they can reach.",
+            "pictogram": "treat-openai-accounts-like-production-infrastructure",
+            "voice": "Govern OpenAI workspaces like access boundaries. Workspaces, projects, keys, connectors, and files decide who can use AI systems and what business data they can reach."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The engineer who left",
+            "title": "The invite that survived offboarding",
+            "subtitle": "Laptop collected. SSO disabled. Workspace membership and connector: still live.",
+            "voice": "An engineer leaves the company. The laptop is collected and the SSO account disabled — but the OpenAI workspace membership, added by manual invite a year earlier, survives all of it. So does the connector they authorized. Nobody watches that boundary, because nobody decided it was one."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The real boundary",
+            "title": "Not just prompt hygiene",
+            "subtitle": "Accounts, projects, keys, apps, files, connectors — plus the roles and retention settings around them.",
+            "voice": "OpenAI security is not just prompt hygiene. The AI boundary is made of accounts, projects, keys, apps, files, and connectors. This is a SaaS control plane, and the question is not what infrastructure can be reached — it is who can use AI systems, which business data they can connect, and which actions those systems can take."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Identity first",
+            "title": "Membership should follow employment",
+            "subtitle": "Intentional owners and admins · SSO and SCIM · strong protection for anyone who can administer.",
+            "voice": "Start with identity. Workspace owners and admins should be intentional, and membership should follow employment and group lifecycle. SSO and SCIM matter because informal lifecycle does not scale: when people join and leave through manual invitations, stale accounts and accidental admins become normal."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Projects and connectors",
+            "title": "Separation on both sides",
+            "subtitle": "Production, development, and client work apart · connected AI inherits source-system hygiene.",
+            "voice": "Project structure matters on the API side: production, development, experimentation, and client work should not share the same keys, service accounts, budgets, or access assumptions. And connectors move the data boundary — a workspace that can reach drives, repositories, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface the mess."
+          },
+          {
+            "kind": "quote",
+            "quote": "Prompt security does not matter much if workspace access is unmanaged.",
+            "attribution": "AI",
+            "voice": "Prompt security does not matter much if workspace access is unmanaged."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "What to check now",
+            "title": "The review list",
+            "subtitle": "Owners and admin roles · SSO and SCIM · project membership · API keys · app approvals · connector scopes · audit logs · retention.",
+            "voice": "AI access is quiet, so make the audit routine. Check now: workspace owners and admin roles, SSO and SCIM, MFA adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The goal",
+            "title": "Make one compromise boring",
+            "subtitle": "Bounded, visible, revocable — never quietly organization-wide.",
+            "pictogram": "treat-openai-accounts-like-production-infrastructure",
+            "voice": "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become organization-wide exposure."
+          }
+        ]
       },
       "pullQuotes": [
         "AI access is quiet. That is the problem.",
@@ -635,15 +1049,73 @@
       },
       "video": {
         "src": "/seed-art/threat-intelligence/videos/how-to-play-games-securely.mp4",
-        "alt": "Video summary of How to Play Games Securely",
-        "caption": "1-minute briefing narrated from the article excerpt.",
+        "alt": "Video edition of How to Play Games Securely",
+        "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 75,
+        "durationSeconds": 155,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/how-to-play-games-securely-light.mp4"
           }
-        }
+        },
+        "scenes": [
+          {
+            "kind": "quote",
+            "quote": "The most practical gaming security control is separation.",
+            "attribution": "Gaming & Consumer",
+            "voice": "The most practical gaming security control is separation."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Gaming & Consumer",
+            "title": "How to Play Games Securely",
+            "subtitle": "Games, mods, launchers, and anti-cheat drivers are software from strangers.",
+            "pictogram": "how-to-play-games-securely",
+            "voice": "How to play games securely. Games, mods, launchers, and anti-cheat drivers are software from strangers — give them their own blast radius, away from banking, work, and recovery accounts."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The reality",
+            "title": "Software from strangers",
+            "subtitle": "Launchers, constant updates, social accounts, mods, community servers, deep-access anti-cheat.",
+            "voice": "That does not make every game hostile, and it should not make players live in fear. It means the security model should match reality: games arrive through launchers, update constantly, depend on social accounts, load mods, run community servers, and sometimes install anti-cheat components with unusually deep access to the machine."
+          },
+          {
+            "kind": "quote",
+            "quote": "Do not make one machine responsible for every part of your life.",
+            "attribution": "Gaming & Consumer",
+            "voice": "When one machine does everything, every game, mod, launcher, and chat attachment inherits access to all of it. Do not make one machine responsible for every part of your life."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The one-sentence rule",
+            "title": "Keep gaming away from bank records",
+            "subtitle": "A cheap laptop or a well-secured phone is a better home for financial sessions.",
+            "voice": "For many people the rule reduces to one sentence: do not connect your gaming environment to your bank records. A cheap laptop, a phone with strong account security, or a work-managed machine is a better home for financial sessions than the box where you test experimental builds and random mods."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Building the habit",
+            "title": "Consoles narrow. PCs can too.",
+            "subtitle": "Separate OS account · clean browser profile · no sensitive documents · deliberate password-manager unlocks.",
+            "voice": "A console helps because it narrows what the machine is for — not magic, but a dedicated device does not slowly collect bank logins, tax PDFs, and SSH keys. PC players can build the same habit deliberately: a separate operating system account for gaming, a browser profile with no saved financial credentials, sensitive documents kept elsewhere, and mods, trainers, and vibe-coded executables treated as high-risk software until proven otherwise."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "What to check now",
+            "title": "Three checks",
+            "subtitle": "What the machine can reach · separate accounts and payment paths · what you are willing to reinstall.",
+            "voice": "What to check now. First: list what your gaming machine can currently reach — saved sessions, synced documents, cloud drives, SSH keys, work chat — and remove what does not need to be there. Second: separate accounts and payment paths, with unique passwords and MFA, and no reuse of the email-password pair that protects banking or work. Third: decide what you are willing to reinstall. Back up saves, keep recovery codes off the machine, and accept that a suspicious install may justify wiping the box."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "The goal",
+            "title": "Make experimentation cheap",
+            "subtitle": "Play the odd games, the indie builds, the mods — from a machine that can lose the bet.",
+            "pictogram": "how-to-play-games-securely",
+            "voice": "The goal is not to make gaming sterile. It is to make experimentation cheap. Play the odd games, the indie builds, the foreign releases, the mods and prototypes — from a machine or account that can lose the bet without taking the rest of your life with it."
+          }
+        ]
       },
       "pullQuotes": [
         "The most practical gaming security control is separation.",
