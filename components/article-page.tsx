@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import type { Article } from "../lib/articles";
-import { createThreatIntelligenceRhythm, reserveRhythmRows } from "../lib/blog-rhythm";
+import type { CSSProperties, ReactNode, RefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Article, ArticleImage, ArticleVideoAsset } from "../lib/articles";
+import { solveFeaturedFloatGeometry } from "../lib/blog-feature-solver";
+import { createThreatIntelligenceRhythm } from "../lib/blog-rhythm";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { getPublicationItemVideoAsset } from "../lib/publication-items";
@@ -28,6 +31,8 @@ type ArticlePageViewProps = {
   videoScript?: VideoScriptRef | null;
 };
 
+const BLOG_RHYTHM = createThreatIntelligenceRhythm();
+
 export function ArticlePageView({
   article,
   backHref,
@@ -37,38 +42,29 @@ export function ArticlePageView({
   videoScript = null,
 }: ArticlePageViewProps) {
   const articleDate = editionDate ? formatArticleDate(editionDate) : null;
+  const image = article.image ?? null;
 
   return (
-    <main className={getArticleShellClassName(editionFooter)}>
-      <nav className="article-nav">
-        <Link href={backHref}>{backLabel}</Link>
-        <span>{article.section}</span>
-      </nav>
-      <article className="article-page">
-        {article.video ? (
-          <div className="article-page__hero-video">
-            <ArticleVideoFigure slug={article.slug} video={article.video} videoScript={videoScript} />
-          </div>
-        ) : null}
-        <header>
-          <p className="story-label">{article.section}</p>
-          <h1>{article.headline}</h1>
-          <p className="article-deck">{article.deck}</p>
-          <div className="story-byline">
-            <span>{article.byline}</span>
-            <span>{article.dateline}</span>
-            {articleDate ? <time dateTime={editionDate}>{articleDate}</time> : null}
-          </div>
-        </header>
-        <div className="article-body">
-          <ArticleLeadPictogram article={article} />
-          {article.body.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
-      </article>
-      {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
-    </main>
+    <ArticlePageShell
+      backHref={backHref}
+      backLabel={backLabel}
+      body={article.body}
+      deck={article.deck}
+      editionFooter={editionFooter}
+      headline={article.headline}
+      image={image}
+      section={article.section}
+      slug={article.slug}
+      video={article.video ?? null}
+      videoScript={videoScript}
+      byline={
+        <>
+          <span>{article.byline}</span>
+          <span>{article.dateline}</span>
+          {articleDate ? <time dateTime={editionDate}>{articleDate}</time> : null}
+        </>
+      }
+    />
   );
 }
 
@@ -104,83 +100,134 @@ export function ItemPageView({
 
   const itemDate = editionDate ? formatArticleDate(editionDate) : null;
   const itemVideo = getPublicationItemVideoAsset(item);
+  const image = item.image ?? null;
+
+  return (
+    <ArticlePageShell
+      backHref={backHref}
+      backLabel={backLabel}
+      body={item.body ?? []}
+      deck={item.deck}
+      editionFooter={editionFooter}
+      headline={item.title}
+      image={image}
+      itemType={item.type}
+      section={item.section ?? item.type}
+      slug={item.slug}
+      video={itemVideo ?? null}
+      videoScript={videoScript}
+      byline={itemDate ? <time dateTime={editionDate}>{itemDate}</time> : null}
+    />
+  );
+}
+
+type ArticlePageShellProps = {
+  backHref: string;
+  backLabel: string;
+  body: string[];
+  byline: ReactNode;
+  deck?: string;
+  editionFooter?: ArticlePageEditionFooter;
+  headline: string;
+  image: ArticleImage | null;
+  itemType?: string;
+  section: string;
+  slug: string;
+  video: ArticleVideoAsset | null;
+  videoScript: VideoScriptRef | null;
+};
+
+function ArticlePageShell({
+  backHref,
+  backLabel,
+  body,
+  byline,
+  deck,
+  editionFooter,
+  headline,
+  image,
+  itemType,
+  section,
+  slug,
+  video,
+  videoScript,
+}: ArticlePageShellProps) {
+  const articleRef = useRef<HTMLElement | null>(null);
+  const containerWidth = useMeasuredWidth(articleRef);
+  const viewportWidth = useViewportWidth();
+  const floatGeometry = useMemo(() => {
+    if (!image || !containerWidth) return null;
+    return solveFeaturedFloatGeometry({
+      containerWidth,
+      viewportWidth,
+      rhythm: BLOG_RHYTHM,
+      imageAsset: image,
+      itemIndex: 0,
+    });
+  }, [containerWidth, image, viewportWidth]);
+
+  const hasImage = Boolean(image);
+  const articleClassName = hasImage ? "article-page article-float-grid" : "article-page";
+  const articleStyle = floatGeometry
+    ? ({
+        "--feature-copy-width": `${floatGeometry.copyWidth}px`,
+        "--feature-image-width": `${floatGeometry.imageWidth}px`,
+        "--feature-image-height": `${floatGeometry.imageHeight}px`,
+        "--feature-layout-gap": `${floatGeometry.gap}px`,
+      } as CSSProperties)
+    : undefined;
 
   return (
     <main className={getArticleShellClassName(editionFooter)}>
       <nav className="article-nav">
         <Link href={backHref}>{backLabel}</Link>
-        <span>{item.section ?? item.type}</span>
+        <span>{section}</span>
       </nav>
-      <article className="article-page" data-item-type={item.type}>
-        {itemVideo ? (
+      <article
+        className={articleClassName}
+        data-feature-layout={hasImage ? (floatGeometry?.mode ?? "float") : undefined}
+        data-has-image={hasImage ? "true" : "false"}
+        data-item-type={itemType}
+        ref={articleRef}
+        style={articleStyle}
+      >
+        {video ? (
           <div className="article-page__hero-video">
-            <ArticleVideoFigure slug={item.slug} video={itemVideo} videoScript={videoScript} />
+            <ArticleVideoFigure slug={slug} video={video} videoScript={videoScript} />
           </div>
         ) : null}
-        <header>
-          <p className="story-label">{item.section ?? item.type}</p>
-          <h1>{item.title}</h1>
-          {item.deck ? <p className="article-deck">{item.deck}</p> : null}
-          {itemDate ? (
-            <div className="story-byline">
-              <time dateTime={editionDate}>{itemDate}</time>
-            </div>
-          ) : null}
+        <header className={hasImage ? "article-float-grid__header" : undefined}>
+          <p className="story-label">{section}</p>
+          <h1>{headline}</h1>
+          {deck ? <p className="article-deck">{deck}</p> : null}
+          {byline ? <div className="story-byline">{byline}</div> : null}
         </header>
-        <div className="article-body">
-          <ItemLeadPictogram item={item} />
-          {(item.body ?? []).map((paragraph) => (
+        <div className={hasImage ? "article-body article-float-grid__body" : "article-body"}>
+          {body.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}
         </div>
+        {image ? (
+          <div className="presentation-item__media article-float-grid__media">
+            <PictogramFigure
+              alt={image.alt}
+              caption={image.caption}
+              credit={image.credit}
+              figureClassName="presentation-item__image"
+              frameHeight={floatGeometry?.imageHeight}
+              frameWidth={floatGeometry?.imageWidth}
+              layout={image.layout}
+              priority
+              sizes="(max-width: 900px) 100vw, 760px"
+              slug={slug}
+              src={image.src}
+              themeVariants={image.themeVariants}
+            />
+          </div>
+        ) : null}
       </article>
       {editionFooter ? <ArticleEditionFooter footer={editionFooter} /> : null}
     </main>
-  );
-}
-
-const ARTICLE_PICTOGRAM_RHYTHM = createThreatIntelligenceRhythm();
-const ARTICLE_PICTOGRAM_HEIGHT = reserveRhythmRows(ARTICLE_PICTOGRAM_RHYTHM.rowHeight * 24, ARTICLE_PICTOGRAM_RHYTHM);
-const ARTICLE_PICTOGRAM_WIDTH = reserveRhythmRows(ARTICLE_PICTOGRAM_RHYTHM.rowHeight * 42, ARTICLE_PICTOGRAM_RHYTHM);
-
-function ArticleLeadPictogram({ article }: { article: Article }) {
-  if (!article.image) return null;
-  return (
-    <PictogramFigure
-      alt={article.image.alt}
-      caption={article.image.caption}
-      credit={article.image.credit}
-      figureClassName="article-photo"
-      frameHeight={ARTICLE_PICTOGRAM_HEIGHT}
-      frameWidth={ARTICLE_PICTOGRAM_WIDTH}
-      layout={article.image.layout}
-      priority
-      sizes="(max-width: 980px) 100vw, 900px"
-      slug={article.slug}
-      src={article.image.src}
-      themeVariants={article.image.themeVariants}
-    />
-  );
-}
-
-function ItemLeadPictogram({ item }: { item: PublicationItem }) {
-  const image = item.type === "article" ? item.image : item.image;
-  if (!image) return null;
-  return (
-    <PictogramFigure
-      alt={image.alt}
-      caption={image.caption}
-      credit={image.credit}
-      figureClassName="article-photo"
-      frameHeight={ARTICLE_PICTOGRAM_HEIGHT}
-      frameWidth={ARTICLE_PICTOGRAM_WIDTH}
-      layout={image.layout}
-      priority
-      sizes="(max-width: 980px) 100vw, 900px"
-      slug={item.slug}
-      src={image.src}
-      themeVariants={image.themeVariants}
-    />
   );
 }
 
@@ -212,4 +259,33 @@ function formatArticleDate(value: string): string {
     month: "long",
     year: "numeric",
   }).format(date);
+}
+
+function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => setWidth(Math.max(1, Math.floor(node.getBoundingClientRect().width)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ref]);
+  return width;
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const update = () => setWidth(Math.max(1, Math.floor(window.innerWidth)));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return width;
 }

@@ -114,6 +114,7 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
 
         payload = load_ti_seed_payload()
         payload["video"] = dict(payload.get("video") or {})
+        payload["video"].pop("scenes", None)  # exercise the legacy fallback path
         payload["video"]["hook"] = "Sample edition hook, isn't it."
         xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
         self.assertIn("Sample edition hook, isn&#39;t it.", xml)
@@ -127,8 +128,11 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
     def test_build_edition_overview_xml_includes_spotlights(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
 
+        payload = load_ti_seed_payload()
+        payload["video"] = dict(payload.get("video") or {})
+        payload["video"].pop("scenes", None)  # exercise the legacy fallback path
         xml = build_edition_overview_xml(
-            load_ti_seed_payload(),
+            payload,
             voice="alloy",
             model="gpt-4o-mini-tts",
         )

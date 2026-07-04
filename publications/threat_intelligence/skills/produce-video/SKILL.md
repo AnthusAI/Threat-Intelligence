@@ -173,6 +173,14 @@ Writing rules for scenes:
 6. **In tandem:** article body edits and scene edits ship together. A body change that makes a
    scene stale is a bug in the change.
 
+**Edition overview scenes** (long-format, all 18 articles, currently ~875 words ≈ 6 min):
+hook quote (edition `video.hook`) → edition thesis slide → section-by-section segments. **Lead
+articles** get a pictogram slide (~55–70 spoken words, core argument) and, where one earns it, a
+quote scene; **non-leads** get one slide each (~30–55 words: headline + central move + sharpest
+check), with the section carried by the `eyebrow` field — no spoken section interstitials. Brief
+spoken transitions at desk boundaries ("On to the cloud desks…") keep it a narrated whole rather
+than a slideshow.
+
 ### Scene order (legacy fallback — articles without `video.scenes`)
 
 Articles that have not yet been converted render the legacy teaser structure:
@@ -202,13 +210,11 @@ every narrated word comes from seed JSON fields. Scene → source:
 Rules that follow from this (the echo rule, poster rule, and verbatim-quote policy apply to
 authored scenes just as much as to the fallback):
 
-- **First-sentence contract.** The pipeline's sentence splitter breaks on `.` `!` `?` — but NOT on em dashes or semicolons. A lead article's excerpt must land a complete thought (setup *and* payoff) before its first period, or the spotlight tease dangles and the scene cuts mid-idea. Join two-beat hooks with an em dash or semicolon:
-  - ✗ `"The engineer left in January. The workspace invite … are all still live."` → spotlight speaks only *"The engineer left in January."*
-  - ✓ `"The engineer left in January — but the workspace invite … are all still live."`
-- **Spotlight subtitle limit.** That first sentence also renders on screen, truncated at 180 characters — keep it under.
-- **Excerpts do triple duty**: edition-index hook, full briefing narration, and spotlight tease. Write them for the ear as well as the eye — read them aloud.
+- **Excerpts are condensed article representations** (~160–215 words): index display plus summary, no longer 1–2-sentence hooks. They are the condensation *guide* when authoring `video.scenes`, not the script — scenes are written from the body.
+- **First-sentence contract (legacy fallback only).** The legacy overview spotlight speaks `headline` + the excerpt's first sentence; the splitter breaks on `.` `!` `?` but NOT on em dashes or semicolons, and the sentence renders on screen truncated at 180 characters. Only matters for videos still on the fallback.
+- **The legacy fallback is not publishable anymore.** With long excerpts, the fallback narrates ~180 words over one static slide showing 240 characters — a frozen minute. Every published video needs authored `video.scenes`.
 - **Adjacent-scene echo rule.** The hook quote and the deck are spoken ~10 seconds apart; do not let them share distinctive phrasing (a hook of "tireless automation / tireless analysis" followed by a deck opening "Attackers bring tireless automation" reads fine on the page and grates when spoken). Likewise the overview opens tagline → `description` → fixed "practical checks" line back-to-back: keep "practical" (and other tagline words) out of `description`.
-- **Deck = claim, excerpt = hook** — same division of labor as the edition index. The deck states the thesis in one or two tight sentences; the excerpt carries stakes, a question, or a scenario, and must not restate the deck (the title scene and briefing scene would then say the same thing twice in a row).
+- **Deck = claim.** The deck states the thesis in one or two tight sentences and feeds the video's headline-slide voice; the excerpt summarizes the article for the index and must not merely restate the deck.
 - **Pull quotes are verbatim body sentences.** `pullQuotes` are narrated cold opens and must occur verbatim in the article body; video-lead articles require `pullQuotes[0]`. Not every article needs a pull quote — drop a weak one rather than keeping a paraphrase. When weaving, never leave the quote adjacent to the sentence that used to paraphrase it.
 - **Scene 1 is the poster.** Embedded videos render their first frame on the index, so `pullQuotes[0]` (and the edition `video.hook`) is display copy at headline size. Poster-grade means two short sentences, roughly 12 words each, no clause-piles or service lists — "Four ordinary findings. One path." over "AWS defense is correlation work: one finding becomes urgent when it connects to identity, data, keys, and activity." The echo rule applies doubly here: the poster sits on the same card as the headline and deck.
 - **Edition hook (`video.hook`).** One edition-wide line that opens the overview video and its poster, so the edition video and the first lead article's video do not show the same quote card twice on one page. Write it in the "before → now with AI" register when it fits, and end on an invitation to press play.
