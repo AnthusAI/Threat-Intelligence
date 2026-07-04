@@ -859,19 +859,24 @@
   height: round(up, calc(100cqw * 9 / 16), var(--ti-row-height));
 }
 
-/* Shared framed video player: extra-muted top/sides border (one rhythm row,
-   matching hrules) and a full-width PLAY VIDEO CTA as the bottom bar. */
+/* Shared framed video player: the extra-muted top/sides border (one rhythm
+   row, matching hrules) lives on the MEDIA wrapper so the PLAY VIDEO CTA can
+   span the full figure width as a sibling, with no negative-margin hacks and
+   no grey strips beside the CTA. */
 :root[data-site-brand="threat-intelligence"] .article-video--framed {
+  border: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+:root[data-site-brand="threat-intelligence"] .article-video--framed .article-video__media {
   border-top: var(--ti-row-height) solid var(--ti-hrule-foreground);
   border-left: var(--ti-row-height) solid var(--ti-hrule-foreground);
   border-right: var(--ti-row-height) solid var(--ti-hrule-foreground);
   border-bottom: 0;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-}
-
-:root[data-site-brand="threat-intelligence"] .article-video--framed .article-video__media {
   flex: 0 0 auto;
   min-height: 0;
   overflow: hidden;
@@ -902,12 +907,10 @@
   flex: 0 0 auto;
   gap: calc(var(--ti-rhythm) * 2);
   height: calc(var(--ti-row-height) * 3);
-  /* Stretch the CTA past the figure's side borders so it spans the full
-     component width and the PLAY VIDEO label aligns with READ ARTICLE. */
-  margin-left: calc(-1 * var(--ti-row-height));
-  margin-right: calc(-1 * var(--ti-row-height));
+  /* The CTA is a sibling of the framed media wrapper, so it spans the full
+     figure width naturally (no negative margins). */
   padding: 0;
-  width: calc(100% + 2 * var(--ti-row-height));
+  width: 100%;
 }
 
 :root[data-site-brand="threat-intelligence"] .article-video__cta-toggle {
