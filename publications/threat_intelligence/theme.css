@@ -811,7 +811,8 @@
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-section-header span {
   align-self: stretch;
   color: var(--muted-foreground);
-  font-size: var(--ti-copy-font-size);
+  font-family: var(--site-body-font);
+  font-size: 22px;
   line-height: var(--ti-copy-line-height);
   max-width: none;
   padding: 0;
@@ -936,7 +937,7 @@
   letter-spacing: var(--ti-meta-letter-spacing);
   line-height: calc(var(--ti-row-height) * 2);
   margin: 0;
-  padding: 0 calc(var(--ti-rhythm) * 2.25);
+  padding: 0 var(--ti-row-height);
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -984,7 +985,7 @@
   cursor: pointer;
   flex: 1 1 auto;
   height: var(--ti-row-height);
-  margin: 0 calc(var(--ti-rhythm) * 2.25) 0 0;
+  margin: 0 var(--ti-row-height) 0 0;
   min-width: 0;
   padding: 0;
   width: 100%;
@@ -1154,7 +1155,7 @@
   line-height: calc(var(--ti-row-height) * 2);
   margin-right: auto;
   margin-top: var(--ti-row-height);
-  padding: 0 calc(var(--ti-rhythm) * 2.25);
+  padding: 0 var(--ti-row-height);
   height: calc(var(--ti-row-height) * 3);
   text-transform: uppercase;
   width: max-content;
@@ -1824,7 +1825,15 @@
   --ti-blog-rail-width: min(100%, var(--ti-blog-rail-max-width));
   --ti-section-band-height: var(--ti-masthead-word-line-box);
   background: var(--background);
+  isolation: isolate;
+  overflow: clip;
   padding: calc(var(--ti-row-height) * 4) var(--ti-body-page-padding-x) calc(var(--ti-row-height) * 8);
+  position: relative;
+}
+
+:root[data-site-brand="threat-intelligence"] .article-shell > :not(.blog-page-background) {
+  position: relative;
+  z-index: 1;
 }
 
 :root[data-site-brand="threat-intelligence"] .article-shell .article-nav,

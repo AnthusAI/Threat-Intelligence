@@ -21,8 +21,9 @@
     "scenes": [
       {
         "kind": "quote",
-        "quote": "The attackers have changed. Your assumptions haven't. Start here.",
-        "attribution": "Anthus Threat Intelligence",
+        "quote": "The attackers have changed.\nYour assumptions haven't.\nStart here.",
+        "quoteSize": 60,
+        "quoteLineHeight": 84,
         "voice": "The attackers have changed. Your assumptions haven't. Start here."
       },
       {
@@ -44,7 +45,6 @@
       {
         "kind": "quote",
         "quote": "Controls built for casual attackers cannot be treated as boundaries anymore.",
-        "attribution": "Mission",
         "voice": "Controls built for casual attackers cannot be treated as boundaries anymore."
       },
       {
@@ -231,7 +231,6 @@
           {
             "kind": "quote",
             "quote": "Attackers used to run out of time, skill, and patience. With AI, they don't.",
-            "attribution": "Mission",
             "voice": "Attackers used to run out of time, skill, and patience. With AI, they don't."
           },
           {
@@ -259,7 +258,6 @@
           {
             "kind": "quote",
             "quote": "The mistake is asking it to carry a threat model it was never designed to carry.",
-            "attribution": "Little-sister encryption",
             "voice": "Many defenses were built around a quiet bargain: limited, but good enough against casual attackers. Call it little-sister encryption. It keeps out a curious sibling or a low-effort intruder, and it genuinely reduces everyday risk. The mistake is asking it to carry a threat model it was never designed to carry."
           },
           {
@@ -273,7 +271,6 @@
           {
             "kind": "quote",
             "quote": "Controls built for casual attackers cannot be treated as boundaries anymore.",
-            "attribution": "Mission",
             "voice": "Controls built for casual attackers cannot be treated as boundaries anymore."
           },
           {
@@ -426,7 +423,6 @@
           {
             "kind": "quote",
             "quote": "If attackers get tireless automation, defenders need tireless analysis.",
-            "attribution": "Newsroom",
             "voice": "If attackers get tireless automation, defenders need tireless analysis."
           },
           {
@@ -461,7 +457,6 @@
           {
             "kind": "quote",
             "quote": "The newsroom is a defensive system for turning noise into checks.",
-            "attribution": "Newsroom",
             "voice": "The newsroom is a defensive system for turning noise into checks."
           },
           {
@@ -617,7 +612,6 @@
           {
             "kind": "quote",
             "quote": "Four ordinary findings. One path.",
-            "attribution": "AWS",
             "voice": "Four ordinary findings. One path."
           },
           {
@@ -659,7 +653,6 @@
           {
             "kind": "quote",
             "quote": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards.",
-            "attribution": "AWS",
             "voice": "The multi-account estate needs an exposure queue, not another collection of disconnected dashboards."
           },
           {
@@ -813,7 +806,6 @@
           {
             "kind": "quote",
             "quote": "In Azure, the path often starts with identity and ends at data.",
-            "attribution": "Azure",
             "voice": "In Azure, the path often starts with identity and ends at data."
           },
           {
@@ -855,7 +847,6 @@
           {
             "kind": "quote",
             "quote": "Attack paths matter because separate low-grade weaknesses can become one working route to impact.",
-            "attribution": "Azure",
             "voice": "Attack paths matter because separate low-grade weaknesses can become one working route to impact."
           },
           {
@@ -1009,7 +1000,6 @@
           {
             "kind": "quote",
             "quote": "AI access is quiet. That is the problem.",
-            "attribution": "AI",
             "voice": "AI access is quiet. That is the problem."
           },
           {
@@ -1051,7 +1041,6 @@
           {
             "kind": "quote",
             "quote": "Prompt security does not matter much if workspace access is unmanaged.",
-            "attribution": "AI",
             "voice": "Prompt security does not matter much if workspace access is unmanaged."
           },
           {
@@ -1204,7 +1193,6 @@
           {
             "kind": "quote",
             "quote": "The most practical gaming security control is separation.",
-            "attribution": "Gaming & Consumer",
             "voice": "The most practical gaming security control is separation."
           },
           {
@@ -1225,7 +1213,6 @@
           {
             "kind": "quote",
             "quote": "Do not make one machine responsible for every part of your life.",
-            "attribution": "Gaming & Consumer",
             "voice": "When one machine does everything, every game, mod, launcher, and chat attachment inherits access to all of it. Do not make one machine responsible for every part of your life."
           },
           {

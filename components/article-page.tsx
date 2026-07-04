@@ -4,7 +4,7 @@ import type { CSSProperties, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Article, ArticleImage, ArticleVideoAsset } from "../lib/articles";
 import { solveFeaturedFloatGeometry } from "../lib/blog-feature-solver";
-import { createThreatIntelligenceRhythm } from "../lib/blog-rhythm";
+import { createThreatIntelligenceRhythm, TI_COPY_ROW_MULTIPLE } from "../lib/blog-rhythm";
 import type { PresentationFooterEntry } from "../lib/presentation-footer";
 import type { PublicationItem } from "../lib/publication-items";
 import { getPublicationItemVideoAsset } from "../lib/publication-items";
@@ -13,6 +13,9 @@ import { ArticleVideoFigure } from "./article-video";
 import { PictogramFigure } from "../publications/threat_intelligence/pictograms/figure";
 import { PresentationFooter } from "./presentation-footer";
 import { PresentationHeader, type PresentationHeaderSection } from "./presentation-header";
+import { useBlogHeaderObstacles } from "./presentation-shell";
+import { useRhythmOverlay } from "./use-rhythm-overlay";
+import { BlogPageBackground } from "../publications/threat_intelligence/blog-defense/page-background";
 
 export type ArticlePageEditionFooter = {
   editionBasePath: string;
@@ -127,8 +130,11 @@ function ArticlePageShell({
   videoScript,
 }: ArticlePageShellProps) {
   const articleRef = useRef<HTMLElement | null>(null);
+  const pageRef = useRef<HTMLElement | null>(null);
   const containerWidth = useMeasuredWidth(articleRef);
   const viewportWidth = useViewportWidth();
+  const showRhythmOverlay = useRhythmOverlay();
+  const headerObstacles = useBlogHeaderObstacles(pageRef);
   const floatGeometry = useMemo(() => {
     if (!image || !containerWidth) return null;
     return solveFeaturedFloatGeometry({
@@ -152,7 +158,18 @@ function ArticlePageShell({
     : undefined;
 
   return (
-    <main className={getArticleShellClassName(editionFooter)}>
+    <main
+      className={`${getArticleShellClassName(editionFooter)} blog-rhythm-shell`}
+      data-rhythm-overlay={showRhythmOverlay ? "true" : "false"}
+      ref={pageRef}
+      style={{
+        "--ti-rhythm": `${BLOG_RHYTHM.rowHeight / TI_COPY_ROW_MULTIPLE}px`,
+        "--ti-row-height": `${BLOG_RHYTHM.rowHeight}px`,
+        "--ti-paint-buffer": `${BLOG_RHYTHM.paintBuffer}px`,
+        "--ti-paint-height": `${BLOG_RHYTHM.paintHeight}px`,
+      } as CSSProperties}
+    >
+      <BlogPageBackground headerObstacles={headerObstacles} pageRef={pageRef} rhythm={BLOG_RHYTHM} />
       <PresentationHeader
         editionBasePath={editionFooter?.editionBasePath}
         editionDate={editionDate}

@@ -41,11 +41,13 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertIn('"--ti-section-rule":"#e54d2e"', xml)
         self.assertNotIn("#ec6142", xml)
         closing_index = xml.index('id="closing"')
-        closing_eyebrow_rule = xml.index("eyebrowRule", closing_index)
-        self.assertGreater(closing_eyebrow_rule, closing_index)
-        self.assertIn("<ti-title-slide", xml[closing_index:])
+        closing_slice = xml[closing_index:]
+        self.assertIn("mastheadEyebrow", closing_slice)
+        self.assertIn("Anthus AI Solutions", closing_slice)
+        self.assertIn("titleWordSplit", closing_slice)
+        self.assertIn("<ti-title-slide", closing_slice)
         self.assertIn("THREAT INTELLIGENCE", xml)
-        self.assertIn("Learn more", xml)
+        self.assertIn("To learn more", xml)
         self.assertIn("July 4, 2026", xml)
         self.assertNotIn("This briefing is from", xml)
         self.assertIn('"variant":"solid"', xml)
@@ -154,7 +156,7 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         teaser_eyebrow_rule = xml.index("eyebrowRule", teaser_index)
         self.assertGreater(teaser_eyebrow_rule, teaser_index)
         self.assertIn("THREAT INTELLIGENCE", xml)
-        self.assertIn("Learn more", xml)
+        self.assertIn("To learn more", xml)
         self.assertIn("July 4, 2026", xml)
         self.assertIn("To learn more, check out the July 4, 2026 edition", xml)
         self.assertIn('"variant":"solid"', xml)
@@ -172,21 +174,21 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
             background_props_for_theme,
         )
 
-        self.assertEqual(TI_SCENE_STYLES_DARK["background"], "#191918")
-        self.assertEqual(TI_SCENE_STYLES_LIGHT["background"], "#f9f9f8")
-        self.assertEqual(TI_BACKGROUND_PROPS_DARK["color"], "#191918")
-        self.assertEqual(TI_BACKGROUND_PROPS_LIGHT["color"], "#f9f9f8")
-        self.assertEqual(scene_styles_for_theme("dark")["background"], "#191918")
-        self.assertEqual(scene_styles_for_theme("light")["background"], "#f9f9f8")
-        self.assertEqual(background_props_for_theme("dark")["color"], "#191918")
-        self.assertEqual(background_props_for_theme("light")["color"], "#f9f9f8")
+        self.assertEqual(TI_SCENE_STYLES_DARK["background"], "#111110")
+        self.assertEqual(TI_SCENE_STYLES_LIGHT["background"], "#fdfdfc")
+        self.assertEqual(TI_BACKGROUND_PROPS_DARK["color"], "#111110")
+        self.assertEqual(TI_BACKGROUND_PROPS_LIGHT["color"], "#fdfdfc")
+        self.assertEqual(scene_styles_for_theme("dark")["background"], "#111110")
+        self.assertEqual(scene_styles_for_theme("light")["background"], "#fdfdfc")
+        self.assertEqual(background_props_for_theme("dark")["color"], "#111110")
+        self.assertEqual(background_props_for_theme("light")["color"], "#fdfdfc")
 
         dark_vars = TI_SCENE_STYLES_DARK["vars"]
         light_vars = TI_SCENE_STYLES_LIGHT["vars"]
         self.assertEqual(dark_vars["--ti-alarm-red"], "#e54d2e")
-        self.assertEqual(light_vars["--ti-alarm-red"], "#c54028")
+        self.assertEqual(light_vars["--ti-alarm-red"], "#e54d2e")
         self.assertEqual(dark_vars["--ti-pictogram-edge"], "#363a3f")
-        self.assertEqual(light_vars["--ti-pictogram-edge"], "#889096")
+        self.assertEqual(light_vars["--ti-pictogram-edge"], "#b9bbc6")
         self.assertEqual(dark_vars["--ti-row-height"], "24px")
         self.assertEqual(light_vars["--ti-row-height"], "24px")
 
@@ -267,12 +269,12 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
             model="gpt-4o-mini-tts",
             theme="light",
         )
-        self.assertIn('"--ti-section-rule":"#c54028"', xml)
-        self.assertIn('"--ti-alarm-red":"#c54028"', xml)
-        self.assertIn('"--ti-headline-color":"#44403c"', xml)
-        self.assertIn('"background":"#f9f9f8"', xml)
+        self.assertIn('"--ti-section-rule":"#e54d2e"', xml)
+        self.assertIn('"--ti-alarm-red":"#e54d2e"', xml)
+        self.assertIn('"--ti-headline-color":"#21201c"', xml)
+        self.assertIn('"background":"#fdfdfc"', xml)
+        self.assertNotIn("#111110", xml)
         self.assertNotIn("#191918", xml)
-        self.assertNotIn("#e54d2e", xml)
 
     def test_parse_theme_option_validates_values(self) -> None:
         from publications.threat_intelligence.videoml.videos_commands import parse_theme_option, resolve_themes

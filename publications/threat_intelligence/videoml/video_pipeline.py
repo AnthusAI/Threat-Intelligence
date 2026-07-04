@@ -79,26 +79,33 @@ def _merge_scene_style_vars(base: dict[str, Any]) -> dict[str, Any]:
 
 
 TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
-    "background": "#191918",
+    "background": "#111110",
     "color": "#eeeeec",
     "vars": {
-        "--color-bg": "#191918",
-        "--color-bg-subtle": "#111110",
-        "--color-surface": "#21201c",
-        "--color-surface-strong": "#2a2926",
+        "--color-bg": "#111110",
+        "--color-bg-subtle": "#191918",
+        "--color-surface": "#111110",
+        "--color-surface-strong": "#222221",
         "--color-text": "#eeeeec",
         "--color-text-muted": "#b5b3ad",
         "--color-primary": "#eeeeec",
         "--color-accent": "#e54d2e",
-        "--color-secondary": "#7f7e77",
+        "--color-secondary": "#222221",
         "--ti-section-rule": "#e54d2e",
         "--ti-alarm-red": "#e54d2e",
         "--ti-headline-color": "#eeeeec",
         "--ti-body-color": "#b5b3ad",
         "--ti-cta-red": "#e54d2e",
-        "--background": "#191918",
+        "--ti-cta-background": "#853a2d",
+        "--ti-cta-foreground": "#eeeeec",
+        "--ti-inverted-alert": "#ff977d",
+        "--background": "#111110",
         "--foreground": "#b5b3ad",
         "--foreground-strong": "#eeeeec",
+        "--foreground-muted": "#7c7b74",
+        "--extra-muted-foreground": "#3b3a37",
+        "--faintly-muted": "#222221",
+        "--ti-hrule-foreground": "#3b3a37",
         "--ti-pictogram-edge": "#363a3f",
         "--ti-pictogram-node": "#2e3135",
         "--ti-pictogram-muted": "#43484e",
@@ -107,7 +114,7 @@ TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
         "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",
         "--grass-8": "#30a46c",
         "--amber-8": "#f59e0b",
-        "--sand-8": "#9090a0",
+        "--sand-8": "#62605b",
         "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
         "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
         "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
@@ -116,41 +123,48 @@ TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
 
 TI_BACKGROUND_PROPS_DARK: dict[str, Any] = {
     "variant": "solid",
-    "color": "#191918",
+    "color": "#111110",
 }
 
-# Matches Threat Intelligence blog light mode (`app/globals.css` sand-light + tomato-11 accent).
-# Uses tomato-11 (#c54028) for WCAG-compliant contrast on sand-2 (#f9f9f8) paper.
+# Matches Threat Intelligence blog light mode (Radix sand-light + tomato-9 accent).
+# Uses the same --sand-1 / --sand-12 / --tomato-9 scale as the website.
 TI_SCENE_STYLES_LIGHT: dict[str, Any] = _merge_scene_style_vars({
-    "background": "#f9f9f8",
-    "color": "#44403c",
+    "background": "#fdfdfc",
+    "color": "#21201c",
     "vars": {
-        "--color-bg": "#f9f9f8",
-        "--color-bg-subtle": "#fcfcfc",
-        "--color-surface": "#fcfcfc",
-        "--color-surface-strong": "#f2f2f0",
-        "--color-text": "#44403c",
-        "--color-text-muted": "#696964",
-        "--color-primary": "#44403c",
-        "--color-accent": "#c54028",
-        "--color-secondary": "#8a8a83",
-        "--ti-section-rule": "#c54028",
-        "--ti-alarm-red": "#c54028",
-        "--ti-headline-color": "#44403c",
-        "--ti-body-color": "#696964",
-        "--ti-cta-red": "#c54028",
-        "--background": "#f9f9f8",
-        "--foreground": "#696964",
-        "--foreground-strong": "#44403c",
-        "--ti-pictogram-edge": "#889096",
-        "--ti-pictogram-node": "#889096",
-        "--ti-pictogram-muted": "#a8adb4",
-        "--ti-pictogram-throb": "#d9542e",
-        "--ti-pictogram-compromised": "#c54028",
+        "--color-bg": "#fdfdfc",
+        "--color-bg-subtle": "#f9f9f8",
+        "--color-surface": "#fdfdfc",
+        "--color-surface-strong": "#f1f0ef",
+        "--color-text": "#21201c",
+        "--color-text-muted": "#63635e",
+        "--color-primary": "#21201c",
+        "--color-accent": "#e54d2e",
+        "--color-secondary": "#f1f0ef",
+        "--ti-section-rule": "#e54d2e",
+        "--ti-alarm-red": "#e54d2e",
+        "--ti-headline-color": "#21201c",
+        "--ti-body-color": "#63635e",
+        "--ti-cta-red": "#e54d2e",
+        "--ti-cta-background": "#e54d2e",
+        "--ti-cta-foreground": "#fdfdfc",
+        "--ti-inverted-alert": "#e54d2e",
+        "--background": "#fdfdfc",
+        "--foreground": "#63635e",
+        "--foreground-strong": "#21201c",
+        "--foreground-muted": "#82827c",
+        "--extra-muted-foreground": "#cfceca",
+        "--faintly-muted": "#f1f0ef",
+        "--ti-hrule-foreground": "#cfceca",
+        "--ti-pictogram-edge": "#b9bbc6",
+        "--ti-pictogram-node": "#b9bbc6",
+        "--ti-pictogram-muted": "#d9d9e0",
+        "--ti-pictogram-throb": "#ec8e7b",
+        "--ti-pictogram-compromised": "#e54d2e",
         "--ti-pictogram-accent-glow": "rgba(234, 88, 12, 0.18)",
         "--grass-8": "#30a46c",
         "--amber-8": "#f59e0b",
-        "--sand-8": "#9090a0",
+        "--sand-8": "#bcbbb5",
         "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
         "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
         "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
@@ -159,7 +173,7 @@ TI_SCENE_STYLES_LIGHT: dict[str, Any] = _merge_scene_style_vars({
 
 TI_BACKGROUND_PROPS_LIGHT: dict[str, Any] = {
     "variant": "solid",
-    "color": "#f9f9f8",
+    "color": "#fdfdfc",
 }
 
 # Backward-compatible aliases (dark is the default theme).
@@ -182,27 +196,53 @@ def retheme_vml_xml(dsl_xml: str, theme: str) -> str:
         return dsl_xml
     updated = dsl_xml.replace(props_attr(TI_SCENE_STYLES_DARK), props_attr(TI_SCENE_STYLES_LIGHT))
     updated = updated.replace(props_attr(TI_BACKGROUND_PROPS_DARK), props_attr(TI_BACKGROUND_PROPS_LIGHT))
-    if any(token in updated for token in ("#191918", "#111110", "#21201c")):
+    if any(token in updated for token in ("#111110", "#191918", "#222221", "#2a2926")):
         updated = _swap_ti_light_palette_tokens(updated)
     return updated
 
 
 def _swap_ti_light_palette_tokens(dsl_xml: str) -> str:
+    # Context-aware fixes for legacy dark palette tokens whose hex values
+    # collide with new light palette tokens.  #21201c was the old dark
+    # --color-surface but is also the new light --color-text / --foreground-
+    # strong (sand-12 light).  A blind global replace would turn light text
+    # into the light background.  Swap only within the specific CSS variable
+    # keys where the old dark value appeared.
+    targeted = (
+        ('"--color-surface":"#21201c"', '"--color-surface":"#fdfdfc"'),
+        ('"--color-surface-strong":"#2a2926"', '"--color-surface-strong":"#f1f0ef"'),
+        ('"--color-secondary":"#7f7e77"', '"--color-secondary":"#f1f0ef"'),
+        ('"--sand-8":"#9090a0"', '"--sand-8":"#bcbbb5"'),
+    )
+    updated = dsl_xml
+    for dark, light in targeted:
+        updated = updated.replace(dark, light)
+
+    # Unambiguous dark -> light mappings (safe to replace globally).
     replacements = (
         ("rgba(251, 146, 60, 0.2)", "rgba(234, 88, 12, 0.18)"),
+        ("#111110", "#fdfdfc"),
         ("#191918", "#f9f9f8"),
-        ("#111110", "#fcfcfc"),
-        ("#21201c", "#fcfcfc"),
-        ("#2a2926", "#f2f2f0"),
-        ("#eeeeec", "#44403c"),
-        ("#b5b3ad", "#696964"),
-        ("#e54d2e", "#c54028"),
-        ("#7f7e77", "#8a8a83"),
-        ("#363a3f", "#889096"),
-        ("#2e3135", "#889096"),
-        ("#43484e", "#a8adb4"),
-        ("#ac4d39", "#d9542e"),
+        ("#222221", "#f1f0ef"),
+        ("#2a2a28", "#e9e8e6"),
+        ("#2a2926", "#f1f0ef"),
+        ("#3b3a37", "#cfceca"),
+        ("#7c7b74", "#82827c"),
+        ("#b5b3ad", "#63635e"),
+        ("#eeeeec", "#21201c"),
+        ("#62605b", "#bcbbb5"),
+        ("#7f7e77", "#f1f0ef"),
+        ("#853a2d", "#e54d2e"),
+        ("#ff977d", "#e54d2e"),
+        ("#363a3f", "#b9bbc6"),
+        ("#2e3135", "#b9bbc6"),
+        ("#43484e", "#d9d9e0"),
+        ("#ac4d39", "#ec8e7b"),
+        ("#9090a0", "#bcbbb5"),
     )
+    for dark_token, light_token in replacements:
+        updated = updated.replace(dark_token, light_token)
+    return updated
     updated = dsl_xml
     for dark_token, light_token in replacements:
         updated = updated.replace(dark_token, light_token)
@@ -301,8 +341,10 @@ def title_slide_layer(
     *,
     pictogram_slug: str | None = None,
     eyebrow: str | None = None,
+    masthead_eyebrow: str | None = None,
     title: str | None = None,
     subtitle: str | None = None,
+    title_word_split: bool = False,
     horizontal_align: str = "left",
     logo_size: int | None = None,
     title_size: int | None = None,
@@ -334,10 +376,14 @@ def title_slide_layer(
     }
     if eyebrow:
         props["eyebrow"] = eyebrow
+    if masthead_eyebrow:
+        props["mastheadEyebrow"] = masthead_eyebrow
     if title:
         props["title"] = title
     if subtitle:
         props["subtitle"] = subtitle
+    if title_word_split:
+        props["titleWordSplit"] = True
     if title_color:
         props["titleColor"] = title_color
     if title_weight is not None:
@@ -354,31 +400,46 @@ def title_slide_layer(
     if pictogram_slug:
         props["pictogramSlug"] = pictogram_slug
         props["pictogramSize"] = logo_size if logo_size is not None else TI_VIDEO_LAYOUT["pictogram_size"]
-    tag = "ti-title-slide" if (pictogram_slug or eyebrow_rule) else "title-slide"
+    tag = "ti-title-slide" if (pictogram_slug or eyebrow_rule or masthead_eyebrow) else "title-slide"
     return f"""    <layer id="content" z="10">
       <{tag} props='{props_attr(props)}' />
     </layer>"""
 
 
-def quote_card_layer(*, quote: str, attribution: str, accent_color: str = "var(--ti-alarm-red)") -> str:
+def quote_card_layer(
+    *,
+    quote: str,
+    attribution: str = "",
+    accent_color: str = "var(--ti-alarm-red)",
+    quote_size: int | None = None,
+    quote_line_height: int | None = None,
+) -> str:
+    props: dict[str, Any] = {
+        "quote": quote,
+        "accentColor": accent_color,
+    }
+    if attribution:
+        props["attribution"] = attribution
+    if quote_size is not None:
+        props["quoteSize"] = quote_size
+    if quote_line_height is not None:
+        props["quoteLineHeight"] = quote_line_height
     return f"""    <layer id="content" z="10">
-      <ti-quote-card props='{props_attr({"quote": quote, "attribution": attribution, "accentColor": accent_color})}' />
+      <ti-quote-card props='{props_attr(props)}' />
     </layer>"""
 
 
 def closing_cta_layer(*, slide_date: str) -> str:
     return title_slide_layer(
-        eyebrow=f"Learn more — {slide_date} edition",
+        masthead_eyebrow="Anthus AI Solutions",
         title="THREAT INTELLIGENCE",
+        title_word_split=True,
         subtitle=TI_TAGLINE,
         horizontal_align="center",
         title_size=TI_VIDEO_LAYOUT["closing_title_size"],
         subtitle_size=TI_VIDEO_LAYOUT["subtitle_size_closing"],
         title_color="var(--ti-alarm-red)",
         title_weight=900,
-        eyebrow_weight=900,
-        eyebrow_letter_spacing=0.09,
-        eyebrow_rule=True,
     )
 
 
@@ -477,8 +538,9 @@ def authored_scene_xml(
     scene: dict[str, Any],
     index: int,
     *,
-    default_attribution: str,
     scene_renderer,
+    default_quote_size: int | None = None,
+    default_quote_line_height: int | None = None,
 ) -> str:
     kind = str(scene.get("kind") or "slide").strip().lower()
     voice_text = str(scene.get("voice") or "").strip()
@@ -492,8 +554,19 @@ def authored_scene_xml(
         quote = str(scene.get("quote") or "").strip()
         if not quote:
             raise ValueError(f"Authored quote scene {index} is missing its quote text.")
-        attribution = str(scene.get("attribution") or default_attribution).strip()
-        layer = quote_card_layer(quote=quote, attribution=attribution)
+        attribution = str(scene.get("attribution") or "").strip()
+        scene_quote_size = scene.get("quoteSize") or scene.get("quote_size")
+        scene_quote_line_height = scene.get("quoteLineHeight") or scene.get("quote_line_height")
+        quote_size = int(scene_quote_size) if scene_quote_size else default_quote_size
+        quote_line_height = (
+            int(scene_quote_line_height) if scene_quote_line_height else default_quote_line_height
+        )
+        layer = quote_card_layer(
+            quote=quote,
+            attribution=attribution,
+            quote_size=quote_size,
+            quote_line_height=quote_line_height,
+        )
         return scene_renderer(scene_id, str(scene.get("title") or "Quote"), layer, cue)
     if kind != "slide":
         raise ValueError(f"Authored video scene {index} has unknown kind: {kind!r}")
@@ -547,7 +620,7 @@ def build_babulus_xml(
     if authored:
         # Video-form article: authored content scenes, then the standard post-roll.
         scene_blocks = [
-            authored_scene_xml(scene, index + 1, default_attribution=section, scene_renderer=_scene)
+            authored_scene_xml(scene, index + 1, scene_renderer=_scene)
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene))
@@ -575,7 +648,7 @@ def build_babulus_xml(
             _scene(
                 "hook",
                 "Hook",
-                quote_card_layer(quote=hook_quote, attribution=section),
+                quote_card_layer(quote=hook_quote),
                 f"""<cue id="hook-cue">
       <voice>{escape(hook_quote)}</voice>
     </cue>""",
@@ -625,7 +698,7 @@ def build_babulus_xml(
             _scene(
                 "body-quote-2",
                 "Quote 2",
-                quote_card_layer(quote=quote, attribution=section),
+                quote_card_layer(quote=quote),
                 f"""<cue id="body-quote-2-cue">
       <voice>{escape(voice_line)}</voice>
     </cue>""",
@@ -675,7 +748,13 @@ def build_edition_overview_xml(
     if authored:
         # Long-format edition video: authored content scenes, then the standard post-roll.
         scene_blocks = [
-            authored_scene_xml(scene, index + 1, default_attribution=title, scene_renderer=_scene)
+            authored_scene_xml(
+                scene,
+                index + 1,
+                scene_renderer=_scene,
+                default_quote_size=TI_VIDEO_LAYOUT["title_size"],
+                default_quote_line_height=ti_video_rows(4),
+            )
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene))
@@ -712,7 +791,11 @@ def build_edition_overview_xml(
             _scene(
                 "hook",
                 "Hook",
-                quote_card_layer(quote=edition_hook, attribution=title),
+                quote_card_layer(
+                    quote=edition_hook,
+                    quote_size=TI_VIDEO_LAYOUT["title_size"],
+                    quote_line_height=ti_video_rows(4),
+                ),
                 f"""<cue id="hook-cue">
       <voice>{escape(edition_hook)}</voice>
     </cue>""",
@@ -724,7 +807,11 @@ def build_edition_overview_xml(
             _scene(
                 "hook",
                 "Hook",
-                quote_card_layer(quote=hook_quote, attribution=first_section),
+                quote_card_layer(
+                    quote=hook_quote,
+                    quote_size=TI_VIDEO_LAYOUT["title_size"],
+                    quote_line_height=ti_video_rows(4),
+                ),
                 f"""<cue id="hook-cue">
       <voice>{escape(hook_quote)}</voice>
     </cue>""",
