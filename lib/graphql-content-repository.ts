@@ -15,6 +15,7 @@ import {
   type PublicationItemType,
 } from "./publication-items";
 import { SITE_BRAND } from "./site-brand";
+import { shouldFetchVideoScripts } from "./video-mode";
 import { parseVideoScriptRef, videomlItemSlug, type VideoScriptRef } from "./video-script";
 
 const AUTH_MODE = "apiKey";
@@ -189,7 +190,7 @@ export const graphqlContentRepository: ContentRepository = {
   },
 
   async loadVideoScript(targetSlug: string) {
-    if (process.env.NODE_ENV !== "development") return null;
+    if (!shouldFetchVideoScripts()) return null;
     const item = await getItemBySlug(videomlItemSlug(targetSlug));
     if (!item || item.type !== "videoml" || item.status !== "published") return null;
     return parseVideoScriptRef(item);
@@ -346,7 +347,7 @@ async function loadEditionVideoScripts(
   items: PublicationItem[],
   editionVideo: ArticleVideoAsset | null,
 ): Promise<Record<string, VideoScriptRef> | undefined> {
-  if (process.env.NODE_ENV !== "development") return undefined;
+  if (!shouldFetchVideoScripts()) return undefined;
 
   const targets = new Set<string>();
   if (editionVideo) targets.add("edition-overview");
@@ -753,10 +754,15 @@ function readInlineExcerpt(editorial: unknown): string | null {
   if (!parsed) return null;
   const direct = parsed.excerpt;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const custom = parsed.customExcerpt;
+  if (typeof custom === "string" && custom.trim()) return custom.trim();
   const newsroom = parsed.newsroom;
   if (!newsroom || typeof newsroom !== "object" || Array.isArray(newsroom)) return null;
-  const nestedExcerpt = (newsroom as Record<string, unknown>).excerpt;
-  return typeof nestedExcerpt === "string" && nestedExcerpt.trim() ? nestedExcerpt.trim() : null;
+  const newsroomRecord = newsroom as Record<string, unknown>;
+  const nestedExcerpt = newsroomRecord.excerpt;
+  if (typeof nestedExcerpt === "string" && nestedExcerpt.trim()) return nestedExcerpt.trim();
+  const nestedCustom = newsroomRecord.customExcerpt;
+  return typeof nestedCustom === "string" && nestedCustom.trim() ? nestedCustom.trim() : null;
 }
 
 function normalizePublicationItemType(value: string): Exclude<PublicationItemType, "article"> | null {

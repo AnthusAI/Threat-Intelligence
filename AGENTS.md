@@ -719,6 +719,12 @@ To change rendering:
 - Threat Intelligence videos use **flat solid background colors** matching the blog dark-mode paper (`#191918`). Do not use gradient backgrounds in `TI_BACKGROUND_PROPS` or scene styles — the TI brand language is flat color, not SaaS-style gradients. Pictogram frames, quote cards, and CTA slides all sit on the same flat paper.
 - Threat Intelligence blog page uses **strict rhythm**. Vertical spacing, margins, padding, and line boxes must snap to whole `--ti-row-height` units (or 0). Do not use half-row offsets for core copy/CTA stack spacing.
 
+## Seed / content update (Threat Intelligence)
+
+- Read [publications/threat_intelligence/skills/seed-update/SKILL.md](publications/threat_intelligence/skills/seed-update/SKILL.md) before updating TI seed content in sandbox or production backends (seed JSON, GraphQL metadata, S3 videos, pictogram-backed MP4s).
+- Live TI reader production is Amplify app `d3on1y5vlrxmam` (`threat-intelligence.anth.us`), not Papyrus main `dbsyytcm9drqa`. The skill has the backend identity map, CLI entry points (`papyrus ops content seed-edition`), and JWT vs Cognito seed paths.
+- Video generation alone is not enough: after render, follow the seed-update skill to upload MP4s and refresh GraphQL on the correct backend.
+
 ## Verification Checklist
 
 Run these after changes:

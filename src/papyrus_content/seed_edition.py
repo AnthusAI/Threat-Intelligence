@@ -36,7 +36,7 @@ def seed_edition_content(flags: list[str]) -> None:
     client, _claims = create_authoring_client()
     changes = build_record_changes_targeted_by_id(client, records)
     stale_edition_item_records = list_stale_seed_edition_item_records(client, payload, records)
-    stale_media_records = list_stale_seed_media_records(client, payload)
+    stale_media_records = list_stale_seed_media_records(client, payload, records)
     counts = summarize_changes(changes)
     result = {
         "ok": True,
@@ -476,14 +476,33 @@ def list_stale_seed_edition_item_records(
     }
 
 
-def list_stale_seed_media_records(client: PapyrusGraphQLAuthoringClient, payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def list_stale_seed_media_records(
+    client: PapyrusGraphQLAuthoringClient,
+    payload: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    expected_ids: dict[str, set[str]] = {"MediaAsset": set(), "PublishedMediaAsset": set()}
+    for record_entry in records:
+        model_name = record_entry.get("modelName")
+        if model_name not in expected_ids:
+            continue
+        record_id = normalize_string((record_entry.get("expected") or {}).get("id"))
+        if record_id:
+            expected_ids[str(model_name)].add(record_id)
     stale = {"MediaAsset": [], "PublishedMediaAsset": []}
     for article in payload["articles"]:
         item_id = f"item-{article['slug']}"
         published_id = published_item_id(item_id)
         stale["MediaAsset"].extend(client.list_by_index("mediaAssetsByItemAndSortKey", item_id))
         stale["PublishedMediaAsset"].extend(client.list_by_index("publishedMediaAssetsByItemAndSortKey", published_id))
-    return stale
+    return {
+        model_name: [
+            record_entry
+            for record_entry in records_for_model
+            if normalize_string(record_entry.get("id")) not in expected_ids[model_name]
+        ]
+        for model_name, records_for_model in stale.items()
+    }
 
 
 def summarize_stale_media(records_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, int]:

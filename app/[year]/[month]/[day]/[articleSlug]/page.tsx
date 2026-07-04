@@ -50,11 +50,11 @@ export default async function DateScopedArticlePage({ params }: DateScopedArticl
       editionFooter={{
         editionBasePath,
         entries: buildPresentationFooterEntries(content),
+        sections: content.sections.map((section) => ({ key: section.key, label: section.label })),
         subtitle: SITE_BRAND.id === "threat-intelligence" ? "" : (content.description?.trim() || "Inside Papyrus"),
         title: SITE_BRAND.id === "threat-intelligence" ? "ANTHUS THREAT INTELLIGENCE" : undefined,
       }}
       item={item}
-      backHref={`${editionBasePath}#${item.slug}`}
       videoScript={content.videoScripts?.[item.slug] ?? null}
     />
   );

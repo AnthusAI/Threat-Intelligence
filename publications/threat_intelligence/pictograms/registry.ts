@@ -10,6 +10,18 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_PHASE_OFFSETS = {
   "audit-azure-blast-radius-before-attackers-do": 7_500,
   "treat-openai-accounts-like-production-infrastructure": 10_000,
   "how-to-play-games-securely": 12_500,
+  "the-new-sensitive-data-estate": 13_400,
+  "from-lessons-learned-to-defenses-checked": 14_700,
+  "the-knowledge-base-beneath-the-newsroom": 16_000,
+  "from-signals-to-practical-advice": 17_300,
+  "build-the-aws-exposure-control-stack": 18_600,
+  "find-pii-risk-in-s3-buckets": 900,
+  "make-azure-privilege-temporary": 3_400,
+  "find-sensitive-data-paths-in-azure": 6_100,
+  "shrink-openai-api-key-blast-radius": 8_800,
+  "control-chatgpt-workspace-access-and-connected-data": 11_300,
+  "separate-game-accounts-from-real-life": 15_200,
+  "treat-mods-and-launchers-like-untrusted-code": 19_400,
 } as const;
 
 export type ThreatIntelligencePictogramSlug = Exclude<
