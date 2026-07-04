@@ -238,7 +238,7 @@ Before rendering, proofread what will be *spoken*, not just what the JSON says:
 The one branding block, standardized and **pipeline-appended** (`post_roll_scene()` in
 `video_pipeline.py`) — never authored per-video, never varied per-video:
 
-Slide: eyebrow `Learn more — {edition date} edition`, title `THREAT INTELLIGENCE` in tomato red (`--ti-alarm-red`), subtitle = tagline.
+Slide: masthead eyebrow `Anthus AI Solutions` (blog header split styling), title `THREAT` / `INTELLIGENCE` on separate rhythm rows in tomato red (`--ti-alarm-red`) with one blank row between the eyebrow and `THREAT` and between the two title words, subtitle = tagline.
 
 Voice: `To learn more, check out the {edition date} edition of Anthus Threat Intelligence. {tagline}`
 

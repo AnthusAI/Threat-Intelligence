@@ -1,6 +1,6 @@
 import React from "react";
 import { ThreatIntelligencePictogramVideo } from "./pictogram-video";
-import { TI_VIDEO_LAYOUT } from "./ti-video-rhythm";
+import { TI_VIDEO_LAYOUT, tiVideoRows } from "./ti-video-rhythm";
 
 export type TiTitleSlideProps = Record<string, unknown> & {
   pictogramSlug?: string;
@@ -10,6 +10,8 @@ export type TiTitleSlideProps = Record<string, unknown> & {
   title?: string;
   subtitle?: string;
   eyebrow?: string;
+  mastheadEyebrow?: string;
+  titleWordSplit?: boolean;
   horizontalAlign?: "left" | "center";
   verticalAlign?: "top" | "center" | "bottom";
   titleSize?: number;
@@ -51,7 +53,7 @@ function EyebrowWithRules({
       <div style={{ background: "var(--ti-alarm-red)", flex: 1, height: ruleHeight, minWidth: ruleHeight }} />
       <span
         style={{
-          background: "var(--background, #191918)",
+          background: "var(--background, #111110)",
           color: "var(--ti-headline-color, var(--foreground-strong, #eeeeec))",
           fontFamily: fontEyebrow,
           fontSize,
@@ -101,6 +103,86 @@ function PlainEyebrow({
   );
 }
 
+function splitMastheadEyebrow(text: string): { lead: string; rest: string } {
+  const trimmed = text.trim();
+  const firstSpace = trimmed.indexOf(" ");
+  if (firstSpace === -1) {
+    return { lead: trimmed, rest: "" };
+  }
+  return { lead: trimmed.slice(0, firstSpace), rest: trimmed.slice(firstSpace + 1) };
+}
+
+/** Blog masthead eyebrow: strong lead word + muted remainder. */
+function MastheadEyebrow({
+  label,
+  marginBottom = tiVideoRows(1),
+}: {
+  label: string;
+  marginBottom?: number;
+}) {
+  const { lead, rest } = splitMastheadEyebrow(label);
+
+  return (
+    <p
+      style={{
+        fontFamily: fontEyebrow,
+        fontSize: TI_VIDEO_LAYOUT.eyebrowSize,
+        fontStyle: "normal",
+        fontWeight: 900,
+        letterSpacing: "0.09em",
+        lineHeight: `${tiVideoRows(2)}px`,
+        margin: `0 0 ${marginBottom}px`,
+        textTransform: "uppercase",
+      }}
+    >
+      <span style={{ color: "var(--ti-headline-color, var(--foreground-strong, #eeeeec))" }}>{lead}</span>
+      {rest ? (
+        <span style={{ color: "var(--ti-body-color, var(--color-text-muted, #b5b3ad))" }}> {rest}</span>
+      ) : null}
+    </p>
+  );
+}
+
+function SplitTitle({
+  title,
+  titleColor,
+  titleSize,
+  titleWeight,
+  titleLineHeight,
+  wordGap = tiVideoRows(1),
+}: {
+  title: string;
+  titleColor: string;
+  titleSize: number;
+  titleWeight: number;
+  titleLineHeight: number;
+  wordGap?: number;
+}) {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+
+  return (
+    <h1
+      style={{
+        color: titleColor,
+        display: "grid",
+        fontFamily: fontHeadline,
+        fontSize: titleSize,
+        fontStyle: "normal",
+        fontWeight: titleWeight,
+        gap: wordGap,
+        lineHeight: `${titleLineHeight}px`,
+        margin: 0,
+      }}
+    >
+      {words.map((word) => (
+        <span key={word} style={{ display: "block" }}>
+          {word}
+        </span>
+      ))}
+    </h1>
+  );
+}
+
 export function TiTitleSlide(props: TiTitleSlideProps) {
   const {
     pictogramSlug,
@@ -110,6 +192,8 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     title = "",
     subtitle,
     eyebrow,
+    mastheadEyebrow,
+    titleWordSplit = false,
     horizontalAlign = "left",
     verticalAlign = "center",
     titleSize = TI_VIDEO_LAYOUT.titleSize,
@@ -129,6 +213,38 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
 
   const resolvedTitleColor = titleColor || "var(--ti-headline-color, var(--foreground-strong, #eeeeec))";
   const resolvedSubtitleColor = "var(--ti-body-color, var(--color-text-muted, #b5b3ad))";
+  const resolvedTitleSize = Number(titleSize);
+  const resolvedTitleWeight = Number(titleWeight);
+  const resolvedTitleLineHeight = Number(titleLineHeight);
+
+  const mastheadEyebrowNode = mastheadEyebrow ? (
+    <MastheadEyebrow label={String(mastheadEyebrow)} marginBottom={tiVideoRows(1)} />
+  ) : null;
+
+  const titleNode = titleWordSplit ? (
+    <SplitTitle
+      title={String(title)}
+      titleColor={resolvedTitleColor}
+      titleLineHeight={resolvedTitleLineHeight}
+      titleSize={resolvedTitleSize}
+      titleWeight={resolvedTitleWeight}
+      wordGap={tiVideoRows(1)}
+    />
+  ) : (
+    <h1
+      style={{
+        color: resolvedTitleColor,
+        fontFamily: fontHeadline,
+        fontSize: resolvedTitleSize,
+        fontStyle: "normal",
+        fontWeight: resolvedTitleWeight,
+        lineHeight: `${resolvedTitleLineHeight}px`,
+        margin: 0,
+      }}
+    >
+      {title}
+    </h1>
+  );
 
   const logo = pictogramSlug ? (
     <ThreatIntelligencePictogramVideo
@@ -154,20 +270,9 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
 
   const textColumn = (
     <div style={{ display: "flex", flex: 1, flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
+      {mastheadEyebrowNode}
       {eyebrowNode}
-      <h1
-        style={{
-          color: resolvedTitleColor,
-          fontFamily: fontHeadline,
-          fontSize: Number(titleSize),
-          fontStyle: "normal",
-          fontWeight: Number(titleWeight),
-          lineHeight: `${Number(titleLineHeight)}px`,
-          margin: 0,
-        }}
-      >
-        {title}
-      </h1>
+      {titleNode}
       {subtitle ? (
         <p
           style={{
@@ -205,20 +310,9 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     return (
       <div style={{ ...outerStyle, alignItems: "center", textAlign: "center" }}>
         <div style={{ maxWidth: tiVideoCenterMaxWidth(padding), width: "100%" }}>
+          {mastheadEyebrowNode}
           {eyebrowNode}
-          <h1
-            style={{
-              color: resolvedTitleColor,
-              fontFamily: fontHeadline,
-              fontSize: Number(titleSize),
-              fontStyle: "normal",
-              fontWeight: Number(titleWeight),
-              lineHeight: `${Number(titleLineHeight)}px`,
-              margin: 0,
-            }}
-          >
-            {title}
-          </h1>
+          {titleNode}
           {subtitle ? (
             <p
               style={{

@@ -498,14 +498,14 @@ function useViewportWidth(): number {
   return width;
 }
 
-type BlogHeaderObstacle = {
+export type BlogHeaderObstacle = {
   x: number;
   y: number;
   width: number;
   height: number;
 };
 
-function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHeaderObstacle[] {
+export function useBlogHeaderObstacles(pageRef: RefObject<HTMLElement | null>): BlogHeaderObstacle[] {
   const [obstacles, setObstacles] = useState<BlogHeaderObstacle[]>([]);
 
   useEffect(() => {

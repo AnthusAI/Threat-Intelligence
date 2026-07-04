@@ -29,9 +29,10 @@ function estimateCharsPerLine(fontSize: number, maxWidth: number): number {
 export function resolveTiQuoteTypography(
   quote: string,
   maxTextWidth: number,
+  large = false,
 ): { fontSize: number; lineHeight: number } {
   const length = quote.trim().length;
-  const maxQuoteBlockHeight = tiVideoRows(11);
+  const maxQuoteBlockHeight = large ? tiVideoRows(14) : tiVideoRows(11);
 
   const candidates = [
     ...(length <= 45 ? [{ fontSize: tiVideoRows(3), lineHeight: tiVideoRows(4) }] : []),
@@ -54,7 +55,7 @@ export function TiQuoteCard(props: TiQuoteCardProps) {
     quote,
     attribution,
     accentColor = "var(--ti-alarm-red)",
-    backgroundColor = "var(--color-surface, #21201c)",
+    backgroundColor = "var(--color-surface, #111110)",
     textColor = "var(--ti-headline-color, var(--foreground-strong, #eeeeec))",
     padding = TI_VIDEO_LAYOUT.padding,
     maxWidth = QUOTE_CANVAS_WIDTH - TI_VIDEO_LAYOUT.padding * 2,
@@ -65,12 +66,12 @@ export function TiQuoteCard(props: TiQuoteCardProps) {
 
   const innerPadding = tiVideoRows(2);
   const textGutter = tiVideoRows(1);
-  const accentWidth = tiVideoRows(0.5);
-  const maxTextWidth = maxWidth - innerPadding * 2 - textGutter - accentWidth;
+  const accentWidth = tiVideoRows(2);
+  const maxTextWidth = maxWidth - innerPadding - textGutter - accentWidth;
 
   const typography = useMemo(
-    () => resolveTiQuoteTypography(String(quote ?? ""), maxTextWidth),
-    [maxTextWidth, quote],
+    () => resolveTiQuoteTypography(String(quote ?? ""), maxTextWidth, !attribution),
+    [maxTextWidth, quote, attribution],
   );
 
   const resolvedQuoteSize = quoteSize ?? typography.fontSize;
@@ -93,11 +94,11 @@ export function TiQuoteCard(props: TiQuoteCardProps) {
       <div
         style={{
           background: backgroundColor,
-          borderRadius: tiVideoRows(1),
+          borderRadius: 0,
           boxSizing: "border-box",
           color: textColor,
           maxWidth,
-          padding: innerPadding,
+          padding: `${innerPadding}px ${innerPadding}px ${innerPadding}px 0`,
           position: "relative",
           width: "100%",
         }}
@@ -105,11 +106,10 @@ export function TiQuoteCard(props: TiQuoteCardProps) {
         <div
           style={{
             background: accentColor,
-            borderRadius: accentWidth,
-            bottom: innerPadding,
+            bottom: 0,
             left: 0,
             position: "absolute",
-            top: innerPadding,
+            top: 0,
             width: accentWidth,
           }}
         />
@@ -122,6 +122,7 @@ export function TiQuoteCard(props: TiQuoteCardProps) {
             letterSpacing: -0.02,
             lineHeight: `${resolvedQuoteLineHeight}px`,
             paddingLeft: textGutter + accentWidth,
+            whiteSpace: "pre-wrap",
           }}
         >
           “{quote}”

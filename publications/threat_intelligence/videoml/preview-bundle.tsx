@@ -19,27 +19,34 @@ registerComponent("TiQuoteCard", TiQuoteCard);
 const TI_VIDEO_RHYTHM_VARS = tiVideoRhythmCssVars();
 
 const TI_SCENE_STYLES_DARK = {
-  background: "#191918",
+  background: "#111110",
   color: "#eeeeec",
   vars: {
     ...TI_VIDEO_RHYTHM_VARS,
-    "--color-bg": "#191918",
-    "--color-bg-subtle": "#111110",
-    "--color-surface": "#21201c",
-    "--color-surface-strong": "#2a2926",
+    "--color-bg": "#111110",
+    "--color-bg-subtle": "#191918",
+    "--color-surface": "#111110",
+    "--color-surface-strong": "#222221",
     "--color-text": "#eeeeec",
     "--color-text-muted": "#b5b3ad",
     "--color-primary": "#eeeeec",
     "--color-accent": "#e54d2e",
-    "--color-secondary": "#7f7e77",
+    "--color-secondary": "#222221",
     "--ti-section-rule": "#e54d2e",
     "--ti-alarm-red": "#e54d2e",
     "--ti-headline-color": "#eeeeec",
     "--ti-body-color": "#b5b3ad",
     "--ti-cta-red": "#e54d2e",
-    "--background": "#191918",
+    "--ti-cta-background": "#853a2d",
+    "--ti-cta-foreground": "#eeeeec",
+    "--ti-inverted-alert": "#ff977d",
+    "--background": "#111110",
     "--foreground": "#b5b3ad",
     "--foreground-strong": "#eeeeec",
+    "--foreground-muted": "#7c7b74",
+    "--extra-muted-foreground": "#3b3a37",
+    "--faintly-muted": "#222221",
+    "--ti-hrule-foreground": "#3b3a37",
     "--ti-pictogram-edge": "#363a3f",
     "--ti-pictogram-node": "#2e3135",
     "--ti-pictogram-muted": "#43484e",
@@ -48,7 +55,7 @@ const TI_SCENE_STYLES_DARK = {
     "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",
     "--grass-8": "#30a46c",
     "--amber-8": "#f59e0b",
-    "--sand-8": "#9090a0",
+    "--sand-8": "#62605b",
     "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
@@ -56,36 +63,43 @@ const TI_SCENE_STYLES_DARK = {
 };
 
 const TI_SCENE_STYLES_LIGHT = {
-  background: "#f9f9f8",
-  color: "#44403c",
+  background: "#fdfdfc",
+  color: "#21201c",
   vars: {
     ...TI_VIDEO_RHYTHM_VARS,
-    "--color-bg": "#f9f9f8",
-    "--color-bg-subtle": "#fcfcfc",
-    "--color-surface": "#fcfcfc",
-    "--color-surface-strong": "#f2f2f0",
-    "--color-text": "#44403c",
-    "--color-text-muted": "#696964",
-    "--color-primary": "#44403c",
-    "--color-accent": "#c54028",
-    "--color-secondary": "#8a8a83",
-    "--ti-section-rule": "#c54028",
-    "--ti-alarm-red": "#c54028",
-    "--ti-headline-color": "#44403c",
-    "--ti-body-color": "#696964",
-    "--ti-cta-red": "#c54028",
-    "--background": "#f9f9f8",
-    "--foreground": "#696964",
-    "--foreground-strong": "#44403c",
-    "--ti-pictogram-edge": "#889096",
-    "--ti-pictogram-node": "#889096",
-    "--ti-pictogram-muted": "#a8adb4",
-    "--ti-pictogram-throb": "#d9542e",
-    "--ti-pictogram-compromised": "#c54028",
+    "--color-bg": "#fdfdfc",
+    "--color-bg-subtle": "#f9f9f8",
+    "--color-surface": "#fdfdfc",
+    "--color-surface-strong": "#f1f0ef",
+    "--color-text": "#21201c",
+    "--color-text-muted": "#63635e",
+    "--color-primary": "#21201c",
+    "--color-accent": "#e54d2e",
+    "--color-secondary": "#f1f0ef",
+    "--ti-section-rule": "#e54d2e",
+    "--ti-alarm-red": "#e54d2e",
+    "--ti-headline-color": "#21201c",
+    "--ti-body-color": "#63635e",
+    "--ti-cta-red": "#e54d2e",
+    "--ti-cta-background": "#e54d2e",
+    "--ti-cta-foreground": "#fdfdfc",
+    "--ti-inverted-alert": "#e54d2e",
+    "--background": "#fdfdfc",
+    "--foreground": "#63635e",
+    "--foreground-strong": "#21201c",
+    "--foreground-muted": "#82827c",
+    "--extra-muted-foreground": "#cfceca",
+    "--faintly-muted": "#f1f0ef",
+    "--ti-hrule-foreground": "#cfceca",
+    "--ti-pictogram-edge": "#b9bbc6",
+    "--ti-pictogram-node": "#b9bbc6",
+    "--ti-pictogram-muted": "#d9d9e0",
+    "--ti-pictogram-throb": "#ec8e7b",
+    "--ti-pictogram-compromised": "#e54d2e",
     "--ti-pictogram-accent-glow": "rgba(234, 88, 12, 0.18)",
     "--grass-8": "#30a46c",
     "--amber-8": "#f59e0b",
-    "--sand-8": "#9090a0",
+    "--sand-8": "#bcbbb5",
     "--font-headline": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     "--font-subhead": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
     "--font-eyebrow": "Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif",
@@ -94,29 +108,13 @@ const TI_SCENE_STYLES_LIGHT = {
 
 const TI_BACKGROUND_PROPS_DARK = {
   variant: "solid",
-  color: "#191918",
+  color: "#111110",
 };
 
 const TI_BACKGROUND_PROPS_LIGHT = {
   variant: "solid",
-  color: "#f9f9f8",
+  color: "#fdfdfc",
 };
-
-const TI_LIGHT_PALETTE_REPLACEMENTS: Array<[string, string]> = [
-  ["rgba(251, 146, 60, 0.2)", "rgba(234, 88, 12, 0.18)"],
-  ["#191918", "#f9f9f8"],
-  ["#111110", "#fcfcfc"],
-  ["#21201c", "#fcfcfc"],
-  ["#2a2926", "#f2f2f0"],
-  ["#eeeeec", "#44403c"],
-  ["#b5b3ad", "#696964"],
-  ["#e54d2e", "#c54028"],
-  ["#7f7e77", "#8a8a83"],
-  ["#363a3f", "#889096"],
-  ["#2e3135", "#889096"],
-  ["#43484e", "#a8adb4"],
-  ["#ac4d39", "#d9542e"],
-];
 
 function propsAttr(value: unknown): string {
   const raw = JSON.stringify(value);
@@ -124,8 +122,46 @@ function propsAttr(value: unknown): string {
 }
 
 function swapTiLightPaletteTokens(xml: string): string {
+  // Context-aware fixes for legacy dark palette tokens whose hex values
+  // collide with new light palette tokens.  #21201c was the old dark
+  // --color-surface but is also the new light --color-text / --foreground-
+  // strong (sand-12 light).  A blind global replace would turn light text
+  // into the light background.  Swap only within the specific CSS variable
+  // keys where the old dark value appeared.
+  const targeted: Array<[string, string]> = [
+    ['"--color-surface":"#21201c"', '"--color-surface":"#fdfdfc"'],
+    ['"--color-surface-strong":"#2a2926"', '"--color-surface-strong":"#f1f0ef"'],
+    ['"--color-secondary":"#7f7e77"', '"--color-secondary":"#f1f0ef"'],
+    ['"--sand-8":"#9090a0"', '"--sand-8":"#bcbbb5"'],
+  ];
   let updated = xml;
-  for (const [darkToken, lightToken] of TI_LIGHT_PALETTE_REPLACEMENTS) {
+  for (const [dark, light] of targeted) {
+    updated = updated.replaceAll(dark, light);
+  }
+
+  // Unambiguous dark -> light mappings (safe to replace globally).
+  const replacements: Array<[string, string]> = [
+    ["rgba(251, 146, 60, 0.2)", "rgba(234, 88, 12, 0.18)"],
+    ["#111110", "#fdfdfc"],
+    ["#191918", "#f9f9f8"],
+    ["#222221", "#f1f0ef"],
+    ["#2a2a28", "#e9e8e6"],
+    ["#2a2926", "#f1f0ef"],
+    ["#3b3a37", "#cfceca"],
+    ["#7c7b74", "#82827c"],
+    ["#b5b3ad", "#63635e"],
+    ["#eeeeec", "#21201c"],
+    ["#62605b", "#bcbbb5"],
+    ["#7f7e77", "#f1f0ef"],
+    ["#853a2d", "#e54d2e"],
+    ["#ff977d", "#e54d2e"],
+    ["#363a3f", "#b9bbc6"],
+    ["#2e3135", "#b9bbc6"],
+    ["#43484e", "#d9d9e0"],
+    ["#ac4d39", "#ec8e7b"],
+    ["#9090a0", "#bcbbb5"],
+  ];
+  for (const [darkToken, lightToken] of replacements) {
     updated = updated.replaceAll(darkToken, lightToken);
   }
   return updated;
@@ -153,7 +189,7 @@ function rethemeDslXml(xml: string, theme: "dark" | "light"): string {
   updated = updated
     .replaceAll(darkSceneStyles, lightSceneStyles)
     .replaceAll(darkBackgroundProps, lightBackgroundProps);
-  if (updated.includes("#191918") || updated.includes("#111110") || updated.includes("#21201c")) {
+  if (updated.includes("#111110") || updated.includes("#191918") || updated.includes("#222221") || updated.includes("#2a2926")) {
     updated = swapTiLightPaletteTokens(updated);
   }
   return updated;
@@ -219,7 +255,7 @@ function TiPreviewPlayer({ script, width, height, autoPlay = false, audioSrc, rh
 
   const currentFrame = Math.floor(visualTime * fps);
   const sceneBackground = script.scenes?.[0]?.styles?.background;
-  const backgroundColor = typeof sceneBackground === "string" ? sceneBackground : "#191918";
+  const backgroundColor = typeof sceneBackground === "string" ? sceneBackground : "#111110";
   const rhythmRowHeight =
     script.scenes?.[0]?.styles?.vars?.["--ti-row-height"] ?? TI_VIDEO_RHYTHM_VARS["--ti-row-height"];
   const fittedStage = useMemo(
