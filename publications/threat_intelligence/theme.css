@@ -134,8 +134,9 @@
   --paper-page-background: var(--paper-background);
   --paper-page-background-size: 100% 100%;
   --paper-drop-shadow: 0 18px 44px -34px rgb(15 23 42 / 0.38);
+  /* Body copy: IBM Plex Serif. Headlines/UI stay on Inter via display/ui. */
   --site-body-font:
-    var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+    var(--font-body), Georgia, "Times New Roman", serif;
   --site-display-font:
     var(--font-masthead), "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
   --site-ui-font:
@@ -253,12 +254,13 @@
   --paper-drop-shadow: 0 22px 46px -28px rgb(0 0 0 / 0.86);
 }
 
+/* Shell chrome defaults to Inter; body copy opts into --site-body-font. */
 :root[data-site-brand="threat-intelligence"] .paper-page,
 :root[data-site-brand="threat-intelligence"] .site-shell,
 :root[data-site-brand="threat-intelligence"] .presentation-page,
 :root[data-site-brand="threat-intelligence"] .article-page,
 :root[data-site-brand="threat-intelligence"] .settings-page {
-  font-family: var(--site-body-font);
+  font-family: var(--site-ui-font);
 }
 
 :root[data-site-brand="threat-intelligence"] body {
@@ -1107,6 +1109,7 @@
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__header h2 {
   color: var(--foreground);
+  font-family: var(--site-display-font);
   font-size: var(--ti-secondary-headline-font-size);
   font-weight: 900;
   letter-spacing: 0;
@@ -1122,6 +1125,7 @@
 
 :root[data-site-brand="threat-intelligence"] .presentation-page--blog .presentation-item__header span {
   color: var(--muted-foreground);
+  font-family: var(--site-display-font);
   font-size: var(--ti-deck-font-size);
   font-weight: 650;
   line-height: var(--ti-deck-line-height);

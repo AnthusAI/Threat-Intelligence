@@ -5,6 +5,7 @@ import { AmplifyClientProvider } from "../components/amplify-client-provider";
 import { PapyrusConsoleShell } from "../components/papyrus-console-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SITE_BRAND, getPresentationChoices } from "../lib/site-brand";
+import { tiBodyFont } from "../lib/ti-body-fonts";
 import "./tailwind.css";
 import "./globals.css";
 
@@ -44,7 +45,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html
       lang="en"
-      className={`light light-theme ${mastheadFont.variable}`}
+      className={`light light-theme ${mastheadFont.variable} ${tiBodyFont.variable}`}
       data-papyrus-theme={defaultTheme}
       data-site-brand={SITE_BRAND.id}
       data-default-presentation={SITE_BRAND.defaultPresentation}
@@ -52,7 +53,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       {...(SITE_BRAND.forcedPresentation ? { "data-forced-presentation": SITE_BRAND.forcedPresentation } : {})}
       suppressHydrationWarning
     >
-      <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable} ${mastheadFont.variable}`}>
+      <body className={`${playfairDisplay.variable} ${plusJakartaSans.variable} ${mastheadFont.variable} ${tiBodyFont.variable}`}>
         <Script id="papyrus-favicon-color-scheme" strategy="beforeInteractive">
           {`(() => {
   const version = "${faviconVersion}";

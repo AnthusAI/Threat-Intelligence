@@ -1,4 +1,5 @@
 import type { SiteBrand } from "../../lib/site-brand";
+import { TI_BODY_FONT_FAMILY } from "../../lib/ti-body-fonts";
 
 export const threatIntelligenceBrand: SiteBrand = {
   id: "threat-intelligence",
@@ -13,7 +14,7 @@ export const threatIntelligenceBrand: SiteBrand = {
   placeholderByline: "Anthus AI Solutions",
   defaultPresentation: "blog",
   forcedPresentation: "blog",
-  textFont: 'system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+  textFont: TI_BODY_FONT_FAMILY,
   footerTitle: "ANTHUS THREAT INTELLIGENCE",
   footerSubtitleOverride: "",
   mastheadWordSplit: true,
