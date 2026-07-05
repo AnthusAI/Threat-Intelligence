@@ -10,9 +10,9 @@ export const threatIntelligenceBrand: SiteBrand = {
   mastheadEyebrow: "Anthus AI Solutions",
   mastheadTagline: "Practical advice for staying secure as the threat landscape shifts.",
   mastheadTaglineLines: [
-    "Practical advice for",
-    "staying secure as the",
-    "threat landscape shifts",
+    { emphasis: "Practical advice", tail: " for" },
+    { emphasis: "staying secure", tail: " as the" },
+    { emphasis: "threat landscape", tail: " shifts" },
   ],
   backToHomeLabel: "Back to Threat Intelligence",
   articleTitleSuffix: "Threat Intelligence",

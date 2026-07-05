@@ -71,7 +71,8 @@ export function PresentationHeader({
             {taglineLines && taglineLines.length > 0
               ? taglineLines.map((line, index) => (
                   <span className="presentation-header__tagline-line" key={index}>
-                    {line}
+                    <span className="presentation-header__tagline-emphasis">{line.emphasis}</span>
+                    <span className="presentation-header__tagline-tail">{line.tail}</span>
                     {index < taglineLines.length - 1 ? " " : null}
                   </span>
                 ))

@@ -3,6 +3,11 @@ import { threatIntelligenceBrand } from "../publications/threat_intelligence/bra
 
 export type SiteBrandId = "papyrus" | "threat-intelligence";
 
+export type MastheadTaglineLine = {
+  emphasis: string;
+  tail: string;
+};
+
 export type SiteBrand = {
   id: SiteBrandId;
   appTitle: string;
@@ -11,7 +16,7 @@ export type SiteBrand = {
   mastheadSubtitle: string;
   mastheadEyebrow?: string;
   mastheadTagline?: string;
-  mastheadTaglineLines?: string[];
+  mastheadTaglineLines?: MastheadTaglineLine[];
   backToHomeLabel: string;
   articleTitleSuffix: string;
   placeholderByline: string;
