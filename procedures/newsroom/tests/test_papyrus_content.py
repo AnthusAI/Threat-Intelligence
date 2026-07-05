@@ -90,7 +90,7 @@ class PapyrusContentTests(unittest.TestCase):
         self.assertIn("attacker capability", mission["description"])
         self.assertEqual(len(mission["itemIds"]), 3)
         self.assertEqual(
-            by_key["cloud"]["description"],
+            by_key["aws"]["description"],
             "AWS exposure patterns where identity, data, keys, and logging gaps line up across accounts.",
         )
 

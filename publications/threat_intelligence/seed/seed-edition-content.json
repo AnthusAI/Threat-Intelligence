@@ -11,8 +11,8 @@
     "alt": "Edition video for Anthus Threat Intelligence",
     "caption": "The edition in video form.",
     "credit": "Anthus Threat Intelligence video",
-    "hook": "The attackers have changed. Your assumptions haven't. Start here.",
-    "durationSeconds": 373,
+    "hook": "The attackers have changed. Your assumptions haven't.",
+    "durationSeconds": 300,
     "themeVariants": {
       "light": {
         "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4"
@@ -21,169 +21,95 @@
     "scenes": [
       {
         "kind": "quote",
-        "quote": "The attackers have changed.\nYour assumptions haven't.\nStart here.",
-        "quoteSize": 60,
-        "quoteLineHeight": 84,
-        "voice": "The attackers have changed. Your assumptions haven't. Start here."
+        "quote": "The attackers have changed.\nYour assumptions haven't.",
+        "attribution": "The Balance of Power Is Shifting",
+        "voice": "The attackers have changed. Your assumptions haven't. And that gap is exposing you to more risk than you think."
       },
       {
         "kind": "slide",
-        "eyebrow": "July 4, 2026",
-        "title": "Anthus Threat Intelligence",
-        "subtitle": "How attacker capability is shifting — and what defenders should do about it.",
-        "pictogram": "the-balance-of-power-is-shifting",
-        "voice": "Who can come after you, how often, and how patiently — AI is shifting all three. This edition maps that shift and what defenders should do about it: the mission, the newsroom behind it, and practical checks across AWS, Azure, AI platforms, and personal security at home."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Mission",
+        "eyebrow": "Edition One",
         "title": "The Balance of Power Is Shifting",
-        "subtitle": "Attackers used to run out of time, skill, and patience. With AI, they don't.",
+        "subtitle": "For most of its history, serious attacks took serious effort.",
         "pictogram": "the-balance-of-power-is-shifting",
-        "voice": "First, the mission. The balance of power is shifting. Every security program rests on an assumption it rarely writes down: most attackers will give up. AI changes that bargain. Reconnaissance, phishing, profiling, and persistence get cheap and repeatable, so ordinary criminal operators can behave like far more capable teams — more viable threat actors, more targets, more patience per dollar."
+        "voice": "For as long as computers have been connected, security has been a cat-and-mouse game — and for most of that history, ordinary people and ordinary businesses had a quiet advantage. Serious attacks took serious effort. Breaking in needed skilled people, expensive tools, and patience, so the most capable attackers went after banks, governments, and giant corporations. The rest of us were protected by something unglamorous: we were not worth the trouble."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Two shifts at once",
+        "title": "The threat has spread, and deepened",
+        "subtitle": "More targets everywhere — and deeper, patient, continuous pressure on the ones who were always worth the trouble.",
+        "voice": "AI has changed that arithmetic in two ways. The tools that help the rest of us write and research now help attackers find targets, write convincing lures, and keep trying at almost no cost — so attacks that once needed a skilled team can be run by ordinary criminals, against everyone: your business, your accounts, your family's computers. And for the organizations that always were worth the trouble — deep pockets, valuable resources — the pressure has intensified too. More attempts, more patience, probes that run continuously and go deeper than before. The threat has spread, and it has also deepened."
+      },
+      {
+        "kind": "quote",
+        "quote": "Attackers used to run out of time, skill, and patience. With AI, they don't.",
+        "attribution": "The Balance of Power Is Shifting",
+        "voice": "Attackers used to run out of time, skill, and patience. With AI, they don't."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "The mission",
+        "title": "Put AI on the defender's side",
+        "subtitle": "If attackers scale with AI, defense has to learn with AI.",
+        "pictogram": "from-lessons-learned-to-defenses-checked",
+        "voice": "So what do we do? Part of the answer is old advice that suddenly matters more — and we will get to it. But part of it is new: defenders need the same advantage. If attackers use AI to scale up, defenders need AI to keep watch — reading more, remembering more, and turning what it learns into steps a person can actually take. That is the idea this publication is built on."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "The newsroom",
+        "title": "An automated newsroom, steered by experts",
+        "subtitle": "Continuous monitoring, a semantic knowledge base, and trend detection — steered by experts in AI inference and enterprise cloud security.",
+        "pictogram": "how-our-newsroom-learns",
+        "voice": "Behind these videos is an automated newsroom. Around the clock it monitors security research, incident reports, and newly disclosed vulnerabilities, building a structured, semantic knowledge base — attackers, tools, weaknesses, fixes — and using machine learning to watch how threats trend over time. The experts who steer it have spent their careers using AI to draw inferences over large, evolving bodies of knowledge like this one, and securing enterprise cloud environments for some of the largest companies in the world. They judge every word before it ships. The insights are public. This edition is the first of them."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "Where it lands first",
+        "title": "Know what you have, isolate what matters",
+        "subtitle": "Stand up secure architecture, then move fast on known vulnerabilities as they emerge.",
+        "pictogram": "audit-aws-exposure-before-attackers-do",
+        "voice": "So where does this land? Real attacks are still chains — a small weakness here, a forgotten account there, linked step by patient step — and AI automates the patience to walk them. But defense is not chasing chains after they form. It is standing up the most secure architecture you can, then moving fast on known vulnerabilities as they emerge, and isolating what you cannot afford to have reached. In Amazon's cloud, that means knowing where your sensitive data and keys live, tightening who can reach them, and treating every over-broad permission as a hole AI is increasingly likely to find."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "The most valuable thing to isolate",
+        "title": "Identity conveys power",
+        "subtitle": "Old credentials and over-general roles used to be safe because no one would bother. Now AI will.",
+        "pictogram": "audit-azure-blast-radius-before-attackers-do",
+        "voice": "The most valuable thing to isolate is identity — an account, a role, a permission. Compromise one and you do not break in; you log in. You move sideways. You can even leave a quiet way back in, so that long after the flaw is fixed, the extra door is still there. On Microsoft's cloud, that is where the pressure lands: stale guest accounts, over-powered groups, permissions granted in a hurry. The old comfort was that nobody would bother to find them. Now AI will. Map who can reach what, make administrator access expire, and remove the easy links before someone walks them for you."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "The newest identities",
+        "title": "Your AI tools are identities, too",
+        "subtitle": "Workspaces, keys, and connectors decide what your AI can reach.",
+        "pictogram": "treat-openai-accounts-like-production-infrastructure",
+        "voice": "The newest identities in your organization belong to AI itself. Workspaces, API keys, and connectors are identities with power: they decide which files, systems, and records an AI can reach, and AI access is quiet by nature. Treat them like the identities they are — owned, watched, and easy to revoke — so one compromised key never becomes a standing entrance."
+      },
+      {
+        "kind": "slide",
+        "eyebrow": "And at home",
+        "title": "Keep sensitive worlds apart",
+        "subtitle": "Isolate what you do not want reached — and never let one password join two worlds.",
+        "pictogram": "how-to-play-games-securely",
+        "voice": "The same logic runs through your home. A game account that shares a password with your email. An email account that can reset your bank. The instinct that protects you now is to keep sensitive things apart in the first place. Keep the computer that runs games, mods, and downloads — software from strangers — away from your banking and taxes, and never let one password join two worlds. Isolate what you do not want reached."
       },
       {
         "kind": "quote",
         "quote": "Controls built for casual attackers cannot be treated as boundaries anymore.",
+        "attribution": "The Balance of Power Is Shifting",
         "voice": "Controls built for casual attackers cannot be treated as boundaries anymore."
       },
       {
         "kind": "slide",
-        "eyebrow": "Mission",
-        "title": "The New Sensitive Data Estate",
-        "subtitle": "Embeddings, prompt logs, notebooks, evaluation sets, traces — value that doesn't look like a database.",
-        "pictogram": "the-new-sensitive-data-estate",
-        "voice": "The new sensitive data estate. AI work does not just consume sensitive data — it creates new forms of it: embeddings, prompt logs, notebooks, evaluation sets, traces. The derivatives can be worth as much as the source, and the estate grows through normal work. Treat artifacts by what they can reveal. The first control is knowing what now exists."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Mission",
-        "title": "From Lessons Learned to Defenses Checked",
-        "subtitle": "An incident report is a bill someone else already paid.",
-        "pictogram": "from-lessons-learned-to-defenses-checked",
-        "voice": "From lessons learned to defenses checked. An incident report is a bill someone else already paid. The editorial pattern here is fixed: identify the trend, explain the failure mode, extract the lesson, and translate it into checks a team can actually run — because the useful question is what the defender can inspect before the lesson becomes personal."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Newsroom",
-        "title": "How Our Newsroom Learns",
-        "subtitle": "Expert judgment steering. AI doing the patient watching.",
-        "pictogram": "how-our-newsroom-learns",
-        "voice": "Behind the publication: how our newsroom learns. Attackers no longer get tired, so defenders need persistence in how they learn. Seasoned experts set direction, constrained AI does the patient watching, and the newsroom keeps learning between articles — a defensive system for turning noise into checks."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Newsroom",
-        "title": "The Knowledge Base Beneath the Newsroom",
-        "subtitle": "New research inherits the actors, assets, and open questions earlier work established.",
-        "pictogram": "the-knowledge-base-beneath-the-newsroom",
-        "voice": "The knowledge base beneath the newsroom. New research does not start from a blank prompt. Accepted sources, extracted entities, and a semantic graph let each assignment inherit what earlier work established. A graph can suggest that two incidents rhyme. An editor still decides whether the rhyme means anything."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Newsroom",
-        "title": "From Signals to Practical Advice",
-        "subtitle": "Research, reporting, drafting, and review — handoffs that keep evidence auditable.",
-        "pictogram": "from-signals-to-practical-advice",
-        "voice": "From signals to practical advice. Research, reporting, drafting, and review are different jobs with different constraints. Researcher agents find, reporters frame, copywriters make it readable, and experienced security judgment decides what ships — handoffs that keep evidence and uncertainty intact."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AWS",
-        "title": "Turn AWS Findings Into an Exposure Queue",
-        "subtitle": "Four ordinary findings. One path.",
-        "pictogram": "audit-aws-exposure-before-attackers-do",
-        "voice": "On to the cloud desks. Turn AWS findings into an exposure queue. Four ordinary findings, one path: AWS defense is correlation work, and each service answers only one question. The value is joining them into a ranked queue of paths — with owners and closure — instead of separate dashboards on separate schedules."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AWS",
-        "title": "Build the AWS Findings Pipeline",
-        "subtitle": "Detection is the easy half.",
-        "pictogram": "build-the-aws-exposure-control-stack",
-        "voice": "Build the AWS findings pipeline. Detection is the easy half. Every high-risk finding class needs a routing rule, an owner, an expiring exception path, and proof of closure — coverage is not the same as operations."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AWS",
-        "title": "Find PII Risk in Your S3 Buckets",
-        "subtitle": "The risky bucket is the one where sensitive content and reachable access overlap.",
-        "pictogram": "find-pii-risk-in-s3-buckets",
-        "voice": "Find PII risk in your S3 buckets. Somewhere in the estate is a migration bucket that never got deleted. Use discovery to find likely PII, then prioritize where sensitive content and reachable access overlap — and give every risky bucket an owner."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Azure",
-        "title": "Map Azure Attack Paths Through Identity",
-        "subtitle": "In Azure, the path often starts with identity and ends at data.",
-        "pictogram": "audit-azure-blast-radius-before-attackers-do",
-        "voice": "Map Azure attack paths through identity. In Azure the path often starts with identity and ends at data. A stale guest, an over-powered group, a hurried app permission — none is an incident on its own; chained, they are a route. The output should be a path map: which identities cross boundaries, and which single control breaks the chain."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Azure",
-        "title": "Make Azure Admin Access Expire",
-        "subtitle": "Ask who can activate power, not only who currently holds it.",
-        "pictogram": "make-azure-privilege-temporary",
-        "voice": "Make Azure admin access expire. Permanent privilege turns yesterday's exception into tomorrow's compromise path. The privilege review should ask who can activate power, not only who currently holds it — powerful access should be explicit when needed, visible while active, and gone when the reason ends."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Azure",
-        "title": "Classify Azure Data Where Access Paths Reach It",
-        "subtitle": "Security work starts when classification meets identity and network reality.",
-        "pictogram": "find-sensitive-data-paths-in-azure",
-        "voice": "Classify Azure data where access paths reach it. A catalog tells you where sensitive data may live; security work starts when classification meets identity and network reality. The useful output is a list of reachable data paths to close or narrow."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AI",
-        "title": "Govern OpenAI Workspaces Like Access Boundaries",
-        "subtitle": "AI access is quiet. That is the problem.",
-        "pictogram": "treat-openai-accounts-like-production-infrastructure",
-        "voice": "The AI desk. Govern OpenAI workspaces like access boundaries. AI access is quiet — that is the problem. Workspaces, projects, keys, connectors, and files decide what AI systems can reach. The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AI",
-        "title": "Scope OpenAI Keys to One Job",
-        "subtitle": "One workload, one owner, one clean revocation path.",
-        "pictogram": "shrink-openai-api-key-blast-radius",
-        "voice": "Scope OpenAI keys to one job. The prototype key that quietly became load-bearing cannot be rotated without breaking something nobody can name in advance. A key should have one job, one owner, and one clean revocation path."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "AI",
-        "title": "Control ChatGPT Connectors and Actions",
-        "subtitle": "A connector turns looking into asking.",
-        "pictogram": "control-chatgpt-workspace-access-and-connected-data",
-        "voice": "Control ChatGPT connectors and actions. A connector turns looking into asking: connected AI inherits the permissions of connected systems. It should inherit deliberate, reviewed, revocable access — never accidental access."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Gaming & Consumer",
-        "title": "How to Play Games Securely",
-        "subtitle": "Games, mods, and launchers are software from strangers.",
-        "pictogram": "how-to-play-games-securely",
-        "voice": "And at home: how to play games securely. Games are software from strangers. The most practical control is separation — keep gaming away from banking, work, and recovery accounts, and make experimentation cheap on a machine that can afford to lose the bet."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Gaming & Consumer",
-        "title": "Separate Game Accounts From Real Life",
-        "subtitle": "Account separation is boring because it works.",
-        "pictogram": "separate-game-accounts-from-real-life",
-        "voice": "Separate game accounts from real life. Skins and save files are what an attacker takes first; the recovery inbox, the saved card, and the reused password are why they stay. Account separation is boring because it works."
-      },
-      {
-        "kind": "slide",
-        "eyebrow": "Gaming & Consumer",
-        "title": "Treat Mods and Launchers Like Untrusted Code",
-        "subtitle": "Every mod loader is a small supply chain decision.",
-        "pictogram": "treat-mods-and-launchers-like-untrusted-code",
-        "voice": "Treat mods and launchers like untrusted code. Every mod loader is a small supply chain decision. Only install experiments inside an environment you are willing to rebuild."
+        "eyebrow": "The response",
+        "title": "Adapt, and keep up",
+        "subtitle": "Use AI to find your risks, manage vulnerabilities and access, and stay current as the game changes.",
+        "pictogram": "the-balance-of-power-is-shifting",
+        "voice": "The balance of power has shifted in a way the old assumptions cannot absorb. The response is to adapt. Use AI on your side to find your risks before attackers do, to manage vulnerabilities and especially identities and access as they emerge, and to stay current on threat intelligence instead of catching up after the fact. The cat-and-mouse game has always favored whoever learns faster. Attackers have just made a sudden, game-changing advance. Defenders have to close that gap — and the tools to do it exist. Every article in this edition ends with checks you can run right away."
       }
-    ]
+    ],
+    "postRollVoice": "For more, every article in this edition has a video version of its own. Explore them at Anthus Threat Intelligence — or read and listen on the web. Practical advice for staying secure as the threat landscape shifts."
   },
   "sectionSubtitles": {
     "Mission": "How attacker capability is shifting—and what defenders should revisit before the next incident.",

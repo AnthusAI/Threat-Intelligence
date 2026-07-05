@@ -179,13 +179,33 @@ Writing rules for scenes:
 6. **In tandem:** article body edits and scene edits ship together. A body change that makes a
    scene stale is a bug in the change.
 
-**Edition overview scenes** (long-format, all 18 articles, currently ~875 words ≈ 6 min):
-hook quote (edition `video.hook`) → edition thesis slide → section-by-section segments. **Lead
-articles** get a pictogram slide (~55–70 spoken words, core argument) and, where one earns it, a
-quote scene; **non-leads** get one slide each (~30–55 words: headline + central move + sharpest
-check), with the section carried by the `eyebrow` field — no spoken section interstitials. Brief
-spoken transitions at desk boundaries ("On to the cloud desks…") keep it a narrated whole rather
-than a slideshow.
+**Edition overview scenes** — the overview is a **standalone introductory episode**, not a table
+of contents. Imagine the viewer found it on YouTube under the edition's lead headline: it must
+earn attention on its own, then sell the publication. Do NOT write one segment per article — that
+produces a salad of summaries. Structure (inverse pyramid, ~650–750 spoken words ≈ 5 min):
+
+1. **Cold-open quote** (also the poster): the edition hook line. No branding.
+2. **Universal stakes**, written for an interested non-specialist ("explain it to an interested
+   80-year-old"): why the shift affects everyone — not just corporate threat-intel desks or
+   governments. Plain words, no product names, no jargon.
+3. **The turn**: what changed (AI removes the attacker's old limits), landed with a strong quote.
+4. **The mission (why)**: defenders need AI on their side to keep up.
+5. **The newsroom (how)**: continuous monitoring, structured semantic knowledge base, ML trend
+   detection, expert judgment, insights made public — one scene, accessible register.
+6. **Practical beats, grouped by audience, not by article** (cloud → identity → AI platforms →
+   home): each lands one practical move. Never dive into technical detail here — the article
+   videos carry the depth. Reuse the lead pictograms. Critically, **thread the edition's core
+   motif through every beat** (edition one: attacks are chains, AI automates the patience to walk
+   them, and identity is the most valuable link) — the beats are one story landing in different
+   places, not a moral per platform.
+7. **Thesis close**: back to the opening idea; the response is checks, not panic.
+8. **Name embargo**: the publication name is spoken **exactly once**, in the post-roll CTA (via
+   `video.postRollVoice`), pointing to the per-article video versions and the website, ending on
+   the tagline over the name+tagline end screen. `grep Anthus` across the overview scenes must
+   return nothing.
+
+**`video.postRollVoice`** (article or edition `video` block): overrides the spoken line of the
+pipeline-appended post-roll. The end screen never varies; only the narration over it may.
 
 ### Scene order (legacy fallback — articles without `video.scenes`)
 

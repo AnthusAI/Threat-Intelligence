@@ -580,17 +580,27 @@ def authored_scene_xml(
     return scene_renderer(scene_id, str(scene.get("title") or f"Scene {index}"), layer, cue)
 
 
-def post_roll_scene(slide_date: str, scene_renderer) -> str:
+def post_roll_scene(slide_date: str, scene_renderer, voice_text: str | None = None) -> str:
     """The standardized branding block. Appended by the pipeline to every
-    scenes-driven video; never authored per-video."""
+    scenes-driven video; never authored per-video. The end screen never varies;
+    the spoken line over it may be overridden via the seed `video.postRollVoice`
+    when a video's narrative needs a custom closing CTA."""
+    resolved_voice = (voice_text or "").strip() or closing_cta_voice(slide_date)
     return scene_renderer(
         "post-roll",
         "Post-roll",
         closing_cta_layer(slide_date=slide_date),
         f"""<cue id="post-roll-cue">
-      <voice>{escape(closing_cta_voice(slide_date))}</voice>
+      <voice>{escape(resolved_voice)}</voice>
     </cue>""",
     )
+
+
+def post_roll_voice_override(video_meta: Any) -> str | None:
+    if not isinstance(video_meta, dict):
+        return None
+    override = str(video_meta.get("postRollVoice") or "").strip()
+    return override or None
 
 
 def build_babulus_xml(
@@ -623,7 +633,7 @@ def build_babulus_xml(
             authored_scene_xml(scene, index + 1, scene_renderer=_scene)
             for index, scene in enumerate(authored)
         ]
-        scene_blocks.append(post_roll_scene(slide_date, _scene))
+        scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(article.get("video"))))
         body = "\n\n".join(scene_blocks)
         return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
   <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
@@ -757,7 +767,7 @@ def build_edition_overview_xml(
             )
             for index, scene in enumerate(authored)
         ]
-        scene_blocks.append(post_roll_scene(slide_date, _scene))
+        scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(edition.get("video"))))
         body = "\n\n".join(scene_blocks)
         return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
   <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />

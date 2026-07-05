@@ -28,6 +28,7 @@ export function PresentationHeader({
   const subtitle = SITE_BRAND.mastheadSource === "brand" ? SITE_BRAND.mastheadSubtitle : description;
   const eyebrow = SITE_BRAND.mastheadEyebrow ?? null;
   const tagline = SITE_BRAND.mastheadTagline ?? null;
+  const taglineLines = SITE_BRAND.mastheadTaglineLines ?? null;
   const displayDate = editionDate
     ? SITE_BRAND.mastheadDateFormat === "formatted"
       ? formatMastheadDate(editionDate)
@@ -65,7 +66,19 @@ export function PresentationHeader({
             {displayDate ? <p className="presentation-header__date">{displayDate}</p> : null}
           </div>
         </div>
-        {tagline ? <span className="presentation-header__tagline">{tagline}</span> : null}
+        {tagline ? (
+          <span className="presentation-header__tagline">
+            {taglineLines && taglineLines.length > 0
+              ? taglineLines.map((line, index) => (
+                  <span className="presentation-header__tagline-line" key={index}>
+                    <span className="presentation-header__tagline-emphasis">{line.emphasis}</span>
+                    <span className="presentation-header__tagline-tail">{line.tail}</span>
+                    {index < taglineLines.length - 1 ? " " : null}
+                  </span>
+                ))
+              : tagline}
+          </span>
+        ) : null}
       </header>
       {sections && sections.length > 0 ? (
         <nav className="presentation-section-nav" aria-label="Edition sections">
