@@ -111,6 +111,28 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertNotIn("spotlight-1", xml)
         self.assertNotIn('id="hook"', xml)
 
+    def test_post_roll_voice_override_replaces_spoken_line_only(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import (
+            build_edition_overview_xml,
+            closing_cta_voice,
+            load_ti_seed_payload,
+        )
+
+        payload = load_ti_seed_payload()
+        payload["video"] = dict(payload.get("video") or {})
+        payload["video"]["scenes"] = [
+            {"kind": "quote", "quote": "Edition scene quote.", "voice": "Edition scene voice."},
+        ]
+        payload["video"]["postRollVoice"] = "Custom closing line naming the publication once."
+        xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn("Custom closing line naming the publication once.", xml)
+        self.assertNotIn(escape(closing_cta_voice("July 4, 2026")), xml)
+        self.assertIn("THREAT INTELLIGENCE", xml)  # end screen unchanged
+
+        payload["video"].pop("postRollVoice")
+        fallback_xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn(escape(closing_cta_voice("July 4, 2026")), fallback_xml)
+
     def test_build_edition_overview_xml_uses_edition_hook_with_fallback(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
 

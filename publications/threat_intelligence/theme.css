@@ -551,14 +551,14 @@
 }
 
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell) .presentation-header__tagline-emphasis {
-  color: var(--foreground);
+  color: var(--muted-foreground);
   display: inline;
   font-family: var(--site-display-font);
   font-style: normal;
 }
 
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell) .presentation-header__tagline-tail {
-  color: var(--muted-foreground);
+  color: var(--extra-muted-foreground);
   display: inline;
   font-family: var(--site-display-font);
   font-style: normal;
