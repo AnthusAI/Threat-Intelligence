@@ -47,6 +47,7 @@
   --secondary-foreground: var(--sand-11);
   --muted: var(--sand-3);
   --muted-foreground: var(--sand-11);
+  --more-muted-foreground: var(--sand-8);
   --extra-muted-foreground: var(--sand-7);
   --faintly-muted: var(--sand-3);
   --accent: var(--sand-4);
@@ -163,6 +164,7 @@
     --secondary-foreground: var(--sand-11);
     --muted: var(--sand-3);
     --muted-foreground: var(--sand-11);
+    --more-muted-foreground: var(--sand-8);
     --extra-muted-foreground: var(--sand-6);
     --faintly-muted: var(--sand-3);
     --accent: var(--sand-4);
@@ -184,8 +186,8 @@
     --ti-pictogram-compromised: var(--ti-alarm-red);
     --ti-pictogram-compromised-stroke: var(--sand-2);
     --ti-pictogram-accent-glow: rgb(251 146 60 / 0.2);
-    --ti-cta-background: var(--tomato-7);
-    --ti-cta-background-hover: var(--tomato-6);
+    --ti-cta-background: var(--ti-alarm-red);
+    --ti-cta-background-hover: var(--tomato-10);
     --ti-cta-foreground: var(--sand-12);
     --ti-neutral-button-background: var(--sand-3);
     --ti-panel-surface: var(--sand-1);
@@ -224,6 +226,7 @@
   --secondary-foreground: var(--sand-11);
   --muted: var(--sand-3);
   --muted-foreground: var(--sand-11);
+  --more-muted-foreground: var(--sand-8);
   --extra-muted-foreground: var(--sand-6);
   --faintly-muted: var(--sand-3);
   --accent: var(--sand-4);
@@ -245,8 +248,8 @@
   --ti-pictogram-compromised: var(--ti-alarm-red);
   --ti-pictogram-compromised-stroke: var(--sand-2);
   --ti-pictogram-accent-glow: rgb(251 146 60 / 0.2);
-  --ti-cta-background: var(--tomato-7);
-  --ti-cta-background-hover: var(--tomato-6);
+  --ti-cta-background: var(--ti-alarm-red);
+  --ti-cta-background-hover: var(--tomato-10);
   --ti-cta-foreground: var(--sand-12);
   --ti-neutral-button-background: var(--sand-3);
   --ti-panel-surface: var(--sand-1);
@@ -551,7 +554,7 @@
 }
 
 :root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell) .presentation-header__tagline-emphasis {
-  color: var(--muted-foreground);
+  color: var(--more-muted-foreground);
   display: inline;
   font-family: var(--site-display-font);
   font-style: normal;
