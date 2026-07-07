@@ -264,30 +264,46 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     }
     const easeOut = 1 - Math.pow(1 - slideProgress, 3);
     
-    // Shift left by exactly half its width plus half the gap so the first logo starts perfectly centered.
-    const gapOffset = 60;
+    const gapOffset = tiVideoRows(1); // 24px default gap
     const initialTranslateX = (Number(pictogramSize) + gapOffset) / 2;
 
     logo = (
       <div
         style={{
-          display: "flex",
-          gap: gapOffset,
-          transform: secondaryPictogramSlug ? `translateX(${(1 - easeOut) * initialTranslateX}px)` : undefined,
+          position: "relative",
+          width: Number(pictogramSize),
+          height: Number(pictogramSize),
+          flexShrink: 0,
         }}
       >
-        <ThreatIntelligencePictogramVideo
-          alt={typeof title === "string" ? title : String(pictogramSlug)}
-          frame={Number(frame)}
-          fps={Number(fps)}
-          size={Number(pictogramSize)}
-          slug={String(pictogramSlug)}
-        />
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            transform: secondaryPictogramSlug ? `translateX(${-(easeOut) * initialTranslateX}px)` : undefined,
+          }}
+        >
+          <ThreatIntelligencePictogramVideo
+            alt={typeof title === "string" ? title : String(pictogramSlug)}
+            frame={Number(frame)}
+            fps={Number(fps)}
+            size={Number(pictogramSize)}
+            slug={String(pictogramSlug)}
+          />
+        </div>
         {secondaryPictogramSlug ? (
           <div
             style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
               opacity: easeOut,
-              transform: `translateX(${(1 - easeOut) * 100}px)`,
+              transform: `translateX(${easeOut * initialTranslateX + (1 - easeOut) * (initialTranslateX + 100)}px)`,
             }}
           >
             <ThreatIntelligencePictogramVideo
