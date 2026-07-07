@@ -972,8 +972,7 @@ function FindingsPipelinePictogram({ alt, palette, timing }: RegisteredPictogram
         {/* Owner takes the first item to closure */}
         <g style={closeStyle}>
           <Line d={arrowPath(238, 233, 262, 233, 8)} palette={palette} tone="accent" width={5} />
-          <circle cx={282} cy={226} fill="none" r={11} stroke={stackPalette.edge} strokeWidth={5} />
-          <path d="M 268 254 C 268 242, 296 242, 296 254" fill="none" stroke={stackPalette.edge} strokeLinecap="round" strokeWidth={5} />
+          <Actor palette={palette} x={282} y={235} scale={1.8} state="user" />
           <Line d="M 276 226 L 281 231 L 289 220" palette={palette} tone="accent" width={4} />
         </g>
       </g>
@@ -1178,8 +1177,7 @@ function AzureDataPathsPictogram({ alt, palette, timing }: RegisteredPictogramPr
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
         {/* Identity */}
-        <circle cx={62} cy={120} fill={palette.frame} r={20} stroke={pathPalette.edge} strokeWidth={6} />
-        <path d="M 40 168 C 40 146, 84 146, 84 168" fill="none" stroke={pathPalette.edge} strokeLinecap="round" strokeWidth={6} />
+        <Actor palette={palette} x={62} y={144} scale={0.9} state="user" />
         {/* Gate posts along the route */}
         {[136, 196].map((x) => (
           <g key={x}>
