@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import React, { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { PICTOGRAM_CYCLE_MS, PICTOGRAM_EDGE_WIDTH, PICTOGRAM_NODE_RADIUS } from "./registry";
 
 export type PictogramPalette = {
@@ -312,4 +312,127 @@ function resolveNodeTone(palette: PictogramPalette, tone: "node" | "muted" | "ac
     default:
       return palette.node;
   }
+}
+
+export function Actor({
+  palette,
+  x,
+  y,
+  scale = 1,
+  colorAnimation,
+  hatAnimation,
+  baseColor,
+  state = "user",
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  colorAnimation?: string;
+  hatAnimation?: string;
+  baseColor?: string;
+  state?: "user" | "threat";
+}) {
+  const isThreat = state === "threat";
+  
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      <g style={{ color: baseColor || (isThreat ? palette.warning : palette.muted), animation: colorAnimation }}>
+        <circle cx={0} cy={-4} r={6} fill="currentColor" />
+        <path d="M -11 11 C -11 3, 11 3, 11 11" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" />
+      </g>
+      
+      <g style={{ 
+        color: palette.warning, 
+        opacity: isThreat ? 1 : 0, 
+        animation: hatAnimation 
+      }}>
+        <path d="M -6 -10 L -4 -18 L 4 -18 L 6 -10 Z" fill="currentColor" strokeLinejoin="round" />
+        <path d="M -11 -10 L 11 -10" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+      </g>
+    </g>
+  );
+}
+
+export function RiskGlyph({
+  palette,
+  x,
+  y,
+  scale = 1,
+  color,
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  color?: string;
+}) {
+  const fillColor = color || palette.warning;
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      <path 
+        d="M 0 -14 L 14 0 L 0 14 L -14 0 Z" 
+        fill={fillColor} 
+      />
+      <path 
+        d="M 0 -6 V 3 M 0 7 V 9" 
+        stroke={palette.frame} 
+        strokeWidth={3.5} 
+        strokeLinecap="round" 
+        fill="none"
+      />
+    </g>
+  );
+}
+
+export function PadlockGlyph({
+  palette,
+  x,
+  y,
+  scale = 1,
+  color,
+  state = "locked",
+  shackleAnimation,
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  color?: string;
+  state?: "locked" | "unlocked";
+  shackleAnimation?: string;
+}) {
+  const fillColor = color || palette.node;
+  const isUnlocked = state === "unlocked";
+  
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      <g style={{ 
+        animation: shackleAnimation, 
+        transform: isUnlocked ? "translateY(-6px)" : undefined,
+        transformOrigin: "center"
+      }}>
+        <path 
+          d="M -5 6 V -7 C -5 -14, 5 -14, 5 -7 V -1" 
+          fill="none" 
+          stroke={palette.edge} 
+          strokeWidth={4.5} 
+          strokeLinecap="round" 
+        />
+      </g>
+      <rect 
+        x={-11} 
+        y={0} 
+        width={22} 
+        height={16} 
+        rx={3} 
+        fill={fillColor} 
+        stroke={palette.edge} 
+        strokeWidth={4} 
+      />
+      {/* Keyhole */}
+      <circle cx={0} cy={6} r={2.5} fill={palette.frame} />
+      <path d="M 0 6 V 11" stroke={palette.frame} strokeWidth={2.5} strokeLinecap="round" />
+    </g>
+  );
 }

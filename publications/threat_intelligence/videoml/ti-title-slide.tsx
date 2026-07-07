@@ -27,6 +27,8 @@ export type TiTitleSlideProps = Record<string, unknown> & {
   columnGap?: number;
   titleLineHeight?: number;
   subtitleLineHeight?: number;
+  secondaryPictogramSlug?: string;
+  secondaryPictogramDelaySec?: number;
 };
 
 const fontHeadline = "var(--font-headline, Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif)";
@@ -209,6 +211,8 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     columnGap = TI_VIDEO_LAYOUT.columnGap,
     titleLineHeight = TI_VIDEO_LAYOUT.titleLineHeight,
     subtitleLineHeight = TI_VIDEO_LAYOUT.subtitleLineHeight,
+    secondaryPictogramSlug,
+    secondaryPictogramDelaySec,
   } = props;
 
   const resolvedTitleColor = titleColor || "var(--ti-headline-color, var(--foreground-strong, #eeeeec))";
@@ -246,15 +250,58 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     </h1>
   );
 
-  const logo = pictogramSlug ? (
-    <ThreatIntelligencePictogramVideo
-      alt={typeof title === "string" ? title : String(pictogramSlug)}
-      frame={Number(frame)}
-      fps={Number(fps)}
-      size={Number(pictogramSize)}
-      slug={String(pictogramSlug)}
-    />
-  ) : null;
+  let logo: React.ReactNode = null;
+  if (pictogramSlug) {
+    let slideProgress = 1;
+    if (secondaryPictogramSlug && secondaryPictogramDelaySec != null) {
+      const delayFrames = Number(secondaryPictogramDelaySec) * Number(fps);
+      const slideDurationFrames = Number(fps) * 0.8;
+      if (Number(frame) < delayFrames) {
+        slideProgress = 0;
+      } else {
+        slideProgress = Math.min(1, (Number(frame) - delayFrames) / slideDurationFrames);
+      }
+    }
+    const easeOut = 1 - Math.pow(1 - slideProgress, 3);
+    
+    // Shift left by exactly half its width plus half the gap so the first logo starts perfectly centered.
+    const gapOffset = 60;
+    const initialTranslateX = (Number(pictogramSize) + gapOffset) / 2;
+
+    logo = (
+      <div
+        style={{
+          display: "flex",
+          gap: gapOffset,
+          transform: secondaryPictogramSlug ? `translateX(${(1 - easeOut) * initialTranslateX}px)` : undefined,
+        }}
+      >
+        <ThreatIntelligencePictogramVideo
+          alt={typeof title === "string" ? title : String(pictogramSlug)}
+          frame={Number(frame)}
+          fps={Number(fps)}
+          size={Number(pictogramSize)}
+          slug={String(pictogramSlug)}
+        />
+        {secondaryPictogramSlug ? (
+          <div
+            style={{
+              opacity: easeOut,
+              transform: `translateX(${(1 - easeOut) * 100}px)`,
+            }}
+          >
+            <ThreatIntelligencePictogramVideo
+              alt={typeof title === "string" ? title : String(secondaryPictogramSlug)}
+              frame={Number(frame)}
+              fps={Number(fps)}
+              size={Number(pictogramSize)}
+              slug={String(secondaryPictogramSlug)}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   const eyebrowNode =
     eyebrow && eyebrowRule ? (

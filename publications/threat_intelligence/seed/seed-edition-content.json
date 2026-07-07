@@ -142,6 +142,28 @@
           "wrapsText": true
         }
       },
+      "assets": [
+        {
+          "id": "scale-up-asset",
+          "type": "image",
+          "src": "/seed-art/threat-intelligence/pictograms/threat-actors-scaling-up",
+          "alt": "Threat actors scaling up",
+          "credit": "Anthus Threat Intelligence diagram",
+          "roles": [
+            "continuationInset"
+          ]
+        },
+        {
+          "id": "scale-out-asset",
+          "type": "image",
+          "src": "/seed-art/threat-intelligence/pictograms/threat-actors-scaling-out",
+          "alt": "Threat actors scaling out",
+          "credit": "Anthus Threat Intelligence diagram",
+          "roles": [
+            "continuationInset"
+          ]
+        }
+      ],
       "video": {
         "src": "/seed-art/threat-intelligence/videos/the-balance-of-power-is-shifting.mp4",
         "alt": "Video edition of The Balance of Power Is Shifting",
@@ -191,7 +213,9 @@
             "eyebrow": "Capability diffusion",
             "title": "More viable threat actors",
             "subtitle": "A weakness that once demanded rare expertise may now demand only a decent toolchain and persistence.",
-            "pictogram": "the-balance-of-power-is-shifting",
+            "pictogram": "threat-actors-scaling-up",
+            "secondaryPictogram": "threat-actors-scaling-out",
+            "secondaryPictogramDelaySec": 15.5,
             "voice": "That bargain used to be affordable, because the strongest adversaries were rare and had better things to do. The calculation changes when ordinary criminal operators can rent, prompt, buy, or compose enough automation to behave like a far more capable team. Not every attacker becomes elite. But the number of viable threat actors goes up, dramatically — and the ones who already have financing get more out of every dollar."
           },
           {
@@ -917,7 +941,7 @@
         "alt": "Video edition of Govern OpenAI Workspaces Like Access Boundaries",
         "caption": "The article in video form.",
         "credit": "Anthus Threat Intelligence video",
-        "durationSeconds": 153,
+        "durationSeconds": 170,
         "themeVariants": {
           "light": {
             "src": "/seed-art/threat-intelligence/videos/treat-openai-accounts-like-production-infrastructure-light.mp4"
@@ -927,63 +951,66 @@
           {
             "kind": "quote",
             "quote": "AI access is quiet. That is the problem.",
+            "attribution": "AI",
             "voice": "AI access is quiet. That is the problem."
           },
           {
             "kind": "slide",
             "eyebrow": "AI",
             "title": "Govern OpenAI Workspaces Like Access Boundaries",
-            "subtitle": "Workspaces, projects, keys, connectors, and files decide who can use AI systems and what they can reach.",
+            "subtitle": "Workspaces, projects, keys, connectors, and files decide what business data an AI can reach.",
             "pictogram": "treat-openai-accounts-like-production-infrastructure",
             "voice": "Govern OpenAI workspaces like access boundaries. Workspaces, projects, keys, connectors, and files decide who can use AI systems and what business data they can reach."
           },
           {
             "kind": "slide",
-            "eyebrow": "The engineer who left",
+            "eyebrow": "The newest identities",
+            "title": "Your AI tools are identities, too",
+            "subtitle": "Workspaces, keys, and connectors are identities with power — and their access is quiet.",
+            "voice": "Think of it this way: the newest identities in your organization belong to AI itself. Workspaces, API keys, and connectors are identities with power — they decide which files, systems, and records an AI can reach. And AI access is quiet by nature, so nobody notices the boundary until it is crossed."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "A quiet example",
             "title": "The invite that survived offboarding",
             "subtitle": "Laptop collected. SSO disabled. Workspace membership and connector: still live.",
             "voice": "An engineer leaves the company. The laptop is collected and the SSO account disabled — but the OpenAI workspace membership, added by manual invite a year earlier, survives all of it. So does the connector they authorized. Nobody watches that boundary, because nobody decided it was one."
           },
           {
             "kind": "slide",
-            "eyebrow": "The real boundary",
-            "title": "Not just prompt hygiene",
-            "subtitle": "Accounts, projects, keys, apps, files, connectors — plus the roles and retention settings around them.",
-            "voice": "OpenAI security is not just prompt hygiene. The AI boundary is made of accounts, projects, keys, apps, files, and connectors. This is a SaaS control plane, and the question is not what infrastructure can be reached — it is who can use AI systems, which business data they can connect, and which actions those systems can take."
-          },
-          {
-            "kind": "slide",
-            "eyebrow": "Identity first",
-            "title": "Membership should follow employment",
-            "subtitle": "Intentional owners and admins · SSO and SCIM · strong protection for anyone who can administer.",
-            "voice": "Start with identity. Workspace owners and admins should be intentional, and membership should follow employment and group lifecycle. SSO and SCIM matter because informal lifecycle does not scale: when people join and leave through manual invitations, stale accounts and accidental admins become normal."
-          },
-          {
-            "kind": "slide",
-            "eyebrow": "Projects and connectors",
-            "title": "Separation on both sides",
-            "subtitle": "Production, development, and client work apart · connected AI inherits source-system hygiene.",
-            "voice": "Project structure matters on the API side: production, development, experimentation, and client work should not share the same keys, service accounts, budgets, or access assumptions. And connectors move the data boundary — a workspace that can reach drives, repositories, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface the mess."
+            "eyebrow": "The response",
+            "title": "Treat it like the boundary it is",
+            "subtitle": "Intentional owners · SSO and SCIM · separate projects · governed connectors.",
+            "pictogram": "treat-openai-accounts-like-production-infrastructure",
+            "voice": "So treat it like the boundary it is. Make workspace owners and admins intentional, and drive membership through SSO and SCIM so informal invites stop producing stale accounts. Separate production, development, and client work into distinct projects and keys. And govern connectors, because a workspace that can reach drives, repositories, or internal knowledge inherits the access hygiene of all of them — if source permissions are messy, connected AI will surface the mess."
           },
           {
             "kind": "quote",
             "quote": "Prompt security does not matter much if workspace access is unmanaged.",
+            "attribution": "AI",
             "voice": "Prompt security does not matter much if workspace access is unmanaged."
+          },
+          {
+            "kind": "slide",
+            "eyebrow": "Because it is quiet",
+            "title": "Make the audit routine",
+            "subtitle": "Admin events, key creation, app and connector changes, usage, retention.",
+            "voice": "Because AI access is quiet, the audit has to be routine. Review admin events, key creation, app and connector changes, unusual usage, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing."
           },
           {
             "kind": "slide",
             "eyebrow": "What to check now",
             "title": "The review list",
             "subtitle": "Owners and admin roles · SSO and SCIM · project membership · API keys · app approvals · connector scopes · audit logs · retention.",
-            "voice": "AI access is quiet, so make the audit routine. Check now: workspace owners and admin roles, SSO and SCIM, MFA adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing."
+            "voice": "What to check now: workspace owners and admin roles, SSO and SCIM, MFA adoption, project membership, service accounts and API keys, app approvals and connector scopes, uploaded knowledge, audit logs, and retention settings."
           },
           {
             "kind": "slide",
             "eyebrow": "The goal",
             "title": "Make one compromise boring",
-            "subtitle": "Bounded, visible, revocable — never quietly organization-wide.",
+            "subtitle": "Bounded, visible, revocable — never a standing entrance.",
             "pictogram": "treat-openai-accounts-like-production-infrastructure",
-            "voice": "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become organization-wide exposure."
+            "voice": "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become a standing entrance into the organization."
           }
         ]
       },
@@ -993,7 +1020,7 @@
       ],
       "body": [
         "An engineer leaves the company. The laptop is collected and the SSO account disabled — but the OpenAI workspace membership, added by manual invite a year earlier, survives all of it. So does the connector they authorized. Nobody watches that boundary, because nobody decided it was one.",
-        "OpenAI security is not just prompt hygiene. The AI boundary is made of accounts, projects, keys, apps, files, and connectors. The member roles and retention settings around them complete the boundary.",
+        "OpenAI security is not just prompt hygiene. The newest identities in your organization belong to AI itself: workspaces, projects, keys, apps, files, and connectors are identities with power, and the member roles and retention settings around them complete the boundary.",
         "That makes this a different kind of review than cloud exposure work. It is a SaaS and developer-platform control plane. The question is not what infrastructure can be reached, but who can use AI systems, which business data they can connect, and which actions those systems can take. Prompt security does not matter much if workspace access is unmanaged.",
         "Start with identity. Workspace owners and admins should be intentional. Membership should follow employment and group lifecycle. Strong account protection is a requirement for anyone who can administer users, apps, projects, keys, or data.",
         "SSO and SCIM matter because informal lifecycle does not scale. If people join and leave through manual invitations, stale accounts and accidental admins become normal. Managed lifecycle keeps the workspace aligned with the real organization.",
@@ -1001,7 +1028,7 @@
         "Connectors and apps move the data boundary. A workspace that can reach drives, repositories, tickets, or internal knowledge inherits the access hygiene of those systems. If source permissions are messy, connected AI will surface the mess.",
         "AI access is quiet. That is the problem. Review admin events, key creation, app and connector changes, unusual usage, and retention settings. The security team should know not only that AI is being used, but which boundary it is crossing.",
         "What to check now: workspace owners, admin roles, SSO and SCIM, MFA or passkey adoption, project membership, service accounts, API keys, app approvals, connector scopes, uploaded knowledge, audit logs, and retention settings.",
-        "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become organization-wide exposure."
+        "The goal is to make one compromised user, token, app, or project boring: bounded, visible, revocable, and unable to quietly become a standing entrance into the organization."
       ]
     },
     {

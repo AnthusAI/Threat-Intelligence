@@ -340,6 +340,8 @@ def ensure_videoml_browser_bundle() -> Path:
 def title_slide_layer(
     *,
     pictogram_slug: str | None = None,
+    secondary_pictogram_slug: str | None = None,
+    secondary_pictogram_delay_sec: float | None = None,
     eyebrow: str | None = None,
     masthead_eyebrow: str | None = None,
     title: str | None = None,
@@ -400,6 +402,10 @@ def title_slide_layer(
     if pictogram_slug:
         props["pictogramSlug"] = pictogram_slug
         props["pictogramSize"] = logo_size if logo_size is not None else TI_VIDEO_LAYOUT["pictogram_size"]
+        if secondary_pictogram_slug:
+            props["secondaryPictogramSlug"] = secondary_pictogram_slug
+        if secondary_pictogram_delay_sec is not None:
+            props["secondaryPictogramDelaySec"] = secondary_pictogram_delay_sec
     tag = "ti-title-slide" if (pictogram_slug or eyebrow_rule or masthead_eyebrow) else "title-slide"
     return f"""    <layer id="content" z="10">
       <{tag} props='{props_attr(props)}' />
@@ -501,6 +507,8 @@ def resolve_publish_date(publish_date: str | None = None) -> str:
 def branded_title_slide_layer(
     *,
     pictogram_slug: str | None,
+    secondary_pictogram_slug: str | None = None,
+    secondary_pictogram_delay_sec: float | None = None,
     eyebrow: str | None,
     title: str | None,
     subtitle: str | None,
@@ -511,6 +519,8 @@ def branded_title_slide_layer(
 ) -> str:
     return title_slide_layer(
         pictogram_slug=pictogram_slug,
+        secondary_pictogram_slug=secondary_pictogram_slug,
+        secondary_pictogram_delay_sec=secondary_pictogram_delay_sec,
         eyebrow=eyebrow,
         title=title,
         subtitle=subtitle,
@@ -572,6 +582,8 @@ def authored_scene_xml(
         raise ValueError(f"Authored video scene {index} has unknown kind: {kind!r}")
     layer = branded_title_slide_layer(
         pictogram_slug=str(scene.get("pictogram") or "").strip() or None,
+        secondary_pictogram_slug=str(scene.get("secondaryPictogram") or "").strip() or None,
+        secondary_pictogram_delay_sec=float(scene.get("secondaryPictogramDelaySec")) if scene.get("secondaryPictogramDelaySec") is not None else None,
         eyebrow=str(scene.get("eyebrow") or "").strip() or None,
         title=str(scene.get("title") or "").strip() or None,
         subtitle=str(scene.get("subtitle") or "").strip() or None,
