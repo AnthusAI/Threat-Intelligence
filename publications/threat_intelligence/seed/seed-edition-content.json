@@ -36,12 +36,12 @@
       {
         "kind": "slide",
         "eyebrow": "Two shifts at once",
-        "title": "The threat has spread, and deepened",
-        "subtitle": "More targets everywhere — and deeper, patient, continuous pressure on the ones who were always worth the trouble.",
-        "pictogram": "threat-actors-scaling-out",
-        "secondaryPictogram": "threat-actors-scaling-up",
-        "secondaryPictogramDelaySec": 23.5,
-        "voice": "AI has changed that arithmetic in two ways. The tools that help the rest of us write and research now help attackers find targets, write convincing lures, and keep trying at almost no cost — so attacks that once needed a skilled team can be run by ordinary criminals, against everyone: your business, your accounts, your family's computers. And for the organizations that always were worth the trouble — deep pockets, valuable resources — the pressure has intensified too. More attempts, more patience, probes that run continuously and go deeper than before. The threat has spread, and it has also deepened."
+        "title": "The threat has deepened, and spread",
+        "subtitle": "Deeper pressure on the organizations that were always worth the trouble — and more targets everywhere else.",
+        "pictogram": "threat-actors-scaling-up",
+        "secondaryPictogram": "threat-actors-scaling-out",
+        "secondaryPictogramDelaySec": 17.5,
+        "voice": "AI has changed that arithmetic in two ways. First, the threat has deepened. For the organizations that always were worth the trouble — deep pockets, valuable resources — the pressure has intensified. More attempts, more patience, probes that run continuously and go deeper than before. Second, the threat has spread. The tools that help the rest of us write and research now help attackers find targets, write convincing lures, and keep trying at almost no cost. Attacks that once needed a skilled team can now be run by ordinary criminals, against everyone: your business, your accounts, your family's computers."
       },
       {
         "kind": "quote",
