@@ -14,9 +14,11 @@ from publications.threat_intelligence.videoml.video_pipeline import (
     lead_video_articles,
     load_ti_seed_articles,
     load_ti_seed_payload,
-    probe_openai_key,
+    probe_voiceover_provider,
     render_edition_overview,
     render_video,
+    resolve_video_voiceover_provider,
+    SUPPORTED_VOICEOVER_PROVIDERS,
     THEMES,
 )
 from publications.threat_intelligence.videoml.videos_dsl import (
@@ -67,6 +69,18 @@ def _render_unit_sequential(
 
 def parse_from_article_option(value: object) -> bool:
     return parse_boolean_option(value, False, "--from-article")
+
+
+def parse_provider_option(value: object) -> str:
+    raw = normalize_string(value)
+    if raw is None:
+        return resolve_video_voiceover_provider()
+    normalized = raw.lower()
+    if normalized not in SUPPORTED_VOICEOVER_PROVIDERS:
+        raise ValueError(
+            f"--provider must be one of: {', '.join(SUPPORTED_VOICEOVER_PROVIDERS)}"
+        )
+    return normalized
 
 
 def videos_generate_dsl(flags: list[str]) -> None:
@@ -123,17 +137,18 @@ def videos_render(flags: list[str]) -> None:
     theme_option = parse_theme_option(options.get("theme"))
     themes = resolve_themes(theme_option)
     from_article = parse_from_article_option(options.get("from-article"))
+    provider = parse_provider_option(options.get("provider"))
     if edition_overview:
         probe = parse_boolean_option(options.get("probe-only"), False, "--probe-only")
         if probe:
-            print(json.dumps({"probe": probe_openai_key()}, indent=2))
+            print(json.dumps({"probe": probe_voiceover_provider(provider)}, indent=2))
             return
-        probe_openai_key()
+        probe_voiceover_provider(provider)
         rendered: list[dict[str, str]] = []
         for theme in themes:
-            output = render_edition_overview(theme=theme, from_article=from_article)
+            output = render_edition_overview(theme=theme, from_article=from_article, provider=provider)
             rendered.append({"slug": "edition-overview", "theme": theme, "output": str(output)})
-        print(json.dumps({"ok": True, "videos": rendered}, indent=2))
+        print(json.dumps({"ok": True, "provider": provider, "videos": rendered}, indent=2))
         return
 
     if not slug:
@@ -146,42 +161,43 @@ def videos_render(flags: list[str]) -> None:
 
     probe = parse_boolean_option(options.get("probe-only"), False, "--probe-only")
     if probe:
-        print(json.dumps({"probe": probe_openai_key()}, indent=2))
+        print(json.dumps({"probe": probe_voiceover_provider(provider)}, indent=2))
         return
 
-    probe_openai_key()
+    probe_voiceover_provider(provider)
     rendered: list[dict[str, str]] = []
     for theme in themes:
-        output = render_video(article, theme=theme, from_article=from_article)
+        output = render_video(article, theme=theme, from_article=from_article, provider=provider)
         rendered.append({"slug": slug, "theme": theme, "output": str(output)})
-    print(json.dumps({"ok": True, "videos": rendered}, indent=2))
+    print(json.dumps({"ok": True, "provider": provider, "videos": rendered}, indent=2))
 
 
 def videos_seed(flags: list[str]) -> None:
     options = parse_options(flags)
     probe_only = parse_boolean_option(options.get("probe-only"), False, "--probe-only")
+    provider = parse_provider_option(options.get("provider"))
     if probe_only:
-        print(json.dumps({"probe": probe_openai_key()}, indent=2))
+        print(json.dumps({"probe": probe_voiceover_provider(provider)}, indent=2))
         return
 
     theme_option = parse_theme_option(options.get("theme"))
     themes = resolve_themes(theme_option)
     jobs = parse_jobs_option(options.get("jobs"))
     from_article = parse_from_article_option(options.get("from-article"))
-    probe_openai_key()
+    probe_voiceover_provider(provider)
     payload = load_ti_seed_payload()
 
     # Build render units: (label, render_fn).
     # Each unit renders its themes sequentially (dark before light for TTS cache reuse),
     # but different units run in parallel via ThreadPoolExecutor.
     units: list[tuple[str, Callable[[str], Any]]] = [
-        ("edition-overview", lambda theme: render_edition_overview(payload=payload, theme=theme, from_article=from_article)),
+        ("edition-overview", lambda theme: render_edition_overview(payload=payload, theme=theme, from_article=from_article, provider=provider)),
     ]
     for article in lead_video_articles():
         article_slug = str(article.get("slug", "")).strip()
         article_copy = article
         units.append(
-            (article_slug, lambda theme, a=article_copy: render_video(a, theme=theme, from_article=from_article)),
+            (article_slug, lambda theme, a=article_copy: render_video(a, theme=theme, from_article=from_article, provider=provider)),
         )
 
     print(f"Rendering {len(units)} videos x {len(themes)} theme(s) with {jobs} parallel jobs", flush=True)
@@ -213,6 +229,7 @@ def videos_seed(flags: list[str]) -> None:
         json.dumps(
             {
                 "ok": len(errors) == 0,
+                "provider": provider,
                 "count": len(rendered),
                 "videos": rendered,
                 **({"errors": errors} if errors else {}),

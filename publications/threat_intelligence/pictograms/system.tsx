@@ -321,6 +321,7 @@ export function Actor({
   scale = 1,
   colorAnimation,
   hatAnimation,
+  bgAnimation,
   baseColor,
   state = "user",
 }: {
@@ -330,6 +331,7 @@ export function Actor({
   scale?: number;
   colorAnimation?: string;
   hatAnimation?: string;
+  bgAnimation?: string;
   baseColor?: string;
   state?: "user" | "threat";
 }) {
@@ -337,13 +339,27 @@ export function Actor({
   
   return (
     <g transform={`translate(${x} ${y}) scale(${scale})`}>
-      <g style={{ color: baseColor || (isThreat ? palette.warning : palette.muted), animation: colorAnimation }}>
+      {/* Background circle for threat state */}
+      <circle
+        cx={0}
+        cy={-4}
+        r={18}
+        fill={palette.accent}
+        style={{ 
+          opacity: isThreat ? 1 : 0,
+          animation: bgAnimation 
+        }}
+      />
+      
+      {/* Person (standard color regardless of state) */}
+      <g style={{ color: baseColor || palette.muted, animation: colorAnimation }}>
         <circle cx={0} cy={-4} r={6} fill="currentColor" />
         <path d="M -11 11 C -11 3, 11 3, 11 11" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" />
       </g>
       
+      {/* Hat (always black) */}
       <g style={{ 
-        color: palette.warning, 
+        color: "#000000",
         opacity: isThreat ? 1 : 0, 
         animation: hatAnimation 
       }}>

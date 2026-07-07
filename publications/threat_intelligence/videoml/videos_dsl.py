@@ -19,8 +19,10 @@ from publications.threat_intelligence.videoml.video_pipeline import (
     build_edition_overview_xml,
     lead_video_articles,
     load_ti_seed_payload,
-    resolve_openai_tts_defaults,
     retheme_vml_xml,
+    rewrite_voiceover_provider,
+    resolve_video_voiceover_provider,
+    resolve_voiceover_defaults,
 )
 
 VideoScriptTargetKind = Literal["article", "edition"]
@@ -215,26 +217,33 @@ def update_videoml_dsl(target_slug: str, dsl: str) -> dict[str, Any]:
     return {"ok": True, "slug": videoml_item_slug(target_slug), "changes": summary}
 
 
-def generate_article_videoml_dsl(article: dict[str, Any], *, theme: str = "dark") -> str:
-    defaults = resolve_openai_tts_defaults()
+def generate_article_videoml_dsl(article: dict[str, Any], *, theme: str = "dark", provider: str = "openai") -> str:
+    defaults = resolve_voiceover_defaults(provider)
     payload = load_ti_seed_payload()
     return build_babulus_xml(
         article,
-        voice=str(defaults["voice"]),
-        model=str(defaults["model"]),
+        voice=defaults["voice"],
+        model=defaults["model"],
         publish_date=str(payload.get("publishDate") or "").strip() or None,
         theme=theme,
+        provider=provider,
     )
 
 
-def generate_edition_videoml_dsl(payload: dict[str, Any] | None = None, *, theme: str = "dark") -> str:
-    defaults = resolve_openai_tts_defaults()
+def generate_edition_videoml_dsl(
+    payload: dict[str, Any] | None = None,
+    *,
+    theme: str = "dark",
+    provider: str = "openai",
+) -> str:
+    defaults = resolve_voiceover_defaults(provider)
     edition = payload if payload is not None else load_ti_seed_payload()
     return build_edition_overview_xml(
         edition,
-        voice=str(defaults["voice"]),
-        model=str(defaults["model"]),
+        voice=defaults["voice"],
+        model=defaults["model"],
         theme=theme,
+        provider=provider,
     )
 
 
@@ -243,9 +252,10 @@ def generate_videoml_items_from_seed(*, edition_lineage_id: str | None = None) -
     publish_date = str(payload.get("publishDate") or "2026-07-04").strip()
     published_at = f"{publish_date}T12:00:00.000Z"
     edition_id = edition_lineage_id or str(payload.get("id") or "edition-current")
+    provider = resolve_video_voiceover_provider()
     records: list[dict[str, Any]] = []
 
-    edition_dsl = generate_edition_videoml_dsl(payload)
+    edition_dsl = generate_edition_videoml_dsl(payload, provider=provider)
     records.extend(
         build_videoml_item_records(
             target_slug=EDITION_OVERVIEW_SLUG,
@@ -267,7 +277,7 @@ def generate_videoml_items_from_seed(*, edition_lineage_id: str | None = None) -
             build_videoml_item_records(
                 target_slug=slug,
                 target_kind="article",
-                dsl=generate_article_videoml_dsl(article),
+                dsl=generate_article_videoml_dsl(article, provider=provider),
                 headline=str(article.get("headline") or slug),
                 section=str(article.get("section") or "Anthus Threat Intelligence"),
                 published_at=published_at,
@@ -285,14 +295,20 @@ def resolve_videoml_dsl_for_render(
     from_article: bool,
     article: dict[str, Any] | None = None,
     edition_payload: dict[str, Any] | None = None,
+    provider: str | None = None,
 ) -> str:
+    explicit_provider = provider.strip().lower() if provider else None
     if not from_article:
         client, _claims = create_authoring_client()
         stored = fetch_videoml_dsl(client, target_slug)
         if stored:
-            return retheme_vml_xml(stored, theme)
+            xml = retheme_vml_xml(stored, theme)
+            if explicit_provider:
+                xml = rewrite_voiceover_provider(xml, explicit_provider)
+            return xml
+    resolved_provider = resolve_video_voiceover_provider(provider)
     if target_slug == EDITION_OVERVIEW_SLUG:
-        return generate_edition_videoml_dsl(edition_payload, theme=theme)
+        return generate_edition_videoml_dsl(edition_payload, theme=theme, provider=resolved_provider)
     if article is None:
         raise ValueError(f"Article payload is required to render '{target_slug}' from article copy.")
-    return generate_article_videoml_dsl(article, theme=theme)
+    return generate_article_videoml_dsl(article, theme=theme, provider=resolved_provider)

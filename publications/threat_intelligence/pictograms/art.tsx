@@ -385,6 +385,10 @@ function AzureBlastRadiusPictogram({ alt, palette, timing }: RegisteredPictogram
             0%, 25%, 85%, 100% { opacity: 0; transform: translateY(-10px); }
             30%, 80% { opacity: 1; transform: translateY(0); }
           }
+          @keyframes ti-azure-actor-bg {
+            0%, 25%, 85%, 100% { opacity: 0; }
+            30%, 80% { opacity: 1; }
+          }
         `}
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
@@ -415,6 +419,7 @@ function AzureBlastRadiusPictogram({ alt, palette, timing }: RegisteredPictogram
           baseColor={timing.prefersReducedMotion ? palette.warning : azurePalette.muted}
           colorAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-color ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
           hatAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-hat ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
+          bgAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-bg ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
         />
         <Node palette={azurePalette} x={222} y={112} />
         <Node palette={azurePalette} x={222} y={180} />
@@ -1561,50 +1566,69 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
     ...palette,
     muted: "color-mix(in srgb, var(--foreground-strong) 54%, var(--background) 46%)",
   };
+
+  const outerNodes = [
+    { x: 100, y: 70 },
+    { x: 220, y: 250 },
+    { x: 70, y: 160 },
+    { x: 220, y: 70 },
+    { x: 100, y: 250 },
+    { x: 250, y: 160 },
+  ];
   
   return (
     <PictogramSvg alt={alt} viewBox="0 0 320 320">
       <style>
         {`
-          @keyframes ti-scale-out-line {
-            0%, 40% { opacity: 0; stroke-dashoffset: 60; }
-            50%, 90% { opacity: 0.6; stroke-dashoffset: 0; }
-            95%, 100% { opacity: 0; stroke-dashoffset: 0; }
-          }
           @keyframes ti-center-color {
-            0%, 15% { color: ${nodePalette.muted}; }
-            20%, 90% { color: ${palette.warning}; }
+            0%, 5% { color: ${nodePalette.muted}; }
+            10%, 90% { color: ${palette.warning}; }
             95%, 100% { color: ${nodePalette.muted}; }
           }
           @keyframes ti-center-hat {
-            0%, 10% { opacity: 0; transform: translateY(-10px); }
-            15%, 90% { opacity: 1; transform: translateY(0); }
+            0%, 5% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
             95%, 100% { opacity: 0; transform: translateY(-10px); }
           }
-          @keyframes ti-outer-color {
-            0%, 55% { color: ${nodePalette.muted}; opacity: 0; }
-            60%, 80% { color: ${nodePalette.muted}; opacity: 1; }
-            85%, 90% { color: ${palette.warning}; opacity: 1; }
-            95%, 100% { color: ${nodePalette.muted}; opacity: 0; }
+          @keyframes ti-center-bg {
+            0%, 5% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+            95%, 100% { opacity: 0; }
           }
-          @keyframes ti-outer-hat {
-            0%, 75% { opacity: 0; transform: translateY(-10px); }
-            80%, 90% { opacity: 1; transform: translateY(0); }
-            95%, 100% { opacity: 0; transform: translateY(-10px); }
-          }
+          ${outerNodes.map((_, i) => {
+            const start = i * 12;
+            const reach = start + 20;
+            return `
+              @keyframes ti-scale-out-line-${i} {
+                0%, ${start}% { opacity: 0; stroke-dashoffset: 100; }
+                ${start + 5}% { opacity: 0.6; stroke-dashoffset: 100; }
+                ${reach}%, 90% { opacity: 0.6; stroke-dashoffset: 0; }
+                95%, 100% { opacity: 0; stroke-dashoffset: 0; }
+              }
+              @keyframes ti-outer-color-${i} {
+                0%, ${start + 5}% { color: ${nodePalette.muted}; opacity: 0; }
+                ${start + 10}%, ${reach - 5}% { color: ${nodePalette.muted}; opacity: 1; }
+                ${reach}%, 90% { color: ${palette.warning}; opacity: 1; }
+                95%, 100% { color: ${nodePalette.muted}; opacity: 0; }
+              }
+              @keyframes ti-outer-hat-${i} {
+                0%, ${reach - 5}% { opacity: 0; transform: translateY(-10px); }
+                ${reach}%, 90% { opacity: 1; transform: translateY(0); }
+                95%, 100% { opacity: 0; transform: translateY(-10px); }
+              }
+              @keyframes ti-outer-bg-${i} {
+                0%, ${reach - 5}% { opacity: 0; }
+                ${reach}%, 90% { opacity: 1; }
+                95%, 100% { opacity: 0; }
+              }
+            `;
+          }).join("\n")}
         `}
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
         
         {/* Lines */}
-        {[
-          { x: 120, y: 100, delay: 0 },
-          { x: 200, y: 100, delay: 0 },
-          { x: 220, y: 160, delay: 0 },
-          { x: 200, y: 220, delay: 0 },
-          { x: 120, y: 220, delay: 0 },
-          { x: 100, y: 160, delay: 0 },
-        ].map((n, i) => (
+        {outerNodes.map((n, i) => (
           <path
             key={`line-${i}`}
             d={`M ${160 + (n.x - 160) * 0.25} ${160 + (n.y - 160) * 0.25} L ${n.x} ${n.y}`}
@@ -1612,11 +1636,11 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
             stroke={nodePalette.muted}
             strokeWidth={4}
             strokeLinecap="round"
-            strokeDasharray={60}
+            strokeDasharray={100}
             style={{
               opacity: timing.prefersReducedMotion ? 0.6 : 0,
-              strokeDashoffset: timing.prefersReducedMotion ? 0 : 60,
-              animation: timing.prefersReducedMotion ? "none" : `ti-scale-out-line ${timing.cycleS}s ease-in-out infinite`
+              strokeDashoffset: timing.prefersReducedMotion ? 0 : 100,
+              animation: timing.prefersReducedMotion ? "none" : `ti-scale-out-line-${i} ${timing.cycleS}s ease-in-out infinite`
             }}
           />
         ))}
@@ -1626,32 +1650,28 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
           palette={palette} 
           x={160} 
           y={160} 
-          scale={1.5}
+          scale={1.2}
           baseColor={timing.prefersReducedMotion ? palette.warning : nodePalette.muted}
           colorAnimation={timing.prefersReducedMotion ? "none" : `ti-center-color ${timing.cycleS}s ease-in-out infinite`}
           hatAnimation={timing.prefersReducedMotion ? "none" : `ti-center-hat ${timing.cycleS}s ease-in-out infinite`}
+          bgAnimation={timing.prefersReducedMotion ? "none" : `ti-center-bg ${timing.cycleS}s ease-in-out infinite`}
         />
 
         {/* Outer Actors */}
-        {[
-          { x: 120, y: 100 },
-          { x: 200, y: 100 },
-          { x: 220, y: 160 },
-          { x: 200, y: 220 },
-          { x: 120, y: 220 },
-          { x: 100, y: 160 },
-        ].map((n, i) => (
+        {outerNodes.map((n, i) => (
           <g key={`actor-${i}`} style={{ 
             opacity: timing.prefersReducedMotion ? 1 : 0,
-            animation: timing.prefersReducedMotion ? "none" : `ti-outer-color ${timing.cycleS}s ease-in-out infinite`,
+            animation: timing.prefersReducedMotion ? "none" : `ti-outer-color-${i} ${timing.cycleS}s ease-in-out infinite`,
+            transformOrigin: `${n.x}px ${n.y}px`
           }}>
             <Actor 
               palette={palette} 
               x={n.x} 
               y={n.y} 
-              scale={1}
-              baseColor="inherit" /* Inherits from the animated wrapper color */
-              hatAnimation={timing.prefersReducedMotion ? "none" : `ti-outer-hat ${timing.cycleS}s ease-in-out infinite`}
+              scale={1.2}
+              baseColor="inherit"
+              hatAnimation={timing.prefersReducedMotion ? "none" : `ti-outer-hat-${i} ${timing.cycleS}s ease-in-out infinite`}
+              bgAnimation={timing.prefersReducedMotion ? "none" : `ti-outer-bg-${i} ${timing.cycleS}s ease-in-out infinite`}
             />
           </g>
         ))}
@@ -1671,24 +1691,29 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
       <style>
         {`
           @keyframes ti-scale-up-color {
-            0%, 30% { color: ${nodePalette.muted}; }
-            40%, 90% { color: ${palette.warning}; }
+            0%, 5% { color: ${nodePalette.muted}; }
+            10%, 90% { color: ${palette.warning}; }
             95%, 100% { color: ${nodePalette.muted}; }
           }
           @keyframes ti-scale-up-hat {
-            0%, 20% { opacity: 0; transform: translateY(-10px); }
-            30%, 90% { opacity: 1; transform: translateY(0); }
+            0%, 5% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
             95%, 100% { opacity: 0; transform: translateY(-10px); }
           }
+          @keyframes ti-scale-up-bg {
+            0%, 5% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+            95%, 100% { opacity: 0; }
+          }
           @keyframes ti-scale-up-actor {
-            0%, 35% { transform: scale(1.5); }
-            45%, 90% { transform: scale(3.5); }
+            0%, 5% { transform: scale(1.5); }
+            85%, 90% { transform: scale(5.5); }
             95%, 100% { transform: scale(1.5); }
           }
           @keyframes ti-scale-up-shockwave {
-            0%, 45% { opacity: 0; r: 0; stroke-width: 6; }
-            55% { opacity: 0.8; }
-            80%, 100% { opacity: 0; r: 140; stroke-width: 0; }
+            0%, 10% { opacity: 0; r: 0; stroke-width: 6; }
+            45% { opacity: 0.8; }
+            80%, 100% { opacity: 0; r: 180; stroke-width: 0; }
           }
         `}
       </style>
@@ -1706,14 +1731,14 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
           cx={0} cy={0} fill="none" stroke={palette.warning}
           style={{
             opacity: timing.prefersReducedMotion ? 0 : 0,
-            animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) ${timing.delayS(300)}s infinite`
+            animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) ${timing.delayS(400)}s infinite`
           }} 
         />
         
         {/* Transforming & Scaling Actor */}
         <g style={{
           animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-actor ${timing.cycleS}s ease-in-out infinite`,
-          transform: timing.prefersReducedMotion ? "scale(3.5)" : "scale(1.5)"
+          transform: timing.prefersReducedMotion ? "scale(5.5)" : "scale(1.5)"
         }}>
           <Actor 
             palette={palette} 
@@ -1723,6 +1748,7 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
             baseColor={timing.prefersReducedMotion ? palette.warning : nodePalette.muted}
             colorAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-color ${timing.cycleS}s ease-in-out infinite`}
             hatAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-hat ${timing.cycleS}s ease-in-out infinite`}
+            bgAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-bg ${timing.cycleS}s ease-in-out infinite`}
           />
         </g>
       </g>
