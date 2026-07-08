@@ -3,6 +3,7 @@ import { manageUserRole } from "../functions/manage-user-role/resource";
 
 const authRedirectUrls = [
   "http://localhost:3001/",
+  "http://localhost:3003/",
   "http://localhost:3000/",
   "https://p.apyr.us/",
   "https://main.dbsyytcm9drqa.amplifyapp.com/",

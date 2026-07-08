@@ -76,9 +76,14 @@ function prioritizeCurrentOrigin(config: ResourcesConfig): ResourcesConfig {
   const reorder = (urls: unknown) => {
     if (!Array.isArray(urls)) return urls;
     const normalized = urls.filter((value): value is string => typeof value === "string");
-    const head = normalized.filter((value) => normalizeUrlOrigin(value) === origin);
-    if (!head.length) return normalized;
-    const tail = normalized.filter((value) => normalizeUrlOrigin(value) !== origin);
+    const withCurrentOrigin = normalized.some((value) => normalizeUrlOrigin(value) === origin)
+      ? normalized
+      : isLocalDevOrigin(origin)
+        ? [`${origin}/`, ...normalized]
+        : normalized;
+    const head = withCurrentOrigin.filter((value) => normalizeUrlOrigin(value) === origin);
+    if (!head.length) return withCurrentOrigin;
+    const tail = withCurrentOrigin.filter((value) => normalizeUrlOrigin(value) !== origin);
     return [...head, ...tail];
   };
   return {
@@ -126,6 +131,15 @@ function normalizeUrlOrigin(value: string): string {
 function normalizeLoopbackHostname(hostname: string): string {
   if (hostname === "127.0.0.1" || hostname === "::1") return "localhost";
   return hostname;
+}
+
+function isLocalDevOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function extractAuthFailureDetail(error: unknown): string | null {
