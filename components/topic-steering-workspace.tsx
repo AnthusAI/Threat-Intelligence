@@ -75,6 +75,7 @@ import {
 import { buildNewsroomKnowledgeQueryInput, type NewsroomKnowledgeQueryAnchor as KnowledgeQueryAnchor, type NewsroomKnowledgeQueryTarget as KnowledgeQueryTarget } from "../lib/newsroom-knowledge-query-request";
 import { NewsroomConsoleProgressToggle, PapyrusConsoleChatIcon, usePapyrusConsole } from "./papyrus-console-shell";
 import { useResolvedPapyrusTheme } from "./use-resolved-papyrus-theme";
+import { SITE_BRAND } from "../lib/site-brand";
 import { useOptionalNewsDeskClient } from "./news-desk-client-provider";
 import { ReferenceSourcePreview } from "./reference-source-preview";
 import type { ReaderAuthSnapshot } from "./reader-auth-state";
@@ -371,6 +372,11 @@ const NEWSROOM_SECTION_SHORT_TITLE_FALLBACKS: Record<string, string> = {
   technology: "Infrastructure Landscape",
   world: "Global Affairs",
 };
+const NEWSROOM_ACTOR_LABEL = `${SITE_BRAND.articleTitleSuffix} newsroom`;
+const NEWSROOM_PRODUCT_LABEL = SITE_BRAND.appTitle;
+const NEWS_DESK_SHELL_CLASS = SITE_BRAND.id === "threat-intelligence"
+  ? "site-shell news-desk-shell blog-rhythm-shell"
+  : "site-shell news-desk-shell";
 const ANALYSIS_REINDEX_MODES: AnalysisReindexMode[] = [
   "online-update",
   "classifier-retrain",
@@ -1702,7 +1708,7 @@ function NewsDeskDashboard({
             {
               proposalId: proposal.id,
               action,
-              actorLabel: "Papyrus newsroom",
+              actorLabel: NEWSROOM_ACTOR_LABEL,
               note: input?.note ?? undefined,
               displayName: input?.displayName ?? proposal.displayName ?? undefined,
               shortTitle: input?.shortTitle ?? proposal.shortTitle ?? undefined,
@@ -2284,7 +2290,7 @@ function NewsDeskDashboard({
     if (dashboard.isDemo) {
       try {
         const plan = buildUiReportingPacketReviewPlan({
-          actorLabel: "Papyrus newsroom",
+          actorLabel: NEWSROOM_ACTOR_LABEL,
           assignment,
           decision,
           message,
@@ -2434,7 +2440,7 @@ function NewsDeskDashboard({
 
   function createAnalysisReindexAssignment(profile: AnalysisProfileSummary, draft: AnalysisReindexDraft) {
     const now = new Date().toISOString();
-    const actorLabel = dashboard.isDemo ? "Papyrus newsroom" : authState.label || "Papyrus newsroom";
+    const actorLabel = dashboard.isDemo ? NEWSROOM_ACTOR_LABEL : authState.label || NEWSROOM_ACTOR_LABEL;
     const plan = buildUiAnalysisReindexAssignmentPlan({
       actorLabel,
       categorySet: activeCategorySet,
@@ -2593,7 +2599,7 @@ function NewsDeskDashboard({
     const now = new Date().toISOString();
 
     if (dashboard.isDemo) {
-      const nextRecord = buildDoctrineRecord(kind, nextBody, currentRecord, now, "Papyrus newsroom");
+      const nextRecord = buildDoctrineRecord(kind, nextBody, currentRecord, now, NEWSROOM_ACTOR_LABEL);
       setDoctrineRecords((current) => replaceDoctrineRecord(current, nextRecord));
       setActionState({ id: recordKey, message: "doctrine saved", tone: "ok" });
       return;
@@ -2640,7 +2646,7 @@ function NewsDeskDashboard({
     const now = new Date().toISOString();
 
     if (dashboard.isDemo) {
-      const nextRecord = buildCategoryDoctrineRecord(category, kind, nextBody, currentRecord, now, "Papyrus newsroom");
+      const nextRecord = buildCategoryDoctrineRecord(category, kind, nextBody, currentRecord, now, NEWSROOM_ACTOR_LABEL);
       setDoctrineRecords((current) => replaceDoctrineRecord(current, nextRecord));
       setActionState({ id: recordKey, message: "category doctrine saved", tone: "ok" });
       return;
@@ -2998,7 +3004,7 @@ function NewsDeskDashboard({
     const updatedAt = new Date().toISOString();
     if (dashboard.isDemo) {
       const nextCategory = buildCategoryCopyVersion(category, update, {
-        actorLabel: "Papyrus newsroom",
+        actorLabel: NEWSROOM_ACTOR_LABEL,
         now: updatedAt,
       });
       setCategorys((current) => current.map((entry) => (entry.id === category.id ? nextCategory : entry)));
@@ -3254,7 +3260,7 @@ function NewsDeskDashboard({
 
   return (
     <main
-      className="site-shell news-desk-shell"
+      className={NEWS_DESK_SHELL_CLASS}
       data-news-desk
       data-category-steering
       data-category-steering-demo={dashboard.isDemo ? "true" : "false"}
@@ -15868,7 +15874,7 @@ function demoAssignmentEvent(assignment: AssignmentRecord, action: AssignmentAct
     eventType: action,
     fromStatus: assignment.status,
     toStatus: next.status,
-    actorLabel: "Papyrus newsroom",
+    actorLabel: NEWSROOM_ACTOR_LABEL,
     note: note.trim() || null,
     createdAt: now,
   };
@@ -16402,9 +16408,9 @@ async function getNewsDeskActorLabel(): Promise<string> {
       ?? readTextClaim(payload["cognito:username"])
       ?? readTextClaim(payload.username)
       ?? readTextClaim(payload.sub);
-    return claim ?? "Papyrus newsroom";
+    return claim ?? NEWSROOM_ACTOR_LABEL;
   } catch {
-    return "Papyrus newsroom";
+    return NEWSROOM_ACTOR_LABEL;
   }
 }
 
@@ -16423,7 +16429,7 @@ function NewsroomProgressBackLink({
         <svg aria-hidden="true" className="edition-progress__icon" focusable="false" viewBox="0 0 10 10">
           <path d="M7.5 1 2.5 5 7.5 9Z" fill="currentColor" />
         </svg>
-        Back to Papyrus
+        {SITE_BRAND.backToHomeLabel}
       </Link>
       {searchAction ? (
         <div className="edition-progress__trailing">
@@ -16458,7 +16464,7 @@ function NewsDeskAccessGate({ shell, showSectionTabs = false }: { shell: NewsDes
 
   return (
     <main
-      className="site-shell news-desk-shell"
+      className={NEWS_DESK_SHELL_CLASS}
       data-news-desk-access={accessPhase}
       data-news-desk-drawer-docked={drawerController.isDocked ? "true" : "false"}
       data-news-desk-drawer-open={drawerController.open ? "true" : "false"}
@@ -16519,10 +16525,10 @@ function formatAccessTitle(state: NewsDeskShellState | null): string {
 }
 
 function formatAccessDetail(state: NewsDeskShellState | null): string {
-  if (!state || state.phase === "checkingAccess") return "Papyrus is checking the current browser session before loading steering state.";
-  if (state.phase === "loadingDesk") return "Papyrus verified the browser session and is loading private Newsroom records.";
+  if (!state || state.phase === "checkingAccess") return `${NEWSROOM_PRODUCT_LABEL} is checking the current browser session before loading steering state.`;
+  if (state.phase === "loadingDesk") return `${NEWSROOM_PRODUCT_LABEL} verified the browser session and is loading private Newsroom records.`;
   if (state.phase === "forbidden") return "This account is signed in, but the Cognito session does not include the editor or admin group.";
-  if (state.phase === "error") return "Papyrus could not verify this editor session or load the private Newsroom data.";
+  if (state.phase === "error") return `${NEWSROOM_PRODUCT_LABEL} could not verify this editor session or load the private Newsroom data.`;
   return "Sign in with an editor or admin account to inspect category, category tree, ontology, and graph steering.";
 }
 
