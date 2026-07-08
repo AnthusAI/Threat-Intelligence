@@ -1,4 +1,4 @@
-import redirectUrls from "../../config/auth-redirect-urls.json";
+import redirectUrls from "../config/auth-redirect-urls.json";
 
 export type SiteBrandAuthId = "papyrus" | "threat-intelligence";
 
