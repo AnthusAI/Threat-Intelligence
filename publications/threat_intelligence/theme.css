@@ -367,8 +367,8 @@
   font-family: var(--site-ui-font);
 }
 
-:root[data-site-brand="threat-intelligence"] .presentation-page--blog.blog-rhythm-shell {
-  --paper-rhythm: var(--ti-row-height);
+:root[data-site-brand="threat-intelligence"] :is(.presentation-page--blog, .article-shell, .news-desk-shell).blog-rhythm-shell {
+  --paper-rhythm: 16px;
   position: relative;
 }
 

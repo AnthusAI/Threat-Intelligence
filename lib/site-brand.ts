@@ -1,7 +1,12 @@
 import type { EditionPresentationFormat } from "./content-types";
 import { threatIntelligenceBrand } from "../publications/threat_intelligence/brand";
+import {
+  PAPYRUS_AUTH_REDIRECT_URLS,
+  resolveSiteBrandAuthId,
+  type SiteBrandAuthId,
+} from "./site-brand-auth";
 
-export type SiteBrandId = "papyrus" | "threat-intelligence";
+export type SiteBrandId = SiteBrandAuthId;
 
 export type MastheadTaglineLine = {
   emphasis: string;
@@ -30,6 +35,8 @@ export type SiteBrand = {
   mastheadSource: "edition" | "brand";
   sectionLinkStrategy: "route" | "anchor";
   defaultVideoCredit?: string;
+  /** Production / Amplify Hosting OAuth callback origins for this publication. */
+  authRedirectUrls: readonly string[];
 };
 
 const SERIF_TEXT_FONT = 'Georgia, "Times New Roman", serif';
@@ -50,30 +57,12 @@ const SITE_BRANDS: Record<SiteBrandId, SiteBrand> = {
     mastheadDateFormat: "raw",
     mastheadSource: "edition",
     sectionLinkStrategy: "route",
+    authRedirectUrls: PAPYRUS_AUTH_REDIRECT_URLS,
   },
   "threat-intelligence": threatIntelligenceBrand,
 };
 
-function normalizeSiteBrandId(value: string | undefined | null): SiteBrandId | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized === "papyrus") return "papyrus";
-  if (normalized === "threat-intelligence" || normalized === "threat_intelligence" || normalized === "anthus") {
-    return "threat-intelligence";
-  }
-  return null;
-}
-
-function resolveSiteBrandId(): SiteBrandId {
-  const configured = normalizeSiteBrandId(
-    process.env.NEXT_PUBLIC_PAPYRUS_SITE_BRAND
-      ?? process.env.PAPYRUS_SITE_BRAND,
-  );
-  return configured ?? "papyrus";
-}
-
-export const SITE_BRAND = SITE_BRANDS[resolveSiteBrandId()];
+export const SITE_BRAND = SITE_BRANDS[resolveSiteBrandAuthId()];
 
 export function enforcePresentation(presentation: EditionPresentationFormat): EditionPresentationFormat {
   return SITE_BRAND.forcedPresentation ?? presentation;

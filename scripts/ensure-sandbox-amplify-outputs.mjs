@@ -21,6 +21,42 @@ const PRODUCTION_GRAPHQL_HOST = "64hviw";
 const PRODUCTION_USER_POOL_ID = "us-east-1_40Uot7WSv";
 const SANDBOX_GRAPHQL_HOST = "nkqutx";
 const SANDBOX_USER_POOL_ID = "us-east-1_WD8fuTRVk";
+const THREAT_INTELLIGENCE_GRAPHQL_HOST = "ur2anu";
+const THREAT_INTELLIGENCE_AMPLIFY_APP_ID = "d3on1y5vlrxmam";
+const THREAT_INTELLIGENCE_AMPLIFY_BRANCH = "main";
+
+function loadEnvFile() {
+  const envPath = path.join(repoRoot, ".env");
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+function readSiteBrandId() {
+  const configured =
+    process.env.NEXT_PUBLIC_PAPYRUS_SITE_BRAND?.trim().toLowerCase()
+    || process.env.PAPYRUS_SITE_BRAND?.trim().toLowerCase()
+    || "";
+  if (configured === "threat-intelligence" || configured === "threat_intelligence" || configured === "anthus") {
+    return "threat-intelligence";
+  }
+  return configured === "papyrus" ? "papyrus" : null;
+}
+
+function shouldKeepThreatIntelligenceAmplifyOutputs() {
+  const target = process.env.PAPYRUS_AMPLIFY_TARGET?.trim().toLowerCase();
+  if (target === "threat-intelligence" || target === "threat_intelligence" || target === "ti") {
+    return true;
+  }
+  return readSiteBrandId() === "threat-intelligence";
+}
 
 function readOutputs() {
   if (!fs.existsSync(outputsPath)) return null;
@@ -39,7 +75,8 @@ function classifyOutputs(outputs) {
     graphqlUrl.includes(PRODUCTION_GRAPHQL_HOST) || userPoolId === PRODUCTION_USER_POOL_ID;
   const isSandbox =
     graphqlUrl.includes(SANDBOX_GRAPHQL_HOST) || userPoolId === SANDBOX_USER_POOL_ID;
-  return { graphqlUrl, userPoolId, isProduction, isSandbox };
+  const isThreatIntelligence = graphqlUrl.includes(THREAT_INTELLIGENCE_GRAPHQL_HOST);
+  return { graphqlUrl, userPoolId, isProduction, isSandbox, isThreatIntelligence };
 }
 
 function shouldKeepProductionAmplifyOutputs() {
@@ -51,6 +88,41 @@ function shouldKeepProductionAmplifyOutputs() {
   if (repoName === "papyrus-production") return true;
   if (fs.existsSync(path.join(repoRoot, ".papyrus-production-workspace"))) return true;
   return false;
+}
+
+function generateThreatIntelligenceOutputs() {
+  const env = {
+    ...process.env,
+    AWS_PROFILE: process.env.AWS_PROFILE || "default",
+    AWS_REGION: process.env.AWS_REGION || "us-east-1",
+  };
+  console.log(
+    `[papyrus] Generating Threat Intelligence amplify_outputs.json from app ${THREAT_INTELLIGENCE_AMPLIFY_APP_ID} (${env.AWS_PROFILE}).`,
+  );
+  const result = spawnSync(
+    "npx",
+    [
+      "ampx",
+      "generate",
+      "outputs",
+      "--app-id",
+      THREAT_INTELLIGENCE_AMPLIFY_APP_ID,
+      "--branch",
+      THREAT_INTELLIGENCE_AMPLIFY_BRANCH,
+      "--format",
+      "json",
+      "--out-dir",
+      repoRoot,
+    ],
+    { cwd: repoRoot, env, stdio: "inherit" },
+  );
+  if (result.status !== 0) {
+    console.error(
+      "[papyrus] Failed to generate Threat Intelligence amplify_outputs.json. Check AWS credentials for the TI Amplify app.",
+    );
+    process.exit(result.status ?? 1);
+  }
+  syncEnvGraphqlEndpoint();
 }
 
 function generateSandboxOutputs() {
@@ -106,8 +178,14 @@ function syncEnvGraphqlEndpoint() {
 }
 
 function main() {
+  loadEnvFile();
   const outputs = readOutputs();
   if (!outputs) {
+    if (shouldKeepThreatIntelligenceAmplifyOutputs()) {
+      console.log("[papyrus] amplify_outputs.json is missing; generating Threat Intelligence outputs.");
+      generateThreatIntelligenceOutputs();
+      return;
+    }
     if (shouldKeepProductionAmplifyOutputs()) {
       console.error(
         "[papyrus] amplify_outputs.json is missing but production local dev was requested.",
@@ -122,7 +200,15 @@ function main() {
     return;
   }
 
-  const { graphqlUrl, userPoolId, isProduction, isSandbox } = classifyOutputs(outputs);
+  const { graphqlUrl, userPoolId, isProduction, isSandbox, isThreatIntelligence } = classifyOutputs(outputs);
+
+  if (isThreatIntelligence && shouldKeepThreatIntelligenceAmplifyOutputs()) {
+    console.log(
+      `[papyrus] Keeping Threat Intelligence amplify_outputs.json (${graphqlUrl || "no graphql url"}).`,
+    );
+    syncEnvGraphqlEndpoint();
+    return;
+  }
 
   if (isProduction && shouldKeepProductionAmplifyOutputs()) {
     console.log("[papyrus] Keeping production amplify_outputs.json for local dev.");
@@ -134,9 +220,25 @@ function main() {
   }
 
   if (isSandbox && !isProduction) {
+    if (shouldKeepThreatIntelligenceAmplifyOutputs()) {
+      console.warn(
+        "[papyrus] amplify_outputs.json targets the Papyrus sandbox but this checkout is configured for Threat Intelligence.",
+      );
+      console.warn("[papyrus] Regenerating Threat Intelligence outputs…");
+      generateThreatIntelligenceOutputs();
+      return;
+    }
     console.log(
       `[papyrus] amplify_outputs.json already targets sandbox (${graphqlUrl || "no graphql url"}).`,
     );
+    return;
+  }
+
+  if (shouldKeepThreatIntelligenceAmplifyOutputs()) {
+    console.warn(
+      "[papyrus] amplify_outputs.json is not the Threat Intelligence backend; regenerating TI outputs…",
+    );
+    generateThreatIntelligenceOutputs();
     return;
   }
 

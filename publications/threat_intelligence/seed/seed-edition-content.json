@@ -12,7 +12,7 @@
     "caption": "The edition in video form.",
     "credit": "Anthus Threat Intelligence video",
     "hook": "The attackers have changed. Your assumptions haven't.",
-    "durationSeconds": 300,
+    "durationSeconds": 367,
     "themeVariants": {
       "light": {
         "src": "/seed-art/threat-intelligence/videos/edition-overview-light.mp4"
@@ -23,17 +23,17 @@
         "kind": "quote",
         "quote": "The attackers have changed.\nYour assumptions haven't.",
         "attribution": "The Balance of Power Is Shifting",
-        "voice": "The attackers have changed. Your assumptions haven't. And that gap is exposing you to more risk than you think."
+        "voice": "The attackers have changed. Your assumptions haven't. And that gap is exposing you to more risk than you might realize."
+      },
+      {
+        "kind": "slide",
+        "pictogram": "threat-actor-glyph",
+        "voice": "For as long as computers have been connected, security has been a cat-and-mouse game. For most of that history, serious attacks took serious effort — skilled people, expensive tools, and patience."
       },
       {
         "kind": "slide",
         "pictogram": "attackers-vs-defenders-old",
-        "voice": "For as long as computers have been connected, security has been a cat-and-mouse game — and for most of that history, ordinary people and ordinary businesses had a quiet advantage: Serious attacks took serious effort."
-      },
-      {
-        "kind": "slide",
-        "pictogram": "attackers-vs-defenders-old",
-        "voice": "Breaking in needed skilled people, expensive tools, and patience, so the most capable attackers went after banks, governments, and giant corporations. The rest of us were protected by something unglamorous: we were not worth the trouble."
+        "voice": "So the most capable attackers went after banks, governments, and giant corporations. Ordinary people and ordinary businesses had a quiet advantage: we were not worth the trouble."
       },
       {
         "kind": "slide",
@@ -51,7 +51,7 @@
         "title": "The Balance of Power Is Shifting",
         "subtitle": "AI technology favors the attacker",
         "attribution": "The Balance of Power Is Shifting",
-        "voice": "AI helps the attacker more than it helps the rest of us.  The balance of power is shifting in their favor because it's cheaper and easier to attack than it is to defend.  But AI can help us too."
+        "voice": "Are you as focused on using AI to enhance your security as the attackers are on using it to hurt you?  Probably not.  You're probably racing to use AI to get ahead, like everyone else.  That means that AI helps the attacker more than it helps the rest of us.  The balance of power is shifting in their favor.  But AI can help us too."
       },
       {
         "kind": "slide",
