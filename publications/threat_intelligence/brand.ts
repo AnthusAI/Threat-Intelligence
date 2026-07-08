@@ -1,4 +1,5 @@
 import type { SiteBrand } from "../../lib/site-brand";
+import { THREAT_INTELLIGENCE_AUTH_REDIRECT_URLS } from "../../lib/site-brand-auth";
 import { TI_BODY_FONT_FAMILY } from "../../lib/ti-body-fonts";
 
 export const threatIntelligenceBrand: SiteBrand = {
@@ -27,4 +28,5 @@ export const threatIntelligenceBrand: SiteBrand = {
   mastheadSource: "brand",
   sectionLinkStrategy: "anchor",
   defaultVideoCredit: "Anthus Threat Intelligence video",
+  authRedirectUrls: THREAT_INTELLIGENCE_AUTH_REDIRECT_URLS,
 };

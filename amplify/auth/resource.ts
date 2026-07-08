@@ -1,14 +1,8 @@
 import { defineAuth, secret } from "@aws-amplify/backend";
+import { getAuthRedirectUrls } from "../../lib/site-brand-auth";
 import { manageUserRole } from "../functions/manage-user-role/resource";
 
-const authRedirectUrls = [
-  "http://localhost:3001/",
-  "http://localhost:3003/",
-  "http://localhost:3000/",
-  "https://p.apyr.us/",
-  "https://main.dbsyytcm9drqa.amplifyapp.com/",
-  "https://codex-rehydration-api-split.dbsyytcm9drqa.amplifyapp.com/",
-];
+const authRedirectUrls = getAuthRedirectUrls();
 
 const disableGoogleOAuth = process.env.PAPYRUS_DISABLE_GOOGLE_OAUTH === "1";
 
