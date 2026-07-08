@@ -12,6 +12,12 @@ from .env import PAPYRUS_ROOT
 DEFAULT_PAPYRUS_CONFIG = ".papyrus/config.yaml"
 DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_OPENAI_TTS_VOICE = "alloy"
+DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
+DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2"
+DEFAULT_ELEVENLABS_AUDIO_NATIVE_ALLOWLIST = (
+    "https://threat-intelligence.anth.us",
+    "http://localhost:3001",
+)
 DEFAULT_PUBLIC_SITE_BASE_URL = "https://p.apyr.us"
 DEFAULT_NEWSROOM_REFERENCE_WEB_PATH_PREFIX = "/newsroom/references"
 DEFAULT_STEERING_CONFIG_PATH = "corpora/papyrus-steering.yml"
@@ -83,6 +89,14 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
     if openai is not None and not isinstance(openai, dict):
         raise ValueError("Papyrus config openai must be an object.")
     openai = openai if isinstance(openai, dict) else {}
+    elevenlabs = raw_config.get("elevenlabs") or {}
+    if elevenlabs is not None and not isinstance(elevenlabs, dict):
+        raise ValueError("Papyrus config elevenlabs must be an object.")
+    elevenlabs = elevenlabs if isinstance(elevenlabs, dict) else {}
+    audio_native = elevenlabs.get("audioNative") or {}
+    if audio_native is not None and not isinstance(audio_native, dict):
+        raise ValueError("Papyrus config elevenlabs.audioNative must be an object.")
+    audio_native = audio_native if isinstance(audio_native, dict) else {}
     return {
         "configPath": config_path,
         "schemaVersion": 1,
@@ -102,6 +116,19 @@ def normalize_papyrus_config(raw_config: Any, config_path: str) -> dict[str, Any
             "model": _optional_string(openai.get("model")) or DEFAULT_OPENAI_TTS_MODEL,
             "voice": _optional_string(openai.get("voice")) or DEFAULT_OPENAI_TTS_VOICE,
             "baseUrl": _optional_string(openai.get("baseUrl")),
+        },
+        "elevenlabs": {
+            "apiKey": _optional_string(elevenlabs.get("api_key")),
+            "voiceId": _optional_string(elevenlabs.get("voice_id")),
+            "modelId": _optional_string(elevenlabs.get("model_id")) or DEFAULT_ELEVENLABS_MODEL_ID,
+            "baseUrl": _optional_string(elevenlabs.get("base_url")) or DEFAULT_ELEVENLABS_BASE_URL,
+            "audioNative": {
+                "urlAllowlist": _normalize_string_list(
+                    audio_native.get("url_allowlist") or audio_native.get("urlAllowlist"),
+                    "elevenlabs.audioNative.url_allowlist",
+                    default=list(DEFAULT_ELEVENLABS_AUDIO_NATIVE_ALLOWLIST),
+                ),
+            },
         },
     }
 
@@ -187,6 +214,40 @@ def resolve_openai_tts_defaults() -> dict[str, str | None]:
     }
 
 
+def resolve_elevenlabs_api_key() -> str | None:
+    env_value = str(os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if env_value:
+        return env_value
+    config = load_papyrus_config()
+    if config:
+        configured = str((config.get("elevenlabs") or {}).get("apiKey") or "").strip()
+        if configured:
+            return configured
+    return None
+
+
+def resolve_elevenlabs_defaults() -> dict[str, str | None]:
+    env_voice_id = str(os.environ.get("ELEVENLABS_VOICE_ID") or "").strip()
+    env_model_id = str(os.environ.get("ELEVENLABS_MODEL_ID") or "").strip()
+    env_base_url = str(os.environ.get("ELEVENLABS_BASE_URL") or "").strip()
+    config = load_papyrus_config()
+    elevenlabs = (config or {}).get("elevenlabs") or {}
+    return {
+        "voiceId": env_voice_id or str(elevenlabs.get("voiceId") or "").strip() or None,
+        "modelId": env_model_id or str(elevenlabs.get("modelId") or DEFAULT_ELEVENLABS_MODEL_ID),
+        "baseUrl": env_base_url or str(elevenlabs.get("baseUrl") or DEFAULT_ELEVENLABS_BASE_URL).strip(),
+    }
+
+
+def resolve_elevenlabs_audio_native_settings() -> dict[str, list[str]]:
+    config = load_papyrus_config()
+    elevenlabs = (config or {}).get("elevenlabs") or {}
+    audio_native = elevenlabs.get("audioNative") or {}
+    return {
+        "urlAllowlist": list(audio_native.get("urlAllowlist") or DEFAULT_ELEVENLABS_AUDIO_NATIVE_ALLOWLIST),
+    }
+
+
 def resolve_reader_revalidation_base_url() -> str:
     env_value = str(os.environ.get("PAPYRUS_BASE_URL") or "").strip().rstrip("/")
     if env_value:
@@ -233,3 +294,26 @@ def _optional_string(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value.strip()
+
+
+def _normalize_string_list(
+    raw_value: Any,
+    field_name: str,
+    *,
+    default: list[str] | None = None,
+) -> list[str]:
+    if raw_value is None:
+        return list(default or [])
+    if not isinstance(raw_value, list):
+        raise ValueError(f"Papyrus config {field_name} must be a list.")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw_value):
+        term = _optional_string(entry)
+        if not term:
+            raise ValueError(f"Papyrus config {field_name}[{index}] must be a non-empty string.")
+        if term in seen:
+            continue
+        seen.add(term)
+        normalized.append(term)
+    return normalized

@@ -53,7 +53,7 @@ export function ThreatIntelligencePictogramVideo({
   return (
     <div
       style={{
-        width: size,
+        width: size * aspectRatio,
         height: size,
         flexShrink: 0,
         ["--pictogram-aspect-ratio" as string]: String(aspectRatio),

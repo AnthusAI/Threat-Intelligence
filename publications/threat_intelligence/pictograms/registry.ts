@@ -22,6 +22,10 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_PHASE_OFFSETS = {
   "control-chatgpt-workspace-access-and-connected-data": 11_300,
   "separate-game-accounts-from-real-life": 15_200,
   "treat-mods-and-launchers-like-untrusted-code": 19_400,
+  "threat-actors-scaling-out": 1_000,
+  "threat-actors-scaling-up": 2_000,
+  "attackers-vs-defenders-old": 3_000,
+  "attackers-vs-defenders-new": 4_000,
 } as const;
 
 export type ThreatIntelligencePictogramSlug = Exclude<

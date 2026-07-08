@@ -40,7 +40,7 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertIn("--ti-alarm-red", xml)
         self.assertIn('"--ti-section-rule":"#e54d2e"', xml)
         self.assertNotIn("#ec6142", xml)
-        closing_index = xml.index('id="closing"')
+        closing_index = xml.index('id="post-roll"')
         closing_slice = xml[closing_index:]
         self.assertIn("mastheadEyebrow", closing_slice)
         self.assertIn("Anthus AI Solutions", closing_slice)
@@ -110,6 +110,26 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertNotIn("edition-teaser", xml)
         self.assertNotIn("spotlight-1", xml)
         self.assertNotIn('id="hook"', xml)
+
+    def test_build_edition_overview_xml_pictogram_only_slide_uses_center_align(self) -> None:
+        from publications.threat_intelligence.videoml.video_pipeline import build_edition_overview_xml, load_ti_seed_payload
+
+        payload = load_ti_seed_payload()
+        payload["video"] = dict(payload.get("video") or {})
+        payload["video"]["scenes"] = [
+            {
+                "kind": "slide",
+                "pictogram": "attackers-vs-defenders-old",
+                "voice": "Pictogram-only scene voice.",
+            },
+        ]
+        xml = build_edition_overview_xml(payload, voice="alloy", model="gpt-4o-mini-tts")
+        self.assertIn('id="scene-1"', xml)
+        self.assertIn("attackers-vs-defenders-old", xml)
+        self.assertIn('"horizontalAlign":"center"', xml)
+        self.assertIn('"pictogramSlug":"attackers-vs-defenders-old"', xml)
+        self.assertIn('"pictogramSize":600', xml)
+        self.assertIn("Pictogram-only scene voice.", xml)
 
     def test_post_roll_voice_override_replaces_spoken_line_only(self) -> None:
         from publications.threat_intelligence.videoml.video_pipeline import (
@@ -211,6 +231,8 @@ class ThreatIntelligenceVideoPipelineTests(unittest.TestCase):
         self.assertEqual(light_vars["--ti-alarm-red"], "#e54d2e")
         self.assertEqual(dark_vars["--ti-pictogram-edge"], "#363a3f")
         self.assertEqual(light_vars["--ti-pictogram-edge"], "#b9bbc6")
+        self.assertEqual(dark_vars["--ti-pictogram-user"], "#d4d8de")
+        self.assertEqual(light_vars["--ti-pictogram-user"], "#60646c")
         self.assertEqual(dark_vars["--ti-row-height"], "24px")
         self.assertEqual(light_vars["--ti-row-height"], "24px")
 

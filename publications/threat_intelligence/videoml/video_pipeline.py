@@ -12,8 +12,17 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+import yaml
+
 from papyrus_content.env import PAPYRUS_ROOT, load_dotenv
-from papyrus_content.papyrus_config import resolve_openai_api_key, resolve_openai_tts_defaults
+from papyrus_content.papyrus_config import (
+    DEFAULT_ELEVENLABS_BASE_URL,
+    resolve_elevenlabs_api_key,
+    resolve_elevenlabs_audio_native_settings,
+    resolve_elevenlabs_defaults,
+    resolve_openai_api_key,
+    resolve_openai_tts_defaults,
+)
 
 DEFAULT_VIDEOML_CLI = Path.home() / "Projects" / "VideoML" / "cli"
 DEFAULT_BABULUS_ROOT = Path.home() / "Projects" / "Babulus"
@@ -32,6 +41,7 @@ LEAD_VIDEO_SLUGS = (
     "treat-openai-accounts-like-production-infrastructure",
     "how-to-play-games-securely",
 )
+SUPPORTED_VOICEOVER_PROVIDERS = ("openai", "elevenlabs")
 
 # Video canvas rhythm: 24px rows on the 720px-tall frame (30 rows).
 TI_VIDEO_RHYTHM_UNIT = 6
@@ -109,6 +119,7 @@ TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
         "--ti-pictogram-edge": "#363a3f",
         "--ti-pictogram-node": "#2e3135",
         "--ti-pictogram-muted": "#43484e",
+        "--ti-pictogram-user": "#d4d8de",
         "--ti-pictogram-throb": "#ac4d39",
         "--ti-pictogram-compromised": "#e54d2e",
         "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",
@@ -159,6 +170,7 @@ TI_SCENE_STYLES_LIGHT: dict[str, Any] = _merge_scene_style_vars({
         "--ti-pictogram-edge": "#b9bbc6",
         "--ti-pictogram-node": "#b9bbc6",
         "--ti-pictogram-muted": "#d9d9e0",
+        "--ti-pictogram-user": "#60646c",
         "--ti-pictogram-throb": "#ec8e7b",
         "--ti-pictogram-compromised": "#e54d2e",
         "--ti-pictogram-accent-glow": "rgba(234, 88, 12, 0.18)",
@@ -199,6 +211,23 @@ def retheme_vml_xml(dsl_xml: str, theme: str) -> str:
     if any(token in updated for token in ("#111110", "#191918", "#222221", "#2a2926")):
         updated = _swap_ti_light_palette_tokens(updated)
     return updated
+
+
+def rewrite_voiceover_provider(dsl_xml: str, provider: str) -> str:
+    """Replace the DSL ``<voiceover .../>`` element with one for ``provider``.
+
+    The stored VideoML DSL (fetched from GraphQL) carries the provider/voice/model
+    that were active when it was authored — by default ``openai``. When a caller
+    renders with an explicit ``--provider`` (e.g. ``elevenlabs``), the stored
+    voiceover element must be rewritten so the render actually uses the requested
+    TTS provider instead of silently falling back and producing empty audio.
+    """
+    defaults = resolve_voiceover_defaults(provider)
+    replacement = voiceover_element(provider, voice=defaults["voice"], model=defaults["model"])
+    pattern = re.compile(r"<voiceover\b[^>]*/>")
+    if not pattern.search(dsl_xml):
+        return dsl_xml
+    return pattern.sub(lambda _: replacement, dsl_xml, count=1)
 
 
 def _swap_ti_light_palette_tokens(dsl_xml: str) -> str:
@@ -340,6 +369,8 @@ def ensure_videoml_browser_bundle() -> Path:
 def title_slide_layer(
     *,
     pictogram_slug: str | None = None,
+    secondary_pictogram_slug: str | None = None,
+    secondary_pictogram_delay_sec: float | None = None,
     eyebrow: str | None = None,
     masthead_eyebrow: str | None = None,
     title: str | None = None,
@@ -400,6 +431,10 @@ def title_slide_layer(
     if pictogram_slug:
         props["pictogramSlug"] = pictogram_slug
         props["pictogramSize"] = logo_size if logo_size is not None else TI_VIDEO_LAYOUT["pictogram_size"]
+        if secondary_pictogram_slug:
+            props["secondaryPictogramSlug"] = secondary_pictogram_slug
+        if secondary_pictogram_delay_sec is not None:
+            props["secondaryPictogramDelaySec"] = secondary_pictogram_delay_sec
     tag = "ti-title-slide" if (pictogram_slug or eyebrow_rule or masthead_eyebrow) else "title-slide"
     return f"""    <layer id="content" z="10">
       <{tag} props='{props_attr(props)}' />
@@ -501,6 +536,8 @@ def resolve_publish_date(publish_date: str | None = None) -> str:
 def branded_title_slide_layer(
     *,
     pictogram_slug: str | None,
+    secondary_pictogram_slug: str | None = None,
+    secondary_pictogram_delay_sec: float | None = None,
     eyebrow: str | None,
     title: str | None,
     subtitle: str | None,
@@ -511,6 +548,8 @@ def branded_title_slide_layer(
 ) -> str:
     return title_slide_layer(
         pictogram_slug=pictogram_slug,
+        secondary_pictogram_slug=secondary_pictogram_slug,
+        secondary_pictogram_delay_sec=secondary_pictogram_delay_sec,
         eyebrow=eyebrow,
         title=title,
         subtitle=subtitle,
@@ -570,12 +609,25 @@ def authored_scene_xml(
         return scene_renderer(scene_id, str(scene.get("title") or "Quote"), layer, cue)
     if kind != "slide":
         raise ValueError(f"Authored video scene {index} has unknown kind: {kind!r}")
+    eyebrow_val = str(scene.get("eyebrow") or "").strip() or None
+    title_val = str(scene.get("title") or "").strip() or None
+    subtitle_val = str(scene.get("subtitle") or "").strip() or None
+    has_text = bool(eyebrow_val or title_val or subtitle_val)
+    pictogram_val = str(scene.get("pictogram") or "").strip() or None
+    
+    if not has_text and not pictogram_val:
+        import logging
+        logging.warning(f"[VideoML Compiler] Scene {index} has neither text nor a pictogram.")
+
     layer = branded_title_slide_layer(
-        pictogram_slug=str(scene.get("pictogram") or "").strip() or None,
-        eyebrow=str(scene.get("eyebrow") or "").strip() or None,
-        title=str(scene.get("title") or "").strip() or None,
-        subtitle=str(scene.get("subtitle") or "").strip() or None,
-        horizontal_align="left",
+        pictogram_slug=pictogram_val,
+        secondary_pictogram_slug=str(scene.get("secondaryPictogram") or "").strip() or None,
+        secondary_pictogram_delay_sec=float(scene.get("secondaryPictogramDelaySec")) if scene.get("secondaryPictogramDelaySec") is not None else None,
+        eyebrow=eyebrow_val,
+        title=title_val,
+        subtitle=subtitle_val,
+        horizontal_align="left" if has_text else "center",
+        logo_size=None if has_text else 600,
     )
     return scene_renderer(scene_id, str(scene.get("title") or f"Scene {index}"), layer, cue)
 
@@ -610,6 +662,7 @@ def build_babulus_xml(
     model: str,
     publish_date: str | None = None,
     theme: str = "dark",
+    provider: str = "openai",
 ) -> str:
     slug = slugify(str(article.get("slug") or "article"))
     headline = str(article.get("headline") or slug)
@@ -622,6 +675,7 @@ def build_babulus_xml(
     closing_voice = closing_cta_voice(slide_date)
     styles = scene_styles_for_theme(theme)
     bg_props = background_props_for_theme(theme)
+    voiceover_xml = voiceover_element(provider, voice=voice, model=model)
 
     def _scene(scene_id: str, scene_title: str, content_layer: str, cue_xml: str) -> str:
         return render_scene(scene_id, scene_title, content_layer, cue_xml, styles=styles, background_props=bg_props)
@@ -634,9 +688,16 @@ def build_babulus_xml(
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(article.get("video"))))
-        body = "\n\n".join(scene_blocks)
+        
+        body_parts = []
+        for i, block in enumerate(scene_blocks):
+            if i > 0:
+                body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+            body_parts.append(block)
+            
+        body = "\n\n".join(body_parts)
         return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
-  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+  {voiceover_xml}
 
 {body}
 </vml>
@@ -715,20 +776,17 @@ def build_babulus_xml(
             )
         )
 
-    scenes.append(
-        _scene(
-            "closing",
-            "Closing",
-            closing_cta_layer(slide_date=slide_date),
-            f"""<cue id="closing-cue">
-      <voice>{escape(closing_voice)}</voice>
-    </cue>""",
-        )
-    )
+    scenes.append(post_roll_scene(slide_date, _scene))
 
-    body = "\n\n".join(scenes)
+    body_parts = []
+    for i, block in enumerate(scenes):
+        if i > 0:
+            body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+        body_parts.append(block)
+
+    body = "\n\n".join(body_parts)
     return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
-  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+  {voiceover_xml}
 
 {body}
 </vml>
@@ -741,6 +799,7 @@ def build_edition_overview_xml(
     voice: str,
     model: str,
     theme: str = "dark",
+    provider: str = "openai",
 ) -> str:
     edition = payload if payload is not None else load_ti_seed_payload()
     title = str(edition.get("title") or "Anthus Threat Intelligence").strip()
@@ -750,6 +809,7 @@ def build_edition_overview_xml(
     articles = lead_video_articles()
     styles = scene_styles_for_theme(theme)
     bg_props = background_props_for_theme(theme)
+    voiceover_xml = voiceover_element(provider, voice=voice, model=model)
 
     def _scene(scene_id: str, scene_title: str, content_layer: str, cue_xml: str) -> str:
         return render_scene(scene_id, scene_title, content_layer, cue_xml, styles=styles, background_props=bg_props)
@@ -758,19 +818,20 @@ def build_edition_overview_xml(
     if authored:
         # Long-format edition video: authored content scenes, then the standard post-roll.
         scene_blocks = [
-            authored_scene_xml(
-                scene,
-                index + 1,
-                scene_renderer=_scene,
-                default_quote_size=TI_VIDEO_LAYOUT["title_size"],
-                default_quote_line_height=ti_video_rows(4),
-            )
+            authored_scene_xml(scene, index + 1, scene_renderer=_scene)
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(edition.get("video"))))
-        body = "\n\n".join(scene_blocks)
+        
+        body_parts = []
+        for i, block in enumerate(scene_blocks):
+            if i > 0:
+                body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+            body_parts.append(block)
+            
+        body = "\n\n".join(body_parts)
         return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
-  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+  {voiceover_xml}
 
 {body}
 </vml>
@@ -908,33 +969,96 @@ def build_edition_overview_xml(
         )
     )
 
-    body = "\n\n".join(scenes)
+    body_parts = []
+    for i, block in enumerate(scenes):
+        if i > 0:
+            body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+        body_parts.append(block)
+
+    body = "\n\n".join(body_parts)
     return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
-  <voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />
+  {voiceover_xml}
 
 {body}
 </vml>
 """
 
 
-def resolve_vml_command(dsl_path: Path, project_dir: Path, target_mp4: Path) -> tuple[list[str], Path | None]:
+def materialize_videoml_provider_config(project_dir: Path, *, provider: str) -> None:
+    """Write ``.videoml/config.yml`` so Babulus can resolve TTS provider credentials.
+
+    Babulus's ElevenLabs registry requires ``providers.elevenlabs.voice_id`` in
+    project config — not just on the DSL ``<voiceover>`` element. When the voice id
+    is missing, Babulus silently falls back to the dry-run provider and writes
+    silence segment files (often with a ``.mp3`` extension). The API key itself
+    is passed through ``ELEVENLABS_API_KEY`` env (see ``build_vml_env``).
+    """
+    if provider == "elevenlabs":
+        defaults = resolve_elevenlabs_defaults()
+        voice_id = str(defaults.get("voiceId") or "").strip()
+        if not voice_id:
+            raise ValueError(
+                "ElevenLabs voiceover requires a voice_id. Set elevenlabs.voice_id in "
+                ".papyrus/config.yaml or ELEVENLABS_VOICE_ID env."
+            )
+        config = {
+            "providers": {
+                "elevenlabs": {
+                    "voice_id": voice_id,
+                    "model_id": str(defaults.get("modelId") or "eleven_multilingual_v2"),
+                    "base_url": str(defaults.get("baseUrl") or DEFAULT_ELEVENLABS_BASE_URL),
+                }
+            }
+        }
+    elif provider == "openai":
+        defaults = resolve_openai_tts_defaults()
+        config = {
+            "providers": {
+                "openai": {
+                    "voice": str(defaults["voice"]),
+                    "model": str(defaults["model"]),
+                    **({"base_url": str(defaults["baseUrl"])} if defaults.get("baseUrl") else {}),
+                }
+            }
+        }
+    else:
+        raise ValueError(f"Unsupported voiceover provider '{provider}'.")
+
+    config_dir = project_dir / ".videoml"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.yml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def invalidate_cached_tts_segments(project_dir: Path, composition_id: str) -> None:
+    """Remove cached per-cue TTS segment files so the next render re-synthesizes audio."""
+    segments_dir = project_dir / ".videoml" / "out" / composition_id / "env" / "development" / "segments"
+    if not segments_dir.is_dir():
+        return
+    for path in segments_dir.glob("*--tts--*"):
+        if path.is_file():
+            path.unlink()
+
+
+def resolve_vml_command(
+    dsl_path: Path,
+    project_dir: Path,
+    target_mp4: Path,
+) -> tuple[list[str], Path | None]:
     babulus_root = Path(str(os.environ.get("BABULUS_ROOT") or DEFAULT_BABULUS_ROOT))
     babulus_cli = babulus_root / "packages" / "videoml-cli" / "src" / "cli.ts"
     if babulus_cli.exists():
-        return (
-            [
-                "npx",
-                "tsx",
-                str(babulus_cli),
-                "pipeline",
-                str(dsl_path),
-                "--project-dir",
-                str(project_dir),
-                "--out",
-                str(target_mp4),
-            ],
-            babulus_root,
-        )
+        command = [
+            "npx",
+            "tsx",
+            str(babulus_cli),
+            "pipeline",
+            str(dsl_path),
+            "--project-dir",
+            str(project_dir),
+            "--out",
+            str(target_mp4),
+        ]
+        return (command, babulus_root)
 
     configured = str(os.environ.get("VIDEOML_CLI_DIR") or "").strip()
     cli_root = Path(configured) if configured else DEFAULT_VIDEOML_CLI
@@ -961,21 +1085,32 @@ def resolve_vml_command(dsl_path: Path, project_dir: Path, target_mp4: Path) -> 
     )
 
 
-def build_vml_env() -> dict[str, str]:
+def build_vml_env(*, provider: str = "openai") -> dict[str, str]:
     load_dotenv()
-    api_key = resolve_openai_api_key()
-    if not api_key:
-        raise ValueError(
-            "OpenAI API key is required. Set OPENAI_API_KEY or openai.api_key in .papyrus/config.yaml "
-            "(use PAPYRUS_CONFIG when running from a worktree)."
-        )
     env = os.environ.copy()
-    env["OPENAI_API_KEY"] = api_key
     env["BABULUS_BROWSER_BUNDLE"] = str(TI_BROWSER_BUNDLE)
-    defaults = resolve_openai_tts_defaults()
-    if defaults.get("baseUrl"):
-        env["OPENAI_BASE_URL"] = str(defaults["baseUrl"])
-    return env
+    if provider == "elevenlabs":
+        api_key = resolve_elevenlabs_api_key()
+        if not api_key:
+            raise ValueError(
+                "ElevenLabs API key is required. Set ELEVENLABS_API_KEY or elevenlabs.api_key in "
+                ".papyrus/config.yaml (use PAPYRUS_CONFIG when running from a worktree)."
+            )
+        env["ELEVENLABS_API_KEY"] = api_key
+        return env
+    if provider == "openai":
+        api_key = resolve_openai_api_key()
+        if not api_key:
+            raise ValueError(
+                "OpenAI API key is required. Set OPENAI_API_KEY or openai.api_key in .papyrus/config.yaml "
+                "(use PAPYRUS_CONFIG when running from a worktree)."
+            )
+        env["OPENAI_API_KEY"] = api_key
+        defaults = resolve_openai_tts_defaults()
+        if defaults.get("baseUrl"):
+            env["OPENAI_BASE_URL"] = str(defaults["baseUrl"])
+        return env
+    raise ValueError(f"Unsupported voiceover provider '{provider}'.")
 
 
 def probe_openai_key() -> dict[str, Any]:
@@ -1016,11 +1151,71 @@ def probe_openai_key() -> dict[str, Any]:
 
     return {
         "ok": True,
+        "provider": "openai",
         "model": defaults["model"],
         "voice": defaults["voice"],
         "contentType": content_type,
         "bytesRead": len(body),
     }
+
+
+def probe_elevenlabs_key() -> dict[str, Any]:
+    load_dotenv()
+    api_key = resolve_elevenlabs_api_key()
+    if not api_key:
+        raise ValueError(
+            "ElevenLabs API key is missing. Set ELEVENLABS_API_KEY or elevenlabs.api_key in .papyrus/config.yaml."
+        )
+    defaults = resolve_elevenlabs_defaults()
+    voice_id = str(defaults.get("voiceId") or "").strip()
+    if not voice_id:
+        raise ValueError(
+            "ElevenLabs probe requires a voice_id. Set elevenlabs.voice_id in .papyrus/config.yaml "
+            "or ELEVENLABS_VOICE_ID env."
+        )
+    model_id = str(defaults.get("modelId") or "eleven_multilingual_v2")
+    base_url = str(defaults.get("baseUrl") or "https://api.elevenlabs.io").rstrip("/")
+    # Probe with a minimal TTS synthesis against the same endpoint Babulus uses
+    # (/v1/text-to-speech/{voice_id}/stream) so the probe confirms both the key
+    # and the Text to Speech permission that VideoML voiceover requires, even
+    # when the key is scoped to only TTS + Audio Native (no /v1/user access).
+    request_body = json.dumps({"text": "ok", "model_id": model_id}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/v1/text-to-speech/{voice_id}/stream",
+        data=request_body,
+        headers={
+            "xi-api-key": api_key,
+            "accept": "audio/mpeg",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            content_type = response.headers.get("Content-Type", "")
+            body = response.read(64)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise ValueError(f"ElevenLabs TTS probe failed ({error.code}): {detail}") from error
+    except urllib.error.URLError as error:
+        raise ValueError(f"ElevenLabs TTS probe failed: {error}") from error
+
+    return {
+        "ok": True,
+        "provider": "elevenlabs",
+        "voiceId": voice_id,
+        "modelId": model_id,
+        "contentType": content_type,
+        "bytesRead": len(body),
+    }
+
+
+def probe_voiceover_provider(provider: str) -> dict[str, Any]:
+    if provider == "elevenlabs":
+        return probe_elevenlabs_key()
+    if provider == "openai":
+        return probe_openai_key()
+    raise ValueError(f"Unsupported voiceover provider '{provider}'.")
 
 
 def render_dsl_to_mp4(
@@ -1029,17 +1224,26 @@ def render_dsl_to_mp4(
     dsl_xml: str,
     project_dir: Path,
     target_mp4: Path,
+    provider: str = "openai",
 ) -> Path:
     target_mp4.parent.mkdir(parents=True, exist_ok=True)
     project_dir.mkdir(parents=True, exist_ok=True)
     ensure_videoml_browser_bundle()
     dsl_path.write_text(dsl_xml, encoding="utf-8")
-
+    materialize_videoml_provider_config(project_dir, provider=provider)
+    composition_id = dsl_path.stem.removesuffix("-dark").removesuffix("-light")
+    if provider == "elevenlabs":
+        # Only wipe cached segments when voice_id is missing — without it Babulus
+        # falls back to dry-run silence. When voice_id is configured, rely on
+        # Babulus content-hash caching so unchanged cues are not re-synthesized.
+        defaults = resolve_elevenlabs_defaults()
+        if not defaults.get("voiceId"):
+            invalidate_cached_tts_segments(project_dir, composition_id)
     command, command_cwd = resolve_vml_command(dsl_path, project_dir, target_mp4)
     result = subprocess.run(
         command,
         cwd=str(command_cwd or PAPYRUS_ROOT),
-        env=build_vml_env(),
+        env=build_vml_env(provider=provider),
         capture_output=True,
         text=True,
         check=False,
@@ -1063,6 +1267,7 @@ def render_video(
     work_dir: Path | None = None,
     theme: str = "dark",
     from_article: bool = False,
+    provider: str = "openai",
 ) -> Path:
     slug = str(article.get("slug") or "").strip()
     if not slug:
@@ -1078,12 +1283,14 @@ def render_video(
         theme=theme,
         from_article=from_article,
         article=article,
+        provider=provider,
     )
     return render_dsl_to_mp4(
         dsl_path=dsl_path,
         dsl_xml=dsl_xml,
         project_dir=project_dir,
         target_mp4=target_mp4,
+        provider=provider,
     )
 
 
@@ -1094,6 +1301,7 @@ def render_edition_overview(
     work_dir: Path | None = None,
     theme: str = "dark",
     from_article: bool = False,
+    provider: str = "openai",
 ) -> Path:
     edition = payload if payload is not None else load_ti_seed_payload()
     target_mp4 = output_mp4 or edition_overview_output_mp4(theme=theme)
@@ -1106,15 +1314,151 @@ def render_edition_overview(
         theme=theme,
         from_article=from_article,
         edition_payload=edition,
+        provider=provider,
     )
     return render_dsl_to_mp4(
         dsl_path=dsl_path,
         dsl_xml=dsl_xml,
         project_dir=project_dir,
         target_mp4=target_mp4,
+        provider=provider,
     )
 
 
 def slugify(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return normalized or "article"
+
+
+def resolve_video_voiceover_provider(explicit: str | None = None) -> str:
+    """Pick the VideoML TTS provider.
+
+    If ``explicit`` is given it must be one of SUPPORTED_VOICEOVER_PROVIDERS.
+    Otherwise default to ``openai`` (the cheap dev/iteration provider).
+    ElevenLabs is opt-in via ``--provider elevenlabs`` — it is never auto-selected
+    even when a key + voice id are configured, because ElevenLabs usage is
+    comparatively expensive and must be limited to intentional production renders.
+    """
+    if explicit:
+        normalized = explicit.strip().lower()
+        if normalized not in SUPPORTED_VOICEOVER_PROVIDERS:
+            raise ValueError(
+                f"Unsupported voiceover provider '{explicit}'. "
+                f"Supported: {', '.join(SUPPORTED_VOICEOVER_PROVIDERS)}"
+            )
+        return normalized
+    return "openai"
+
+
+def resolve_voiceover_defaults(provider: str) -> dict[str, str]:
+    """Resolve ``(voice, model)`` for the given provider.
+
+    For ``openai`` these are the OpenAI TTS voice/model names. For
+    ``elevenlabs`` these are the ElevenLabs ``voice_id`` and ``model_id`` that
+    Babulus's elevenlabs TTS provider expects on the DSL ``<voiceover>`` element
+    (the ``voice`` attribute becomes ``req.voice`` and ``model`` becomes
+    ``req.model``).
+    """
+    if provider == "elevenlabs":
+        defaults = resolve_elevenlabs_defaults()
+        voice_id = str(defaults.get("voiceId") or "").strip()
+        if not voice_id:
+            raise ValueError(
+                "ElevenLabs voiceover requires a voice_id. Set elevenlabs.voice_id in "
+                ".papyrus/config.yaml or ELEVENLABS_VOICE_ID env."
+            )
+        return {"voice": voice_id, "model": str(defaults.get("modelId") or "eleven_multilingual_v2")}
+    if provider == "openai":
+        defaults = resolve_openai_tts_defaults()
+        return {"voice": str(defaults["voice"]), "model": str(defaults["model"])}
+    raise ValueError(f"Unsupported voiceover provider '{provider}'.")
+
+
+def voiceover_element(provider: str, *, voice: str, model: str) -> str:
+    if provider == "elevenlabs":
+        return f'<voiceover provider="elevenlabs" voice="{escape(voice)}" model="{escape(model)}" />'
+    if provider == "openai":
+        return f'<voiceover provider="openai" voice="{escape(voice)}" model="{escape(model)}" />'
+    raise ValueError(f"Unsupported voiceover provider '{provider}'.")
+
+
+def assemble_article_narration(article: dict[str, Any], *, publish_date: str | None = None) -> str:
+    """Assemble the plain-text narration spoken for an article video.
+
+    Reuses the same scene/post-roll logic as build_babulus_xml so the Audio
+    Native upload matches the video voiceover word-for-word. Returns the spoken
+    lines joined by a single space, in scene order, including the post-roll.
+    """
+    slide_date = format_slide_edition_date(resolve_publish_date(publish_date))
+    lines: list[str] = []
+
+    authored = authored_video_scenes(article.get("video"))
+    if authored:
+        for scene in authored:
+            voice_text = str(scene.get("voice") or "").strip()
+            if voice_text:
+                lines.append(voice_text)
+        lines.append((post_roll_voice_override(article.get("video")) or closing_cta_voice(slide_date)))
+        return " ".join(lines)
+
+    headline = str(article.get("headline") or slugify(str(article.get("slug") or "article"))).strip()
+    deck = str(article.get("deck") or "").strip()
+    excerpt = str(article.get("excerpt") or "").strip()
+    pull_quotes = [str(entry).strip() for entry in (article.get("pullQuotes") or []) if str(entry).strip()][:2]
+
+    if pull_quotes:
+        lines.append(pull_quotes[0])
+    lines.append(headline)
+    if deck:
+        lines.append(deck)
+    if excerpt:
+        lines.append(excerpt)
+    if len(pull_quotes) > 1:
+        lines.append(f'As the article puts it: "{pull_quotes[1]}"')
+    lines.append(closing_cta_voice(slide_date))
+    return " ".join(part for part in lines if part)
+
+
+def assemble_edition_narration(payload: dict[str, Any] | None = None) -> str:
+    """Assemble the plain-text narration spoken for the edition overview video."""
+    edition = payload if payload is not None else load_ti_seed_payload()
+    publish_date = resolve_publish_date(str(edition.get("publishDate") or "").strip() or None)
+    slide_date = format_slide_edition_date(publish_date)
+    articles = lead_video_articles()
+    lines: list[str] = []
+
+    authored = authored_video_scenes(edition.get("video"))
+    if authored:
+        for scene in authored:
+            voice_text = str(scene.get("voice") or "").strip()
+            if voice_text:
+                lines.append(voice_text)
+        lines.append((post_roll_voice_override(edition.get("video")) or closing_cta_voice(slide_date)))
+        return " ".join(lines)
+
+    title = str(edition.get("title") or "Anthus Threat Intelligence").strip()
+    description = str(edition.get("description") or TI_TAGLINE).strip()
+    video_meta = edition.get("video") if isinstance(edition.get("video"), dict) else {}
+    edition_hook = str((video_meta or {}).get("hook") or "").strip()
+
+    if edition_hook:
+        lines.append(edition_hook)
+    else:
+        first_pull_quotes = [
+            str(entry).strip() for entry in (articles[0].get("pullQuotes") or []) if str(entry).strip()
+        ] if articles else []
+        if first_pull_quotes:
+            lines.append(first_pull_quotes[0])
+
+    lines.append(f"Anthus Threat Intelligence. {slide_date}. {TI_TAGLINE}")
+    lines.append(
+        f"{description} This edition features {len(articles)} video briefings with practical checks you can run now."
+    )
+    for article in articles:
+        headline = str(article.get("headline") or "").strip()
+        excerpt = str(article.get("excerpt") or "").strip()
+        hook = first_sentence(excerpt) or str(article.get("deck") or "").strip()
+        if headline:
+            lines.append(f"{headline}. {hook}".strip())
+    lines.append(closing_cta_voice(slide_date))
+    return " ".join(part for part in lines if part)

@@ -50,6 +50,7 @@ const TI_SCENE_STYLES_DARK = {
     "--ti-pictogram-edge": "#363a3f",
     "--ti-pictogram-node": "#2e3135",
     "--ti-pictogram-muted": "#43484e",
+    "--ti-pictogram-user": "#d4d8de",
     "--ti-pictogram-throb": "#ac4d39",
     "--ti-pictogram-compromised": "#e54d2e",
     "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",
@@ -94,6 +95,7 @@ const TI_SCENE_STYLES_LIGHT = {
     "--ti-pictogram-edge": "#b9bbc6",
     "--ti-pictogram-node": "#b9bbc6",
     "--ti-pictogram-muted": "#d9d9e0",
+    "--ti-pictogram-user": "#60646c",
     "--ti-pictogram-throb": "#ec8e7b",
     "--ti-pictogram-compromised": "#e54d2e",
     "--ti-pictogram-accent-glow": "rgba(234, 88, 12, 0.18)",
@@ -579,7 +581,58 @@ function parsePreviewScript(xml: string): ScriptData {
   const result = executeVomXml(xml);
   const composition =
     Array.isArray(result?.compositions) && result.compositions[0] ? result.compositions[0] : result;
-  return dslToScriptData(composition, { type: "cue-count", secondsPerCue: 3 });
+  const script = dslToScriptData(composition, { type: "cue-count", secondsPerCue: 3 });
+
+  // executeVomXml currently ignores <transition> elements in the browser parser.
+  // Re-inject transitions into a unified timeline by parsing the raw XML.
+  const timeline = [];
+  const scenes = script.scenes ?? [];
+  let sceneIndex = 0;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, "text/xml");
+  const root = doc.documentElement;
+  const elements = Array.from(root.children);
+
+  for (const el of elements) {
+    if (el.tagName === "scene") {
+      const s = scenes[sceneIndex];
+      if (s) {
+        timeline.push(s);
+        sceneIndex++;
+      }
+    } else if (el.tagName === "transition") {
+      const prevScene = sceneIndex > 0 ? scenes[sceneIndex - 1] : null;
+      const nextScene = sceneIndex < scenes.length ? scenes[sceneIndex] : null;
+      
+      const durationAttr = el.getAttribute("duration");
+      const durationStr = typeof durationAttr === "string" ? durationAttr.replace("f", "") : durationAttr;
+      const durationFrames = durationStr ? parseFloat(durationStr) : 16;
+      const durationSec = durationFrames / (script.fps ?? 30);
+      
+      const startSec = nextScene ? (nextScene.startSec ?? 0) : 0;
+      const endSec = startSec + durationSec;
+      
+      const propsAttr = el.getAttribute("props");
+      const props = propsAttr ? JSON.parse(propsAttr) : undefined;
+      
+      timeline.push({
+        kind: "transition",
+        id: el.getAttribute("id") || `trans-${sceneIndex}`,
+        effect: el.getAttribute("effect") || "push",
+        durationFrames: durationFrames,
+        ease: el.getAttribute("ease"),
+        props: props,
+        startSec,
+        endSec,
+        fromSceneId: prevScene?.id,
+        toSceneId: nextScene?.id
+      });
+    }
+  }
+
+  script.timeline = timeline;
+  return script;
 }
 
 function mountTiPreview(container: HTMLElement, options: TiPreviewMountOptions): () => void {

@@ -27,24 +27,31 @@
       },
       {
         "kind": "slide",
-        "eyebrow": "Edition One",
-        "title": "The Balance of Power Is Shifting",
-        "subtitle": "For most of its history, serious attacks took serious effort.",
-        "pictogram": "the-balance-of-power-is-shifting",
-        "voice": "For as long as computers have been connected, security has been a cat-and-mouse game — and for most of that history, ordinary people and ordinary businesses had a quiet advantage. Serious attacks took serious effort. Breaking in needed skilled people, expensive tools, and patience, so the most capable attackers went after banks, governments, and giant corporations. The rest of us were protected by something unglamorous: we were not worth the trouble."
+        "pictogram": "attackers-vs-defenders-old",
+        "voice": "For as long as computers have been connected, security has been a cat-and-mouse game — and for most of that history, ordinary people and ordinary businesses had a quiet advantage: Serious attacks took serious effort."
       },
       {
         "kind": "slide",
-        "eyebrow": "Two shifts at once",
-        "title": "The threat has spread, and deepened",
-        "subtitle": "More targets everywhere — and deeper, patient, continuous pressure on the ones who were always worth the trouble.",
-        "voice": "AI has changed that arithmetic in two ways. The tools that help the rest of us write and research now help attackers find targets, write convincing lures, and keep trying at almost no cost — so attacks that once needed a skilled team can be run by ordinary criminals, against everyone: your business, your accounts, your family's computers. And for the organizations that always were worth the trouble — deep pockets, valuable resources — the pressure has intensified too. More attempts, more patience, probes that run continuously and go deeper than before. The threat has spread, and it has also deepened."
+        "pictogram": "attackers-vs-defenders-old",
+        "voice": "Breaking in needed skilled people, expensive tools, and patience, so the most capable attackers went after banks, governments, and giant corporations. The rest of us were protected by something unglamorous: we were not worth the trouble."
       },
       {
-        "kind": "quote",
-        "quote": "Attackers used to run out of time, skill, and patience. With AI, they don't.",
+        "kind": "slide",
+        "pictogram": "threat-actors-scaling-up",
+        "voice": "AI has changed that arithmetic in two ways. First, the threat has deepened. For the organizations that always were worth the trouble — deep pockets, valuable resources — the pressure has intensified. More attempts, more patience, probes that run continuously and go deeper than before."
+      },
+      {
+        "kind": "slide",
+        "pictogram": "threat-actors-scaling-out",
+        "voice": "Second, the threat has spread. The tools that help the rest of us write and research now help attackers find targets, write convincing lures, and keep trying at almost no cost. Attacks that once needed a skilled team can now be run by ordinary criminals, against everyone: your business, your accounts, your family's computers."
+      },
+      {
+        "kind": "slide",
+        "pictogram": "the-balance-of-power-is-shifting",
+        "title": "The Balance of Power Is Shifting",
+        "subtitle": "AI technology favors the attacker",
         "attribution": "The Balance of Power Is Shifting",
-        "voice": "Attackers used to run out of time, skill, and patience. With AI, they don't."
+        "voice": "AI helps the attacker more than it helps the rest of us.  The balance of power is shifting in their favor because it's cheaper and easier to attack than it is to defend.  But AI can help us too."
       },
       {
         "kind": "slide",
@@ -60,7 +67,7 @@
         "title": "An automated newsroom, steered by experts",
         "subtitle": "Continuous monitoring, a semantic knowledge base, and trend detection — steered by experts in AI inference and enterprise cloud security.",
         "pictogram": "how-our-newsroom-learns",
-        "voice": "Behind these videos is an automated newsroom. Around the clock it monitors security research, incident reports, and newly disclosed vulnerabilities, building a structured, semantic knowledge base — attackers, tools, weaknesses, fixes — and using machine learning to watch how threats trend over time. The experts who steer it have spent their careers using AI to draw inferences over large, evolving bodies of knowledge like this one, and securing enterprise cloud environments for some of the largest companies in the world. They judge every word before it ships. The insights are public. This edition is the first of them."
+        "voice": "Behind these videos is an automated newsroom. Around the clock it monitors security research, incident reports, and newly disclosed vulnerabilities, building a structured, semantic knowledge base — attackers, tools, weaknesses, fixes — and using machine learning to watch how threats trend over time. The experts who steer it have spent their careers managing data at scale, and securing enterprise cloud environments for some of the largest companies in the world -- and getting attacked in every possible way. We use agentic AI to infer trends in knowledge bases, like the one powering our newsroom.  Instead of generating derivative AI slop summarizing secondhand headlines about best practices, our reporter agents are constantly using Charlie Munger's inversion technique to ask: How could we screw this up? How could this go wrong?  What are the failure modes that matter?  We already have handbooks of best practices.  What we need as the landscape shifts is a roadmap of the new ways that everything could go wrong.  The old, known ways that are more common or more dangerous now."
       },
       {
         "kind": "slide",
@@ -68,7 +75,7 @@
         "title": "Know what you have, isolate what matters",
         "subtitle": "Stand up secure architecture, then move fast on known vulnerabilities as they emerge.",
         "pictogram": "audit-aws-exposure-before-attackers-do",
-        "voice": "So where does this land? Real attacks are still chains — a small weakness here, a forgotten account there, linked step by patient step — and AI automates the patience to walk them. But defense is not chasing chains after they form. It is standing up the most secure architecture you can, then moving fast on known vulnerabilities as they emerge, and isolating what you cannot afford to have reached. In Amazon's cloud, that means knowing where your sensitive data and keys live, tightening who can reach them, and treating every over-broad permission as a hole AI is increasingly likely to find."
+        "voice": "So where does this land? Real attacks are chains — a small weakness here, a forgotten account there, linked step by patient step — and AI is really good at connecting dots like that.  It has the patience to walk through the chain, trying option after option until it finds one that works.  But defense is not chasing chains after they form. It is standing up the most secure architecture you can, then moving fast on known vulnerabilities as they emerge, and isolating what you cannot afford to have reached. In Amazon's cloud, that means knowing where your sensitive data and keys live, tightening who can reach them, and treating every over-broad permission as a hole AI is increasingly likely to find."
       },
       {
         "kind": "slide",

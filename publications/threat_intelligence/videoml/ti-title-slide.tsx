@@ -1,3 +1,5 @@
+import { getPictogramRegistryEntry } from "../pictograms/art";
+import { isThreatIntelligencePictogramSlug, type ThreatIntelligencePictogramSlug } from "../pictograms/registry";
 import React from "react";
 import { ThreatIntelligencePictogramVideo } from "./pictogram-video";
 import { TI_VIDEO_LAYOUT, tiVideoRows } from "./ti-video-rhythm";
@@ -27,6 +29,8 @@ export type TiTitleSlideProps = Record<string, unknown> & {
   columnGap?: number;
   titleLineHeight?: number;
   subtitleLineHeight?: number;
+  secondaryPictogramSlug?: string;
+  secondaryPictogramDelaySec?: number;
 };
 
 const fontHeadline = "var(--font-headline, Inter, Helvetica Neue, Segoe UI, Helvetica, Arial, sans-serif)";
@@ -209,6 +213,8 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     columnGap = TI_VIDEO_LAYOUT.columnGap,
     titleLineHeight = TI_VIDEO_LAYOUT.titleLineHeight,
     subtitleLineHeight = TI_VIDEO_LAYOUT.subtitleLineHeight,
+    secondaryPictogramSlug,
+    secondaryPictogramDelaySec,
   } = props;
 
   const resolvedTitleColor = titleColor || "var(--ti-headline-color, var(--foreground-strong, #eeeeec))";
@@ -221,7 +227,7 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     <MastheadEyebrow label={String(mastheadEyebrow)} marginBottom={tiVideoRows(1)} />
   ) : null;
 
-  const titleNode = titleWordSplit ? (
+  const titleNode = !title ? null : titleWordSplit ? (
     <SplitTitle
       title={String(title)}
       titleColor={resolvedTitleColor}
@@ -246,15 +252,77 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
     </h1>
   );
 
-  const logo = pictogramSlug ? (
-    <ThreatIntelligencePictogramVideo
-      alt={typeof title === "string" ? title : String(pictogramSlug)}
-      frame={Number(frame)}
-      fps={Number(fps)}
-      size={Number(pictogramSize)}
-      slug={String(pictogramSlug)}
-    />
-  ) : null;
+  let logo: React.ReactNode = null;
+  if (pictogramSlug && isThreatIntelligencePictogramSlug(pictogramSlug)) {
+    const entry = getPictogramRegistryEntry(pictogramSlug as ThreatIntelligencePictogramSlug);
+    const aspectRatio = entry.aspectRatio ?? 1;
+    
+    let slideProgress = 1;
+    if (secondaryPictogramSlug && secondaryPictogramDelaySec != null) {
+      const delayFrames = Number(secondaryPictogramDelaySec) * Number(fps);
+      const slideDurationFrames = Number(fps) * 0.8;
+      if (Number(frame) < delayFrames) {
+        slideProgress = 0;
+      } else {
+        slideProgress = Math.min(1, (Number(frame) - delayFrames) / slideDurationFrames);
+      }
+    }
+    const easeOut = 1 - Math.pow(1 - slideProgress, 3);
+    
+    const gapOffset = tiVideoRows(1); // 24px default gap
+    const initialTranslateX = (Number(pictogramSize) * aspectRatio + gapOffset) / 2;
+
+    logo = (
+      <div
+        style={{
+          position: "relative",
+          width: Number(pictogramSize) * aspectRatio,
+          height: Number(pictogramSize),
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            transform: secondaryPictogramSlug ? `translateX(${-(easeOut) * initialTranslateX}px)` : undefined,
+          }}
+        >
+          <ThreatIntelligencePictogramVideo
+            alt={typeof title === "string" ? title : String(pictogramSlug)}
+            frame={Number(frame)}
+            fps={Number(fps)}
+            size={Number(pictogramSize)}
+            slug={String(pictogramSlug)}
+          />
+        </div>
+        {secondaryPictogramSlug ? (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              opacity: easeOut,
+              transform: `translateX(${easeOut * initialTranslateX + (1 - easeOut) * (initialTranslateX + 100)}px)`,
+            }}
+          >
+            <ThreatIntelligencePictogramVideo
+              alt={typeof title === "string" ? title : String(secondaryPictogramSlug)}
+              frame={Number(frame)}
+              fps={Number(fps)}
+              size={Number(pictogramSize)}
+              slug={String(secondaryPictogramSlug)}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   const eyebrowNode =
     eyebrow && eyebrowRule ? (
@@ -268,7 +336,8 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
       <PlainEyebrow label={String(eyebrow)} letterSpacing={Number(eyebrowLetterSpacing)} weight={Number(eyebrowWeight)} />
     ) : null;
 
-  const textColumn = (
+  const hasText = Boolean(title || subtitle || eyebrow);
+  const textColumn = hasText ? (
     <div style={{ display: "flex", flex: 1, flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
       {mastheadEyebrowNode}
       {eyebrowNode}
@@ -289,13 +358,14 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
         </p>
       ) : null}
     </div>
-  );
+  ) : null;
 
   const justifyContent =
+    !hasText ? "center" :
     verticalAlign === "top" ? "flex-start" : verticalAlign === "bottom" ? "flex-end" : "center";
 
   const outerStyle: React.CSSProperties = {
-    alignItems: horizontalAlign === "left" && logo ? "center" : "stretch",
+    alignItems: !hasText ? "center" : horizontalAlign === "left" && logo ? "center" : "stretch",
     boxSizing: "border-box",
     display: "flex",
     flexDirection: horizontalAlign === "left" && logo ? "row" : "column",
@@ -307,9 +377,18 @@ export function TiTitleSlide(props: TiTitleSlideProps) {
   };
 
   if (horizontalAlign === "center") {
+    if (logo && !hasText) {
+      return (
+        <div style={{ ...outerStyle, alignItems: "center", justifyContent: "center" }}>
+          {logo}
+        </div>
+      );
+    }
+
     return (
       <div style={{ ...outerStyle, alignItems: "center", textAlign: "center" }}>
         <div style={{ maxWidth: tiVideoCenterMaxWidth(padding), width: "100%" }}>
+          {logo}
           {mastheadEyebrowNode}
           {eyebrowNode}
           {titleNode}

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import React, { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { PICTOGRAM_CYCLE_MS, PICTOGRAM_EDGE_WIDTH, PICTOGRAM_NODE_RADIUS } from "./registry";
 
 export type PictogramPalette = {
@@ -15,6 +15,7 @@ export type PictogramPalette = {
   safe: string;
   warning: string;
   barrier: string;
+  user: string;
 };
 
 export const PICTOGRAM_PALETTE: PictogramPalette = {
@@ -28,6 +29,7 @@ export const PICTOGRAM_PALETTE: PictogramPalette = {
   safe: "var(--grass-8)",
   warning: "var(--amber-8)",
   barrier: "var(--sand-8)",
+  user: "var(--ti-pictogram-user)",
 };
 
 export type PictogramMotion = {
@@ -282,34 +284,199 @@ export function ringNodes(cx: number, cy: number, radius: number, count: number,
   });
 }
 
+function validateResolvedTone(resolved: string | undefined, tone: string): string {
+  if (!resolved) {
+    console.warn(`[VideoML Warning] Palette token "${tone}" resolved to undefined. This will cause shapes to be invisible.`);
+    return "transparent";
+  }
+  if (!resolved.startsWith('var(') && !resolved.startsWith('#') && !resolved.startsWith('color-mix') && !resolved.startsWith('rgba') && !resolved.startsWith('rgb') && !resolved.startsWith('hsl')) {
+    console.warn(`[VideoML Warning] Invalid color string for palette token "${tone}": "${resolved}". This may cause shapes to be invisible.`);
+  }
+  return resolved;
+}
+
 function resolveTone(palette: PictogramPalette, tone: "edge" | "muted" | "accent" | "safe" | "warning" | "barrier"): string {
+  let resolved: string | undefined;
   switch (tone) {
     case "muted":
-      return palette.muted;
+      resolved = palette.muted;
+      break;
     case "accent":
-      return palette.accent;
+      resolved = palette.accent;
+      break;
     case "safe":
-      return palette.safe;
+      resolved = palette.safe;
+      break;
     case "warning":
-      return palette.warning;
+      resolved = palette.warning;
+      break;
     case "barrier":
-      return palette.barrier;
+      resolved = palette.barrier;
+      break;
     default:
-      return palette.edge;
+      resolved = palette.edge;
+      break;
   }
+  return validateResolvedTone(resolved, tone);
 }
 
 function resolveNodeTone(palette: PictogramPalette, tone: "node" | "muted" | "accent" | "safe" | "warning"): string {
+  let resolved: string | undefined;
   switch (tone) {
     case "muted":
-      return palette.muted;
+      resolved = palette.muted;
+      break;
     case "accent":
-      return palette.accent;
+      resolved = palette.accent;
+      break;
     case "safe":
-      return palette.safe;
+      resolved = palette.safe;
+      break;
     case "warning":
-      return palette.warning;
+      resolved = palette.warning;
+      break;
     default:
-      return palette.node;
+      resolved = palette.node;
+      break;
   }
+  return validateResolvedTone(resolved, tone);
+}
+
+export function Actor({
+  palette,
+  x,
+  y,
+  scale = 1,
+  colorAnimation,
+  hatAnimation,
+  bgAnimation,
+  baseColor,
+  state = "user",
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  colorAnimation?: string;
+  hatAnimation?: string;
+  bgAnimation?: string;
+  baseColor?: string;
+  state?: "user" | "threat";
+}) {
+  const isThreat = state === "threat";
+  
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      {/* Background circle for threat state */}
+      <circle
+        cx={0}
+        cy={-4}
+        r={18}
+        fill={palette.accent}
+        style={{ 
+          opacity: isThreat ? 1 : 0,
+          animation: bgAnimation 
+        }}
+      />
+      
+      {/* Person (standard color regardless of state) */}
+      <g style={{ color: baseColor || palette.user, animation: colorAnimation }}>
+        <circle cx={0} cy={-4} r={6} fill="currentColor" />
+        <path d="M -11 11 C -11 3, 11 3, 11 11" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" />
+      </g>
+      
+      {/* Hat (always black) */}
+      <g style={{ 
+        color: "#000000",
+        opacity: isThreat ? 1 : 0, 
+        animation: hatAnimation 
+      }}>
+        <path d="M -6 -10 L -4 -18 L 4 -18 L 6 -10 Z" fill="currentColor" strokeLinejoin="round" />
+        <path d="M -11 -10 L 11 -10" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+      </g>
+    </g>
+  );
+}
+
+export function RiskGlyph({
+  palette,
+  x,
+  y,
+  scale = 1,
+  color,
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  color?: string;
+}) {
+  const fillColor = color || palette.warning;
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      <path 
+        d="M 0 -14 L 14 0 L 0 14 L -14 0 Z" 
+        fill={fillColor} 
+      />
+      <path 
+        d="M 0 -6 V 3 M 0 7 V 9" 
+        stroke={palette.frame} 
+        strokeWidth={3.5} 
+        strokeLinecap="round" 
+        fill="none"
+      />
+    </g>
+  );
+}
+
+export function PadlockGlyph({
+  palette,
+  x,
+  y,
+  scale = 1,
+  color,
+  state = "locked",
+  shackleAnimation,
+}: {
+  palette: PictogramPalette;
+  x: number;
+  y: number;
+  scale?: number;
+  color?: string;
+  state?: "locked" | "unlocked";
+  shackleAnimation?: string;
+}) {
+  const fillColor = color || palette.node;
+  const isUnlocked = state === "unlocked";
+  
+  return (
+    <g transform={`translate(${x} ${y}) scale(${scale})`}>
+      <g style={{ 
+        animation: shackleAnimation, 
+        transform: isUnlocked ? "translateY(-6px)" : undefined,
+        transformOrigin: "center"
+      }}>
+        <path 
+          d="M -5 6 V -7 C -5 -14, 5 -14, 5 -7 V -1" 
+          fill="none" 
+          stroke={palette.edge} 
+          strokeWidth={4.5} 
+          strokeLinecap="round" 
+        />
+      </g>
+      <rect 
+        x={-11} 
+        y={0} 
+        width={22} 
+        height={16} 
+        rx={3} 
+        fill={fillColor} 
+        stroke={palette.edge} 
+        strokeWidth={4} 
+      />
+      {/* Keyhole */}
+      <circle cx={0} cy={6} r={2.5} fill={palette.frame} />
+      <path d="M 0 6 V 11" stroke={palette.frame} strokeWidth={2.5} strokeLinecap="round" />
+    </g>
+  );
 }

@@ -1,14 +1,17 @@
 "use client";
 
 import { motion } from "motion/react";
-import type { CSSProperties, ReactElement } from "react";
+import React, { type CSSProperties, type ReactElement } from "react";
 import type { ThreatIntelligencePictogramSlug } from "./registry";
 import {
   arrowPath,
+  Actor,
   Box,
   Line,
   Node,
   PictogramSvg,
+  RiskGlyph,
+  PadlockGlyph,
   pointsPath,
   type PictogramMotion,
   type PictogramPalette,
@@ -32,15 +35,6 @@ function BalanceShiftPictogram({ alt, palette, timing }: RegisteredPictogramProp
     node: "var(--foreground-strong)",
     muted: "color-mix(in srgb, var(--foreground-strong) 54%, var(--background) 46%)",
   };
-  const nodeTransition = timing.prefersReducedMotion
-    ? { duration: 0 }
-    : {
-        duration: timing.cycleS,
-        repeat: Infinity,
-        ease: "easeInOut",
-        times: [0, 0.24, 0.42, 0.62, 1],
-        delay: timing.delayS(900),
-      };
   const animationDelay = `${timing.delayS()}s`;
   const beamStyle = {
     animation: timing.prefersReducedMotion ? "none" : `ti-scale-beam ${timing.cycleS}s ease-in-out ${animationDelay} infinite`,
@@ -51,10 +45,12 @@ function BalanceShiftPictogram({ alt, palette, timing }: RegisteredPictogramProp
   const leftPanStyle = {
     animation: timing.prefersReducedMotion ? "none" : `ti-scale-left-pan ${timing.cycleS}s ease-in-out ${animationDelay} infinite`,
     transform: timing.prefersReducedMotion ? "translateY(-10px)" : undefined,
+    transformOrigin: "72px 118px",
   } as CSSProperties;
   const rightPanStyle = {
     animation: timing.prefersReducedMotion ? "none" : `ti-scale-right-pan ${timing.cycleS}s ease-in-out ${animationDelay} infinite`,
     transform: timing.prefersReducedMotion ? "translateY(12px)" : undefined,
+    transformOrigin: "248px 118px",
   } as CSSProperties;
 
   return (
@@ -63,17 +59,43 @@ function BalanceShiftPictogram({ alt, palette, timing }: RegisteredPictogramProp
         {`
           @keyframes ti-scale-beam {
             0%, 16%, 100% { transform: rotate(0deg); }
-            38%, 82% { transform: rotate(7deg); }
+            38%, 92% { transform: rotate(7deg); }
           }
 
           @keyframes ti-scale-left-pan {
-            0%, 16%, 100% { transform: translateY(0); }
-            38%, 82% { transform: translateY(-10px); }
+            0%   { transform: translateY(0) rotate(1deg); }
+            8%   { transform: translateY(0) rotate(-1deg); }
+            16%  { transform: translateY(0) rotate(1deg); }
+            24%  { transform: translateY(-5px) rotate(-3deg); }
+            32%  { transform: translateY(-9px) rotate(2deg); }
+            38%  { transform: translateY(-10px) rotate(-1.5deg); }
+            46%  { transform: translateY(-10px) rotate(1deg); }
+            54%  { transform: translateY(-10px) rotate(-1deg); }
+            62%  { transform: translateY(-10px) rotate(1deg); }
+            70%  { transform: translateY(-10px) rotate(-1deg); }
+            78%  { transform: translateY(-10px) rotate(1deg); }
+            86%  { transform: translateY(-10px) rotate(-1deg); }
+            92%  { transform: translateY(-10px) rotate(1deg); }
+            96%  { transform: translateY(-5px) rotate(-2deg); }
+            100% { transform: translateY(0) rotate(1deg); }
           }
 
           @keyframes ti-scale-right-pan {
-            0%, 16%, 100% { transform: translateY(0); }
-            38%, 82% { transform: translateY(12px); }
+            0%   { transform: translateY(0) rotate(-1deg); }
+            8%   { transform: translateY(0) rotate(1deg); }
+            16%  { transform: translateY(0) rotate(-1deg); }
+            24%  { transform: translateY(6px) rotate(3deg); }
+            32%  { transform: translateY(11px) rotate(-2deg); }
+            38%  { transform: translateY(12px) rotate(1.5deg); }
+            46%  { transform: translateY(12px) rotate(-1deg); }
+            54%  { transform: translateY(12px) rotate(1deg); }
+            62%  { transform: translateY(12px) rotate(-1deg); }
+            70%  { transform: translateY(12px) rotate(1deg); }
+            78%  { transform: translateY(12px) rotate(-1deg); }
+            86%  { transform: translateY(12px) rotate(1deg); }
+            92%  { transform: translateY(12px) rotate(-1deg); }
+            96%  { transform: translateY(6px) rotate(2deg); }
+            100% { transform: translateY(0) rotate(-1deg); }
           }
         `}
       </style>
@@ -101,63 +123,25 @@ function BalanceShiftPictogram({ alt, palette, timing }: RegisteredPictogramProp
           </g>
           <g style={leftPanStyle}>
             <path
-              d="M 78 118 L 42 198 H 128 L 78 118 Z"
+              d="M 72 118 L 36 200 H 108 Z"
               fill="none"
               stroke={scalePalette.edge}
               strokeLinejoin="round"
               strokeWidth={6}
             />
-            <circle cx={70} cy={180} fill={scalePalette.node} opacity={0.88} r={15} />
-            <circle cx={92} cy={190} fill={scalePalette.muted} opacity={0.86} r={11} />
+            {/* Generic User weighing down left pan */}
+            <Actor palette={palette} x={72} y={192} scale={1.2} state="user" />
           </g>
           <g style={rightPanStyle}>
             <path
-              d="M 246 118 L 190 212 H 288 L 246 118 Z"
+              d="M 248 118 L 212 200 H 284 Z"
               fill="none"
               stroke={palette.accent}
               strokeLinejoin="round"
               strokeWidth={7}
             />
-            <motion.circle
-              animate={timing.prefersReducedMotion ? { opacity: 0.78, scale: 1 } : { opacity: [0.42, 0.42, 0.62, 0.82, 0.82], scale: [1, 1, 1.02, 1.04, 1.04] }}
-              cx={208}
-              cy={198}
-              fill={palette.accent}
-              initial={false}
-              opacity={0.78}
-              r={13}
-              transition={nodeTransition as any}
-            />
-            <motion.circle
-              animate={timing.prefersReducedMotion ? { opacity: 0.9, scale: 1 } : { opacity: [0.5, 0.5, 0.76, 0.95, 0.95], scale: [1, 1, 1.03, 1.07, 1.07] }}
-              cx={232}
-              cy={188}
-              fill={palette.accent}
-              initial={false}
-              opacity={0.9}
-              r={14}
-              transition={{ ...nodeTransition, delay: timing.delayS(1200) } as any}
-            />
-            <motion.circle
-              animate={timing.prefersReducedMotion ? { opacity: 1, scale: 1 } : { opacity: [0.55, 0.55, 0.84, 1, 1], scale: [1, 1, 1.03, 1.1, 1.1] }}
-              cx={254}
-              cy={200}
-              fill={palette.accent}
-              initial={false}
-              opacity={1}
-              r={16}
-              transition={{ ...nodeTransition, delay: timing.delayS(1550) } as any}
-            />
-            <motion.circle
-              animate={timing.prefersReducedMotion ? { opacity: 0.82, scale: 1 } : { opacity: [0.38, 0.38, 0.68, 0.88, 0.88], scale: [1, 1, 1.02, 1.06, 1.06] }}
-              cx={274}
-              cy={189}
-              fill={palette.accent}
-              initial={false}
-              opacity={0.82}
-              r={12}
-              transition={{ ...nodeTransition, delay: timing.delayS(1900) } as any}
-            />
+            {/* Threat Actors weighing down right pan */}
+            <Actor palette={palette} x={248} y={192} scale={1.4} state="threat" />
           </g>
         </g>
         <circle cx={160} cy={118} fill={palette.frame} r={23} stroke={scalePalette.edge} strokeWidth={7} />
@@ -301,9 +285,25 @@ function AwsDiscoveryPictogram({ alt, palette, timing }: RegisteredPictogramProp
             34%, 78% { opacity: 1; transform: scale(1); }
             88% { opacity: 0.42; transform: scale(0.96); }
           }
+          @keyframes ti-aws-sweep {
+            0%, 5% { r: 0; opacity: 0; stroke-width: 8; }
+            6% { r: 0; opacity: 0.6; stroke-width: 8; }
+            45%, 100% { r: 380; opacity: 0; stroke-width: 1; }
+          }
         `}
       </style>
       <g transform="translate(160 160) scale(1.14) translate(-160 -150)">
+        {/* Threat Actor Scanner */}
+        <g>
+          <circle 
+            cx={40} cy={30} fill="none" stroke={palette.warning} 
+            style={{ 
+              animation: timing.prefersReducedMotion ? "none" : `ti-aws-sweep ${timing.cycleS}s ease-out infinite` 
+            }} 
+          />
+          <Actor palette={palette} x={40} y={30} scale={1.1} state="threat" />
+        </g>
+        
         {buckets.map((bucket) => {
           const stroke = bucket.risk === "accent" ? palette.accent : bucket.risk === "warning" ? palette.warning : awsPalette.edge;
           const markerX = bucket.x + (bucket.markerDx ?? 20);
@@ -329,8 +329,7 @@ function AwsDiscoveryPictogram({ alt, palette, timing }: RegisteredPictogramProp
               <Node palette={awsPalette} x={bucket.x} y={bucket.y + 2} />
               {bucket.risk ? (
                 <g style={riskStyle(bucket.offset ?? 0, bucket.risk === "accent")}>
-                  <circle cx={markerX} cy={markerY} fill={stroke} r={markerR} />
-                  <path d={`M ${markerX - markerR * 0.8} ${markerY} H ${markerX + markerR * 0.8} M ${markerX} ${markerY - markerR * 0.8} V ${markerY + markerR * 0.8}`} stroke={palette.frame} strokeLinecap="round" strokeWidth={markerR >= 16 ? 4.8 : 3.4} />
+                  <RiskGlyph palette={palette} x={markerX} y={markerY} scale={markerR / 12} color={stroke} />
                 </g>
               ) : null}
             </g>
@@ -377,6 +376,19 @@ function AzureBlastRadiusPictogram({ alt, palette, timing }: RegisteredPictogram
             32%, 70% { opacity: 1; transform: scale(1.08); }
             82% { opacity: 0.35; transform: scale(1); }
           }
+
+          @keyframes ti-azure-actor-color {
+            0%, 30%, 85%, 100% { color: ${azurePalette.muted}; }
+            35%, 80% { color: ${palette.warning}; }
+          }
+          @keyframes ti-azure-actor-hat {
+            0%, 25%, 85%, 100% { opacity: 0; transform: translateY(-10px); }
+            30%, 80% { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes ti-azure-actor-bg {
+            0%, 25%, 85%, 100% { opacity: 0; }
+            30%, 80% { opacity: 1; }
+          }
         `}
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
@@ -400,17 +412,23 @@ function AzureBlastRadiusPictogram({ alt, palette, timing }: RegisteredPictogram
           strokeWidth={6}
           style={pathStyle}
         />
-        <Node palette={azurePalette} x={104} y={112} />
+        <Actor
+          palette={palette}
+          x={104}
+          y={112}
+          baseColor={timing.prefersReducedMotion ? palette.warning : azurePalette.muted}
+          colorAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-color ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
+          hatAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-hat ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
+          bgAnimation={timing.prefersReducedMotion ? "none" : `ti-azure-actor-bg ${timing.cycleS}s ease-in-out ${animationDelay} infinite`}
+        />
         <Node palette={azurePalette} x={222} y={112} />
         <Node palette={azurePalette} x={222} y={180} />
         <Node palette={azurePalette} x={160} y={216} />
         <g style={riskStyle(3400)}>
-          <circle cx={222} cy={112} fill={palette.warning} r={12} />
-          <path d="M 213 112 H 231 M 222 103 V 121" stroke={palette.frame} strokeLinecap="round" strokeWidth={4} />
+          <RiskGlyph palette={palette} x={222} y={112} scale={0.9} color={palette.warning} />
         </g>
         <g style={riskStyle(6200)}>
-          <circle cx={160} cy={216} fill={palette.accent} r={18} />
-          <path d="M 146 216 H 174 M 160 202 V 230" stroke={palette.frame} strokeLinecap="round" strokeWidth={5} />
+          <RiskGlyph palette={palette} x={160} y={216} scale={1.3} color={palette.accent} />
         </g>
       </g>
     </PictogramSvg>
@@ -479,16 +497,13 @@ function OpenAIInfraPictogram({ alt, palette, timing }: RegisteredPictogramProps
         <Node palette={aiPalette} x={237} y={181} />
         <Node palette={aiPalette} x={160} y={250} />
         <g style={riskStyle(2600)}>
-          <circle cx={83} cy={181} fill={palette.warning} r={12} />
-          <path d="M 74 181 H 92 M 83 172 V 190" stroke={palette.frame} strokeLinecap="round" strokeWidth={4} />
+          <RiskGlyph palette={palette} x={83} y={181} scale={0.9} color={palette.warning} />
         </g>
         <g style={riskStyle(5600)}>
-          <circle cx={237} cy={181} fill={palette.accent} r={14} />
-          <path d="M 226 181 H 248 M 237 170 V 192" stroke={palette.frame} strokeLinecap="round" strokeWidth={4.5} />
+          <RiskGlyph palette={palette} x={237} y={181} scale={1.0} color={palette.accent} />
         </g>
         <g style={riskStyle(8200)}>
-          <circle cx={160} cy={250} fill={palette.accent} r={18} />
-          <path d="M 146 250 H 174 M 160 236 V 264" stroke={palette.frame} strokeLinecap="round" strokeWidth={5} />
+          <RiskGlyph palette={palette} x={160} y={250} scale={1.3} color={palette.accent} />
         </g>
       </g>
     </PictogramSvg>
@@ -549,6 +564,15 @@ function GamingIsolationPictogram({ alt, palette, timing }: RegisteredPictogramP
           strokeWidth={5}
           style={barrierStyle}
         />
+        <g style={barrierStyle}>
+          <PadlockGlyph
+            palette={palette}
+            x={160}
+            y={84}
+            scale={1.3}
+            state="locked"
+          />
+        </g>
 
         <g transform="translate(34 67) scale(0.47)">
           <path
@@ -953,8 +977,7 @@ function FindingsPipelinePictogram({ alt, palette, timing }: RegisteredPictogram
         {/* Owner takes the first item to closure */}
         <g style={closeStyle}>
           <Line d={arrowPath(238, 233, 262, 233, 8)} palette={palette} tone="accent" width={5} />
-          <circle cx={282} cy={226} fill="none" r={11} stroke={stackPalette.edge} strokeWidth={5} />
-          <path d="M 268 254 C 268 242, 296 242, 296 254" fill="none" stroke={stackPalette.edge} strokeLinecap="round" strokeWidth={5} />
+          <Actor palette={palette} x={282} y={235} scale={1.8} state="user" />
           <Line d="M 276 226 L 281 231 L 289 220" palette={palette} tone="accent" width={4} />
         </g>
       </g>
@@ -1022,8 +1045,14 @@ function S3PiiDiscoveryPictogram({ alt, palette, timing }: RegisteredPictogramPr
         {/* The one bucket where sensitivity and reachability overlap */}
         <g style={hitStyle}>
           {bucketShape(228, 176, palette.accent)}
-          <Node glow palette={palette} r={7} tone="accent" x={228} y={180} />
-          <Line d="M 216 156 H 240" opacity={0.9} palette={palette} tone="accent" width={4} />
+          <PadlockGlyph 
+            palette={palette} 
+            x={228} 
+            y={176} 
+            scale={1.2} 
+            state="unlocked" 
+            color={palette.accent} 
+          />
         </g>
         {/* Sweeping lens */}
         <g style={lensStyle}>
@@ -1068,10 +1097,9 @@ function PrivilegeExpiryPictogram({ alt, palette, timing }: RegisteredPictogramP
             100% { stroke-dashoffset: ${Math.round(arcCircumference)}px; }
           }
 
-          @keyframes ti-pim-key {
-            0%, 64% { opacity: 1; }
-            74%, 88% { opacity: 0.28; }
-            100% { opacity: 1; }
+          @keyframes ti-pim-shackle {
+            0%, 64% { transform: translateY(-6px); }
+            74%, 100% { transform: translateY(0); }
           }
 
           @keyframes ti-pim-approve {
@@ -1096,16 +1124,19 @@ function PrivilegeExpiryPictogram({ alt, palette, timing }: RegisteredPictogramP
           style={arcStyle}
           transform="rotate(-90 160 160)"
         />
-        {/* The key that expires */}
-        <g style={keyStyle}>
-          <circle cx={126} cy={136} fill={palette.frame} r={26} stroke={pimPalette.edge} strokeWidth={7} />
-          <circle cx={126} cy={136} fill="none" r={9} stroke={pimPalette.muted} strokeWidth={5} />
-          <Line d="M 146 156 L 202 212" palette={pimPalette} width={9} />
-          <Line d="M 178 188 L 194 172" palette={pimPalette} width={8} />
-          <Line d="M 196 206 L 214 188" palette={pimPalette} width={8} />
+        {/* The padlock that expires (locks) */}
+        <g>
+          <PadlockGlyph 
+            palette={pimPalette} 
+            x={160} 
+            y={160} 
+            scale={2.2} 
+            state="unlocked" 
+            shackleAnimation={timing.prefersReducedMotion ? "none" : `ti-pim-shackle ${timing.cycleS}s ease-in-out ${timing.delayS()}s infinite`} 
+          />
         </g>
-        {/* Deliberate re-activation: brief approval check */}
-        <g style={approveStyle}>
+        {/* Approver mark appears when it locks */}
+        <g style={approveStyle} transform="translate(160, 160) scale(1.4) translate(-160, -160)">
           <circle cx={226} cy={104} fill={palette.frame} r={20} stroke={palette.accent} strokeWidth={5} />
           <Line d="M 216 104 L 223 112 L 237 96" palette={palette} tone="accent" width={5} />
         </g>
@@ -1151,8 +1182,7 @@ function AzureDataPathsPictogram({ alt, palette, timing }: RegisteredPictogramPr
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
         {/* Identity */}
-        <circle cx={62} cy={120} fill={palette.frame} r={20} stroke={pathPalette.edge} strokeWidth={6} />
-        <path d="M 40 168 C 40 146, 84 146, 84 168" fill="none" stroke={pathPalette.edge} strokeLinecap="round" strokeWidth={6} />
+        <Actor palette={palette} x={62} y={144} scale={0.9} state="user" />
         {/* Gate posts along the route */}
         {[136, 196].map((x) => (
           <g key={x}>
@@ -1232,6 +1262,12 @@ function KeyScopePictogram({ alt, palette, timing }: RegisteredPictogramProps) {
             52%, 90% { opacity: 1; }
             100% { opacity: 0.45; }
           }
+
+          @keyframes ti-keys-shackle {
+            0%, 30% { transform: translateY(0); }
+            52%, 90% { transform: translateY(-6px); }
+            100% { transform: translateY(0); }
+          }
         `}
       </style>
       <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
@@ -1252,22 +1288,18 @@ function KeyScopePictogram({ alt, palette, timing }: RegisteredPictogramProps) {
               strokeWidth={job.kept ? 6 : 4}
               style={job.kept ? keptStyle : undefined}
             />
-            <rect
-              fill={palette.frame}
-              height={44}
-              rx={9}
-              stroke={job.kept ? palette.accent : keyPalette.edge}
-              strokeWidth={job.kept ? 6 : 5}
-              width={64}
-              x={196}
-              y={job.y}
-            />
-            <Line
-              d={`M 208 ${job.y + 16} H 248 M 208 ${job.y + 29} H 236`}
-              opacity={0.72}
-              palette={keyPalette}
-              tone="muted"
-              width={4}
+            <PadlockGlyph
+              palette={palette}
+              x={228}
+              y={job.y + 22}
+              scale={1.8}
+              state={job.kept ? "unlocked" : "locked"}
+              color={job.kept ? palette.accent : keyPalette.muted}
+              shackleAnimation={
+                job.kept && !timing.prefersReducedMotion
+                  ? `ti-keys-shackle ${timing.cycleS}s ease-in-out ${timing.delayS()}s infinite`
+                  : "none"
+              }
             />
           </g>
         ))}
@@ -1404,9 +1436,9 @@ function AccountSeparationPictogram({ alt, palette, timing }: RegisteredPictogra
         {/* The bridge that isn't there */}
         <Line d="M 142 140 H 154" opacity={0.6} palette={acctPalette} tone="muted" width={5} />
         <Line d="M 166 140 H 178" dashArray="2 10" opacity={0.35} palette={acctPalette} tone="muted" width={5} />
-        {/* Attacker spark dies at the gap */}
+        {/* Attacker tries to cross the gap */}
         <g style={sparkStyle}>
-          <Node glow palette={palette} r={8} tone="accent" x={140} y={140} />
+          <Actor palette={palette} x={140} y={140} scale={0.75} state="threat" />
         </g>
         {/* Separate keys, separate lives */}
         <g>
@@ -1481,6 +1513,13 @@ function UntrustedModPictogram({ alt, palette, timing }: RegisteredPictogramProp
             x={76}
             y={168}
           />
+          <PadlockGlyph
+            palette={palette}
+            x={160}
+            y={168}
+            scale={1.4}
+            state="locked"
+          />
         </g>
         {/* The slot inside the sandbox */}
         <Line d="M 108 226 H 130 M 190 226 H 212" opacity={0.6} palette={modPalette} tone="muted" width={5} />
@@ -1514,8 +1553,335 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY: Record<ThreatIntelligencePi
   "control-chatgpt-workspace-access-and-connected-data": { aspectRatio: 1, render: ConnectorGovernancePictogram },
   "separate-game-accounts-from-real-life": { aspectRatio: 1, render: AccountSeparationPictogram },
   "treat-mods-and-launchers-like-untrusted-code": { aspectRatio: 1, render: UntrustedModPictogram },
+  "threat-actors-scaling-out": { aspectRatio: 1, render: ThreatActorsScalingOutPictogram },
+  "threat-actors-scaling-up": { aspectRatio: 1, render: ThreatActorsScalingUpPictogram },
+  "attackers-vs-defenders-old": { aspectRatio: 2, render: AttackersVsDefendersOldPictogram },
+  "attackers-vs-defenders-new": { aspectRatio: 2, render: AttackersVsDefendersNewPictogram },
 };
 
 export function getPictogramRegistryEntry(slug: ThreatIntelligencePictogramSlug): PictogramRegistryEntry {
   return THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY[slug];
 }
+
+function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const nodePalette = {
+    ...palette,
+    muted: "color-mix(in srgb, var(--foreground-strong) 54%, var(--background) 46%)",
+  };
+
+  const outerNodes = [
+    { x: 100, y: 70 },
+    { x: 220, y: 250 },
+    { x: 70, y: 160 },
+    { x: 220, y: 70 },
+    { x: 100, y: 250 },
+    { x: 250, y: 160 },
+  ];
+  
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 320 320">
+      <style>
+        {`
+          @keyframes ti-center-color {
+            0%, 5% { color: ${nodePalette.muted}; }
+            10%, 90% { color: ${palette.user}; }
+            95%, 100% { color: ${nodePalette.muted}; }
+          }
+          @keyframes ti-center-hat {
+            0%, 5% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+            95%, 100% { opacity: 0; transform: translateY(-10px); }
+          }
+          @keyframes ti-center-bg {
+            0%, 5% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+            95%, 100% { opacity: 0; }
+          }
+          ${outerNodes.map((_, i) => {
+            const start = i * 12;
+            const reach = start + 20;
+            return `
+              @keyframes ti-scale-out-line-${i} {
+                0%, ${start}% { opacity: 0; stroke-dashoffset: 100; }
+                ${start + 5}% { opacity: 0.6; stroke-dashoffset: 100; }
+                ${reach}%, 90% { opacity: 0.6; stroke-dashoffset: 0; }
+                95%, 100% { opacity: 0; stroke-dashoffset: 0; }
+              }
+              @keyframes ti-outer-color-${i} {
+                0%, ${start + 5}% { color: ${nodePalette.muted}; opacity: 0; }
+                ${start + 10}%, ${reach - 5}% { color: ${nodePalette.muted}; opacity: 1; }
+                ${reach}%, 90% { color: ${palette.user}; opacity: 1; }
+                95%, 100% { color: ${nodePalette.muted}; opacity: 0; }
+              }
+              @keyframes ti-outer-hat-${i} {
+                0%, ${reach - 5}% { opacity: 0; transform: translateY(-10px); }
+                ${reach}%, 90% { opacity: 1; transform: translateY(0); }
+                95%, 100% { opacity: 0; transform: translateY(-10px); }
+              }
+              @keyframes ti-outer-bg-${i} {
+                0%, ${reach - 5}% { opacity: 0; }
+                ${reach}%, 90% { opacity: 1; }
+                95%, 100% { opacity: 0; }
+              }
+            `;
+          }).join("\n")}
+        `}
+      </style>
+      <g transform="translate(160 160) scale(1.1) translate(-160 -160)">
+        
+        {/* Lines */}
+        {outerNodes.map((n, i) => (
+          <path
+            key={`line-${i}`}
+            d={`M ${160 + (n.x - 160) * 0.25} ${160 + (n.y - 160) * 0.25} L ${n.x} ${n.y}`}
+            fill="none"
+            stroke={nodePalette.muted}
+            strokeWidth={4}
+            strokeLinecap="round"
+            strokeDasharray={100}
+            style={{
+              opacity: timing.prefersReducedMotion ? 0.6 : 0,
+              strokeDashoffset: timing.prefersReducedMotion ? 0 : 100,
+              animation: timing.prefersReducedMotion ? "none" : `ti-scale-out-line-${i} ${timing.cycleS}s ease-in-out infinite`
+            }}
+          />
+        ))}
+
+        {/* Center Actor */}
+        <Actor 
+          palette={palette} 
+          x={160} 
+          y={160} 
+          scale={1.2}
+          baseColor={palette.user}
+          colorAnimation={timing.prefersReducedMotion ? "none" : `ti-center-color ${timing.cycleS}s ease-in-out infinite`}
+          hatAnimation={timing.prefersReducedMotion ? "none" : `ti-center-hat ${timing.cycleS}s ease-in-out infinite`}
+          bgAnimation={timing.prefersReducedMotion ? "none" : `ti-center-bg ${timing.cycleS}s ease-in-out infinite`}
+        />
+
+        {/* Outer Actors */}
+        {outerNodes.map((n, i) => (
+          <g key={`actor-${i}`} style={{ 
+            opacity: timing.prefersReducedMotion ? 1 : 0,
+            animation: timing.prefersReducedMotion ? "none" : `ti-outer-color-${i} ${timing.cycleS}s ease-in-out infinite`,
+            transformOrigin: `${n.x}px ${n.y}px`
+          }}>
+            <Actor 
+              palette={palette} 
+              x={n.x} 
+              y={n.y} 
+              scale={1.2}
+              baseColor="inherit"
+              hatAnimation={timing.prefersReducedMotion ? "none" : `ti-outer-hat-${i} ${timing.cycleS}s ease-in-out infinite`}
+              bgAnimation={timing.prefersReducedMotion ? "none" : `ti-outer-bg-${i} ${timing.cycleS}s ease-in-out infinite`}
+            />
+          </g>
+        ))}
+      </g>
+    </PictogramSvg>
+  );
+}
+
+function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const nodePalette = {
+    ...palette,
+    muted: "color-mix(in srgb, var(--foreground-strong) 54%, var(--background) 46%)",
+  };
+  
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 320 320">
+      <style>
+        {`
+          @keyframes ti-scale-up-color {
+            0%, 5% { color: ${nodePalette.muted}; }
+            10%, 90% { color: ${palette.user}; }
+            95%, 100% { color: ${nodePalette.muted}; }
+          }
+          @keyframes ti-scale-up-hat {
+            0%, 5% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+            95%, 100% { opacity: 0; transform: translateY(-10px); }
+          }
+          @keyframes ti-scale-up-bg {
+            0%, 5% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+            95%, 100% { opacity: 0; }
+          }
+          @keyframes ti-scale-up-actor {
+            0%, 5% { transform: scale(1.5); }
+            85%, 90% { transform: scale(5.5); }
+            95%, 100% { transform: scale(1.5); }
+          }
+          @keyframes ti-scale-up-shockwave {
+            0%, 10% { opacity: 0; r: 0; stroke-width: 6; }
+            45% { opacity: 0.8; }
+            80%, 100% { opacity: 0; r: 180; stroke-width: 0; }
+          }
+        `}
+      </style>
+      
+      <g transform="translate(160 160)">
+        {/* Shockwaves */}
+        <circle 
+          cx={0} cy={0} fill="none" stroke={palette.accent}
+          style={{
+            opacity: timing.prefersReducedMotion ? 0 : 0,
+            animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) infinite`
+          }} 
+        />
+        <circle 
+          cx={0} cy={0} fill="none" stroke={palette.accent}
+          style={{
+            opacity: timing.prefersReducedMotion ? 0 : 0,
+            animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) ${timing.delayS(400)}s infinite`
+          }} 
+        />
+        
+        {/* Transforming & Scaling Actor */}
+        <g style={{
+          animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-actor ${timing.cycleS}s ease-in-out infinite`,
+          transform: timing.prefersReducedMotion ? "scale(5.5)" : "scale(1.5)"
+        }}>
+          <Actor 
+            palette={palette} 
+            x={0} 
+            y={0} 
+            scale={1}
+            baseColor={palette.user}
+            colorAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-color ${timing.cycleS}s ease-in-out infinite`}
+            hatAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-hat ${timing.cycleS}s ease-in-out infinite`}
+            bgAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-bg ${timing.cycleS}s ease-in-out infinite`}
+          />
+        </g>
+      </g>
+    </PictogramSvg>
+  );
+}
+
+function AttackersVsDefendersOldPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const users = [
+    { x: 420, y: 80 }, { x: 500, y: 60 }, { x: 580, y: 100 },
+    { x: 380, y: 140 }, { x: 480, y: 150 }, { x: 560, y: 180 },
+    { x: 420, y: 220 }, { x: 520, y: 250 }, { x: 600, y: 260 },
+    { x: 360, y: 280 }, { x: 460, y: 290 }, { x: 280, y: 290 }
+  ];
+
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 640 320">
+      <style>
+        {`
+          @keyframes ti-dash-flow {
+            from { stroke-dashoffset: 24; }
+            to { stroke-dashoffset: 0; }
+          }
+          @keyframes ti-float {
+            0%, 100% { transform: translateY(-4px); }
+            50% { transform: translateY(4px); }
+          }
+        `}
+      </style>
+      {/* Banks / Institutions */}
+      <Box x={100} y={160} width={80} height={120} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={100} y={160} palette={palette} scale={1.2} />
+
+      <Box x={190} y={100} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={100} palette={palette} scale={1.1} />
+
+      <Box x={190} y={220} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={220} palette={palette} scale={1.1} />
+
+      {/* Attack Lines */}
+      <path d="M 320 160 L 140 160" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+      <path d="M 320 160 L 230 100" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+      <path d="M 320 160 L 230 220" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+
+      {/* Attacker */}
+      <g style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float ${timing.cycleS * 0.4}s ease-in-out infinite` }}>
+        <Actor palette={palette} x={320} y={160} scale={1.2} state="threat" />
+      </g>
+
+      {/* Ordinary Users */}
+      {users.map((u, i) => (
+        <Actor key={i} palette={palette} x={u.x} y={u.y} scale={1} state="user" />
+      ))}
+    </PictogramSvg>
+  );
+}
+
+
+function AttackersVsDefendersNewPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const users = [
+    { x: 420, y: 80 }, { x: 500, y: 60 }, { x: 580, y: 100 },
+    { x: 380, y: 140 }, { x: 480, y: 150 }, { x: 560, y: 180 },
+    { x: 420, y: 220 }, { x: 520, y: 250 }, { x: 600, y: 260 },
+    { x: 360, y: 280 }, { x: 460, y: 290 }, { x: 280, y: 290 }
+  ];
+
+  const attackers = [
+    { x: 470, y: 40 }, { x: 560, y: 50 }, { x: 350, y: 80 },
+    { x: 440, y: 110 }, { x: 540, y: 130 }, { x: 620, y: 160 },
+    { x: 390, y: 190 }, { x: 480, y: 210 }, { x: 580, y: 220 },
+    { x: 400, y: 260 }, { x: 500, y: 280 }, { x: 320, y: 240 }
+  ];
+  
+  const bankTargets = [
+    { x: 140, y: 160 },
+    { x: 230, y: 100 },
+    { x: 230, y: 220 },
+  ];
+
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 640 320">
+      <style>
+        {`
+          @keyframes ti-dash-flow-fast {
+            from { stroke-dashoffset: 16; }
+            to { stroke-dashoffset: 0; }
+          }
+          @keyframes ti-float-small {
+            0%, 100% { transform: translateY(-2px); }
+            50% { transform: translateY(2px); }
+          }
+          @keyframes ti-float-tiny {
+            0%, 100% { transform: translateY(-1px); }
+            50% { transform: translateY(1px); }
+          }
+        `}
+      </style>
+      {/* Banks / Institutions */}
+      <Box x={100} y={160} width={80} height={120} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={100} y={160} palette={palette} scale={1.2} />
+
+      <Box x={190} y={100} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={100} palette={palette} scale={1.1} />
+
+      <Box x={190} y={220} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={220} palette={palette} scale={1.1} />
+
+      {/* Attack Lines & Attackers */}
+      {attackers.map((a, i) => {
+        const u = users[i];
+        const b = bankTargets[i % 3];
+        return (
+          <g key={`a-${i}`}>
+            <path d={`M ${a.x} ${a.y} L ${u.x} ${u.y}`} stroke={palette.accent} fill="none" strokeWidth={3} strokeDasharray="4 4" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow-fast ${timing.cycleS * 0.1}s linear infinite` }} />
+            {i % 2 === 0 && (
+              <path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} stroke={palette.accent} fill="none" strokeWidth={3} strokeDasharray="4 4" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow-fast ${timing.cycleS * 0.1}s linear infinite` }} />
+            )}
+            <g style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float-small ${timing.cycleS * (0.3 + (i % 2) * 0.1)}s ease-in-out infinite` }}>
+              <Actor palette={palette} x={a.x} y={a.y} scale={1.3} state="threat" />
+            </g>
+          </g>
+        );
+      })}
+
+      {/* Ordinary Users */}
+      {users.map((u, i) => (
+        <g key={`u-${i}`} style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float-tiny ${timing.cycleS * 0.4}s ease-in-out infinite` }}>
+          <Actor palette={palette} x={u.x} y={u.y} scale={1} state="user" />
+        </g>
+      ))}
+    </PictogramSvg>
+  );
+}
+

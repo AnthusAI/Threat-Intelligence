@@ -200,6 +200,7 @@ from publications.threat_intelligence.videoml.videos_commands import (
     videos_attach,
     videos_edit_dsl,
     videos_generate_dsl,
+    videos_preview_scene,
     videos_render,
     videos_seed,
 )
@@ -351,6 +352,7 @@ PORTED_COMMANDS = frozenset(
         "policy:check-backend-node-scripts",
         "policy:check-reference-action-contract",
         "videos:render",
+        "videos:preview-scene",
         "videos:seed",
         "videos:attach",
         "videos:generate-dsl",
@@ -696,6 +698,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         check_reference_action_contract(flags)
     elif route == "videos:render":
         videos_render(flags)
+    elif route == "videos:preview-scene":
+        videos_preview_scene(flags)
     elif route == "videos:seed":
         videos_seed(flags)
     elif route == "videos:attach":
