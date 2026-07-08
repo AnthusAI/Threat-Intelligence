@@ -40,3 +40,23 @@ scripts/gitblock
 scripts/gitunblock
 .cursor/
 .claude/
+
+# Storybook static build output
+storybook-static/
+
+# Root scratch / agent one-offs (do not commit)
+/check*.py
+/fix_*.py
+/test_*.js
+/test_*.mjs
+/test_*.py
+/update_json.py
+/inject_pictograms.py
+/capture.mjs
+/generate-scales-pdf.mjs
+/old_art.tsx
+/pup-*.png
+/storybook_overview.png
+/babulus_test.xml
+/*.code-workspace
+
