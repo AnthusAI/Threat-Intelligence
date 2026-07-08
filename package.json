@@ -26,6 +26,9 @@
     "test:video-script": "node publications/threat_intelligence/tests/test-video-script.cjs",
     "videoml:bundle": "node scripts/videoml/build-browser-bundle.mjs",
     "videoml:preview-bundle": "node scripts/videoml/build-preview-bundle.mjs",
+    "videoml:export-seed-scripts": "node scripts/videoml/export-seed-video-scripts.mjs",
+    "storybook": "npm run videoml:preview-bundle && npm run videoml:export-seed-scripts && storybook dev -p 6006",
+    "build-storybook": "npm run videoml:preview-bundle && npm run videoml:export-seed-scripts && storybook build",
     "typecheck": "tsc --noEmit",
     "sandbox": "ampx sandbox",
     "seed:amplify": "ampx sandbox seed",
@@ -118,6 +121,12 @@
     "@aws-amplify/backend-cli": "^1.8.2",
     "@aws-amplify/seed": "^1.1.2",
     "@cucumber/cucumber": "^12.8.3",
+    "@storybook/addon-essentials": "^8.6.18",
+    "@storybook/addon-interactions": "^8.6.18",
+    "@storybook/addon-onboarding": "^8.6.18",
+    "@storybook/nextjs": "^8.6.18",
+    "@storybook/react": "^8.6.18",
+    "@storybook/react-vite": "^8.6.18",
     "@types/node": "^25.7.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -125,7 +134,9 @@
     "eslint-config-next": "^15.5.18",
     "jsonschema": "^1.4.1",
     "lucide-static": "^1.16.0",
-    "playwright": "^1.60.0",
-    "typescript": "^6.0.3"
+    "playwright": "^1.61.1",
+    "storybook": "^8.6.18",
+    "typescript": "^6.0.3",
+    "vite": "^5.4.21"
   }
 }

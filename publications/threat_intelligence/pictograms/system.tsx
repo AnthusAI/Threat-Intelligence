@@ -15,6 +15,7 @@ export type PictogramPalette = {
   safe: string;
   warning: string;
   barrier: string;
+  user: string;
 };
 
 export const PICTOGRAM_PALETTE: PictogramPalette = {
@@ -28,6 +29,7 @@ export const PICTOGRAM_PALETTE: PictogramPalette = {
   safe: "var(--grass-8)",
   warning: "var(--amber-8)",
   barrier: "var(--sand-8)",
+  user: "var(--ti-pictogram-user)",
 };
 
 export type PictogramMotion = {
@@ -282,36 +284,62 @@ export function ringNodes(cx: number, cy: number, radius: number, count: number,
   });
 }
 
+function validateResolvedTone(resolved: string | undefined, tone: string): string {
+  if (!resolved) {
+    console.warn(`[VideoML Warning] Palette token "${tone}" resolved to undefined. This will cause shapes to be invisible.`);
+    return "transparent";
+  }
+  if (!resolved.startsWith('var(') && !resolved.startsWith('#') && !resolved.startsWith('color-mix') && !resolved.startsWith('rgba') && !resolved.startsWith('rgb') && !resolved.startsWith('hsl')) {
+    console.warn(`[VideoML Warning] Invalid color string for palette token "${tone}": "${resolved}". This may cause shapes to be invisible.`);
+  }
+  return resolved;
+}
+
 function resolveTone(palette: PictogramPalette, tone: "edge" | "muted" | "accent" | "safe" | "warning" | "barrier"): string {
+  let resolved: string | undefined;
   switch (tone) {
     case "muted":
-      return palette.muted;
+      resolved = palette.muted;
+      break;
     case "accent":
-      return palette.accent;
+      resolved = palette.accent;
+      break;
     case "safe":
-      return palette.safe;
+      resolved = palette.safe;
+      break;
     case "warning":
-      return palette.warning;
+      resolved = palette.warning;
+      break;
     case "barrier":
-      return palette.barrier;
+      resolved = palette.barrier;
+      break;
     default:
-      return palette.edge;
+      resolved = palette.edge;
+      break;
   }
+  return validateResolvedTone(resolved, tone);
 }
 
 function resolveNodeTone(palette: PictogramPalette, tone: "node" | "muted" | "accent" | "safe" | "warning"): string {
+  let resolved: string | undefined;
   switch (tone) {
     case "muted":
-      return palette.muted;
+      resolved = palette.muted;
+      break;
     case "accent":
-      return palette.accent;
+      resolved = palette.accent;
+      break;
     case "safe":
-      return palette.safe;
+      resolved = palette.safe;
+      break;
     case "warning":
-      return palette.warning;
+      resolved = palette.warning;
+      break;
     default:
-      return palette.node;
+      resolved = palette.node;
+      break;
   }
+  return validateResolvedTone(resolved, tone);
 }
 
 export function Actor({
@@ -352,7 +380,7 @@ export function Actor({
       />
       
       {/* Person (standard color regardless of state) */}
-      <g style={{ color: baseColor || palette.muted, animation: colorAnimation }}>
+      <g style={{ color: baseColor || palette.user, animation: colorAnimation }}>
         <circle cx={0} cy={-4} r={6} fill="currentColor" />
         <path d="M -11 11 C -11 3, 11 3, 11 11" fill="none" stroke="currentColor" strokeWidth={4} strokeLinecap="round" />
       </g>

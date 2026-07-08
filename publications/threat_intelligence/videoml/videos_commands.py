@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -128,6 +129,77 @@ def videos_edit_dsl(flags: list[str]) -> None:
 
     result = update_videoml_dsl(slug, dsl)
     print(json.dumps(result, indent=2))
+
+
+def videos_preview_scene(flags: list[str]) -> None:
+    options = parse_options(flags)
+    slug = normalize_string(options.get("article"))
+    edition_overview = parse_boolean_option(options.get("edition-overview"), False, "--edition-overview")
+    scene_index = normalize_positive_integer(options.get("scene"), "--scene")
+    time_offset = float(normalize_string(options.get("time")) or "1.0")
+    theme = parse_theme_option(options.get("theme"))
+    
+    if scene_index is None:
+        raise ValueError("videos preview-scene requires --scene <index>.")
+
+    from publications.threat_intelligence.videoml.video_pipeline import PAPYRUS_ROOT
+    from publications.threat_intelligence.videoml.videos_dsl import resolve_videoml_dsl_for_render
+
+    if edition_overview:
+        slug = "edition-overview"
+        article = None
+    elif slug:
+        articles = load_ti_seed_articles()
+        article = next((entry for entry in articles if str(entry.get("slug", "")).strip() == slug), None)
+        if article is None:
+            raise ValueError(f"Article '{slug}' was not found in the Threat Intelligence seed edition.")
+    else:
+        raise ValueError("videos preview-scene requires --article <slug> or --edition-overview.")
+
+    dsl_xml = resolve_videoml_dsl_for_render(
+        target_slug=slug,
+        theme=theme,
+        from_article=False,
+        article=article,
+        provider="openai",
+    )
+
+    project_dir = PAPYRUS_ROOT / "videoml-work" / slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    xml_path = project_dir / f"preview-{theme}.babulus.xml"
+    xml_path.write_text(dsl_xml, encoding="utf-8")
+
+    # In VideoML DSL, each <scene> has a duration attribute. To find the absolute time of --scene <index>,
+    # we can parse the XML or assume the script handles it. Wait, the puppeteer script currently just 
+    # seeks to `timeSec`, which is absolute time! 
+    # Let me calculate absolute time in Python by parsing the XML.
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(dsl_xml)
+    absolute_time = 0.0
+    scenes = list(root.iter("scene"))
+    if scene_index < 0 or scene_index >= len(scenes):
+        raise ValueError(f"Scene index {scene_index} is out of bounds (0 to {len(scenes)-1}).")
+
+    for i in range(scene_index):
+        dur = float(scenes[i].get("duration", "0"))
+        absolute_time += dur
+    
+    absolute_time += time_offset
+    
+    output_path = project_dir / f"scene-{scene_index}-t{time_offset}.png"
+    
+    script_path = PAPYRUS_ROOT / "scripts" / "videoml" / "capture-scene-preview.mjs"
+    cmd = [
+        "node", str(script_path),
+        "--xml-path", str(xml_path),
+        "--output", str(output_path),
+        "--time", str(absolute_time),
+        "--theme", theme
+    ]
+    
+    print(f"Generating preview for scene {scene_index} at absolute time {absolute_time}s...")
+    subprocess.run(cmd, check=True)
+    print(f"Preview saved to: {output_path}")
 
 
 def videos_render(flags: list[str]) -> None:

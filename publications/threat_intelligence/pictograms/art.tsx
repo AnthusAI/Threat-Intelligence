@@ -1555,6 +1555,8 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY: Record<ThreatIntelligencePi
   "treat-mods-and-launchers-like-untrusted-code": { aspectRatio: 1, render: UntrustedModPictogram },
   "threat-actors-scaling-out": { aspectRatio: 1, render: ThreatActorsScalingOutPictogram },
   "threat-actors-scaling-up": { aspectRatio: 1, render: ThreatActorsScalingUpPictogram },
+  "attackers-vs-defenders-old": { aspectRatio: 2, render: AttackersVsDefendersOldPictogram },
+  "attackers-vs-defenders-new": { aspectRatio: 2, render: AttackersVsDefendersNewPictogram },
 };
 
 export function getPictogramRegistryEntry(slug: ThreatIntelligencePictogramSlug): PictogramRegistryEntry {
@@ -1582,7 +1584,7 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
         {`
           @keyframes ti-center-color {
             0%, 5% { color: ${nodePalette.muted}; }
-            10%, 90% { color: ${palette.warning}; }
+            10%, 90% { color: ${palette.user}; }
             95%, 100% { color: ${nodePalette.muted}; }
           }
           @keyframes ti-center-hat {
@@ -1608,7 +1610,7 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
               @keyframes ti-outer-color-${i} {
                 0%, ${start + 5}% { color: ${nodePalette.muted}; opacity: 0; }
                 ${start + 10}%, ${reach - 5}% { color: ${nodePalette.muted}; opacity: 1; }
-                ${reach}%, 90% { color: ${palette.warning}; opacity: 1; }
+                ${reach}%, 90% { color: ${palette.user}; opacity: 1; }
                 95%, 100% { color: ${nodePalette.muted}; opacity: 0; }
               }
               @keyframes ti-outer-hat-${i} {
@@ -1651,7 +1653,7 @@ function ThreatActorsScalingOutPictogram({ alt, palette, timing }: RegisteredPic
           x={160} 
           y={160} 
           scale={1.2}
-          baseColor={timing.prefersReducedMotion ? palette.warning : nodePalette.muted}
+          baseColor={palette.user}
           colorAnimation={timing.prefersReducedMotion ? "none" : `ti-center-color ${timing.cycleS}s ease-in-out infinite`}
           hatAnimation={timing.prefersReducedMotion ? "none" : `ti-center-hat ${timing.cycleS}s ease-in-out infinite`}
           bgAnimation={timing.prefersReducedMotion ? "none" : `ti-center-bg ${timing.cycleS}s ease-in-out infinite`}
@@ -1692,7 +1694,7 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
         {`
           @keyframes ti-scale-up-color {
             0%, 5% { color: ${nodePalette.muted}; }
-            10%, 90% { color: ${palette.warning}; }
+            10%, 90% { color: ${palette.user}; }
             95%, 100% { color: ${nodePalette.muted}; }
           }
           @keyframes ti-scale-up-hat {
@@ -1721,14 +1723,14 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
       <g transform="translate(160 160)">
         {/* Shockwaves */}
         <circle 
-          cx={0} cy={0} fill="none" stroke={palette.warning}
+          cx={0} cy={0} fill="none" stroke={palette.accent}
           style={{
             opacity: timing.prefersReducedMotion ? 0 : 0,
             animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) infinite`
           }} 
         />
         <circle 
-          cx={0} cy={0} fill="none" stroke={palette.warning}
+          cx={0} cy={0} fill="none" stroke={palette.accent}
           style={{
             opacity: timing.prefersReducedMotion ? 0 : 0,
             animation: timing.prefersReducedMotion ? "none" : `ti-scale-up-shockwave ${timing.cycleS}s cubic-bezier(0.1, 0.8, 0.3, 1) ${timing.delayS(400)}s infinite`
@@ -1745,7 +1747,7 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
             x={0} 
             y={0} 
             scale={1}
-            baseColor={timing.prefersReducedMotion ? palette.warning : nodePalette.muted}
+            baseColor={palette.user}
             colorAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-color ${timing.cycleS}s ease-in-out infinite`}
             hatAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-hat ${timing.cycleS}s ease-in-out infinite`}
             bgAnimation={timing.prefersReducedMotion ? "none" : `ti-scale-up-bg ${timing.cycleS}s ease-in-out infinite`}
@@ -1755,3 +1757,131 @@ function ThreatActorsScalingUpPictogram({ alt, palette, timing }: RegisteredPict
     </PictogramSvg>
   );
 }
+
+function AttackersVsDefendersOldPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const users = [
+    { x: 420, y: 80 }, { x: 500, y: 60 }, { x: 580, y: 100 },
+    { x: 380, y: 140 }, { x: 480, y: 150 }, { x: 560, y: 180 },
+    { x: 420, y: 220 }, { x: 520, y: 250 }, { x: 600, y: 260 },
+    { x: 360, y: 280 }, { x: 460, y: 290 }, { x: 280, y: 290 }
+  ];
+
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 640 320">
+      <style>
+        {`
+          @keyframes ti-dash-flow {
+            from { stroke-dashoffset: 24; }
+            to { stroke-dashoffset: 0; }
+          }
+          @keyframes ti-float {
+            0%, 100% { transform: translateY(-4px); }
+            50% { transform: translateY(4px); }
+          }
+        `}
+      </style>
+      {/* Banks / Institutions */}
+      <Box x={100} y={160} width={80} height={120} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={100} y={160} palette={palette} scale={1.2} />
+
+      <Box x={190} y={100} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={100} palette={palette} scale={1.1} />
+
+      <Box x={190} y={220} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={220} palette={palette} scale={1.1} />
+
+      {/* Attack Lines */}
+      <path d="M 320 160 L 140 160" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+      <path d="M 320 160 L 230 100" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+      <path d="M 320 160 L 230 220" stroke={palette.accent} fill="none" strokeWidth={4} strokeDasharray="6 6" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow ${timing.cycleS * 0.1}s linear infinite` }} />
+
+      {/* Attacker */}
+      <g style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float ${timing.cycleS * 0.4}s ease-in-out infinite` }}>
+        <Actor palette={palette} x={320} y={160} scale={1.2} state="threat" />
+      </g>
+
+      {/* Ordinary Users */}
+      {users.map((u, i) => (
+        <Actor key={i} palette={palette} x={u.x} y={u.y} scale={1} state="user" />
+      ))}
+    </PictogramSvg>
+  );
+}
+
+
+function AttackersVsDefendersNewPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const users = [
+    { x: 420, y: 80 }, { x: 500, y: 60 }, { x: 580, y: 100 },
+    { x: 380, y: 140 }, { x: 480, y: 150 }, { x: 560, y: 180 },
+    { x: 420, y: 220 }, { x: 520, y: 250 }, { x: 600, y: 260 },
+    { x: 360, y: 280 }, { x: 460, y: 290 }, { x: 280, y: 290 }
+  ];
+
+  const attackers = [
+    { x: 470, y: 40 }, { x: 560, y: 50 }, { x: 350, y: 80 },
+    { x: 440, y: 110 }, { x: 540, y: 130 }, { x: 620, y: 160 },
+    { x: 390, y: 190 }, { x: 480, y: 210 }, { x: 580, y: 220 },
+    { x: 400, y: 260 }, { x: 500, y: 280 }, { x: 320, y: 240 }
+  ];
+  
+  const bankTargets = [
+    { x: 140, y: 160 },
+    { x: 230, y: 100 },
+    { x: 230, y: 220 },
+  ];
+
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 640 320">
+      <style>
+        {`
+          @keyframes ti-dash-flow-fast {
+            from { stroke-dashoffset: 16; }
+            to { stroke-dashoffset: 0; }
+          }
+          @keyframes ti-float-small {
+            0%, 100% { transform: translateY(-2px); }
+            50% { transform: translateY(2px); }
+          }
+          @keyframes ti-float-tiny {
+            0%, 100% { transform: translateY(-1px); }
+            50% { transform: translateY(1px); }
+          }
+        `}
+      </style>
+      {/* Banks / Institutions */}
+      <Box x={100} y={160} width={80} height={120} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={100} y={160} palette={palette} scale={1.2} />
+
+      <Box x={190} y={100} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={100} palette={palette} scale={1.1} />
+
+      <Box x={190} y={220} width={80} height={80} palette={palette} strokeTone="muted" />
+      <PadlockGlyph x={190} y={220} palette={palette} scale={1.1} />
+
+      {/* Attack Lines & Attackers */}
+      {attackers.map((a, i) => {
+        const u = users[i];
+        const b = bankTargets[i % 3];
+        return (
+          <g key={`a-${i}`}>
+            <path d={`M ${a.x} ${a.y} L ${u.x} ${u.y}`} stroke={palette.accent} fill="none" strokeWidth={3} strokeDasharray="4 4" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow-fast ${timing.cycleS * 0.1}s linear infinite` }} />
+            {i % 2 === 0 && (
+              <path d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`} stroke={palette.accent} fill="none" strokeWidth={3} strokeDasharray="4 4" style={{ animation: timing.prefersReducedMotion ? "none" : `ti-dash-flow-fast ${timing.cycleS * 0.1}s linear infinite` }} />
+            )}
+            <g style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float-small ${timing.cycleS * (0.3 + (i % 2) * 0.1)}s ease-in-out infinite` }}>
+              <Actor palette={palette} x={a.x} y={a.y} scale={1.3} state="threat" />
+            </g>
+          </g>
+        );
+      })}
+
+      {/* Ordinary Users */}
+      {users.map((u, i) => (
+        <g key={`u-${i}`} style={{ animation: timing.prefersReducedMotion ? "none" : `ti-float-tiny ${timing.cycleS * 0.4}s ease-in-out infinite` }}>
+          <Actor palette={palette} x={u.x} y={u.y} scale={1} state="user" />
+        </g>
+      ))}
+    </PictogramSvg>
+  );
+}
+

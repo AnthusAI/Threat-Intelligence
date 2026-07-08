@@ -119,6 +119,7 @@ TI_SCENE_STYLES_DARK: dict[str, Any] = _merge_scene_style_vars({
         "--ti-pictogram-edge": "#363a3f",
         "--ti-pictogram-node": "#2e3135",
         "--ti-pictogram-muted": "#43484e",
+        "--ti-pictogram-user": "#d4d8de",
         "--ti-pictogram-throb": "#ac4d39",
         "--ti-pictogram-compromised": "#e54d2e",
         "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",
@@ -169,6 +170,7 @@ TI_SCENE_STYLES_LIGHT: dict[str, Any] = _merge_scene_style_vars({
         "--ti-pictogram-edge": "#b9bbc6",
         "--ti-pictogram-node": "#b9bbc6",
         "--ti-pictogram-muted": "#d9d9e0",
+        "--ti-pictogram-user": "#60646c",
         "--ti-pictogram-throb": "#ec8e7b",
         "--ti-pictogram-compromised": "#e54d2e",
         "--ti-pictogram-accent-glow": "rgba(234, 88, 12, 0.18)",
@@ -607,14 +609,25 @@ def authored_scene_xml(
         return scene_renderer(scene_id, str(scene.get("title") or "Quote"), layer, cue)
     if kind != "slide":
         raise ValueError(f"Authored video scene {index} has unknown kind: {kind!r}")
+    eyebrow_val = str(scene.get("eyebrow") or "").strip() or None
+    title_val = str(scene.get("title") or "").strip() or None
+    subtitle_val = str(scene.get("subtitle") or "").strip() or None
+    has_text = bool(eyebrow_val or title_val or subtitle_val)
+    pictogram_val = str(scene.get("pictogram") or "").strip() or None
+    
+    if not has_text and not pictogram_val:
+        import logging
+        logging.warning(f"[VideoML Compiler] Scene {index} has neither text nor a pictogram.")
+
     layer = branded_title_slide_layer(
-        pictogram_slug=str(scene.get("pictogram") or "").strip() or None,
+        pictogram_slug=pictogram_val,
         secondary_pictogram_slug=str(scene.get("secondaryPictogram") or "").strip() or None,
         secondary_pictogram_delay_sec=float(scene.get("secondaryPictogramDelaySec")) if scene.get("secondaryPictogramDelaySec") is not None else None,
-        eyebrow=str(scene.get("eyebrow") or "").strip() or None,
-        title=str(scene.get("title") or "").strip() or None,
-        subtitle=str(scene.get("subtitle") or "").strip() or None,
-        horizontal_align="left",
+        eyebrow=eyebrow_val,
+        title=title_val,
+        subtitle=subtitle_val,
+        horizontal_align="left" if has_text else "center",
+        logo_size=None if has_text else 600,
     )
     return scene_renderer(scene_id, str(scene.get("title") or f"Scene {index}"), layer, cue)
 
@@ -675,7 +688,14 @@ def build_babulus_xml(
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(article.get("video"))))
-        body = "\n\n".join(scene_blocks)
+        
+        body_parts = []
+        for i, block in enumerate(scene_blocks):
+            if i > 0:
+                body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+            body_parts.append(block)
+            
+        body = "\n\n".join(body_parts)
         return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
   {voiceover_xml}
 
@@ -756,18 +776,15 @@ def build_babulus_xml(
             )
         )
 
-    scenes.append(
-        _scene(
-            "closing",
-            "Closing",
-            closing_cta_layer(slide_date=slide_date),
-            f"""<cue id="closing-cue">
-      <voice>{escape(closing_voice)}</voice>
-    </cue>""",
-        )
-    )
+    scenes.append(post_roll_scene(slide_date, _scene))
 
-    body = "\n\n".join(scenes)
+    body_parts = []
+    for i, block in enumerate(scenes):
+        if i > 0:
+            body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+        body_parts.append(block)
+
+    body = "\n\n".join(body_parts)
     return f"""<vml id="{escape(slug)}" title="{escape(headline)}" fps="30" width="1280" height="720">
   {voiceover_xml}
 
@@ -801,17 +818,18 @@ def build_edition_overview_xml(
     if authored:
         # Long-format edition video: authored content scenes, then the standard post-roll.
         scene_blocks = [
-            authored_scene_xml(
-                scene,
-                index + 1,
-                scene_renderer=_scene,
-                default_quote_size=TI_VIDEO_LAYOUT["title_size"],
-                default_quote_line_height=ti_video_rows(4),
-            )
+            authored_scene_xml(scene, index + 1, scene_renderer=_scene)
             for index, scene in enumerate(authored)
         ]
         scene_blocks.append(post_roll_scene(slide_date, _scene, post_roll_voice_override(edition.get("video"))))
-        body = "\n\n".join(scene_blocks)
+        
+        body_parts = []
+        for i, block in enumerate(scene_blocks):
+            if i > 0:
+                body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+            body_parts.append(block)
+            
+        body = "\n\n".join(body_parts)
         return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
   {voiceover_xml}
 
@@ -951,7 +969,13 @@ def build_edition_overview_xml(
         )
     )
 
-    body = "\n\n".join(scenes)
+    body_parts = []
+    for i, block in enumerate(scenes):
+        if i > 0:
+            body_parts.append(f"""  <transition id="trans-{i}" effect="push" duration="16f" ease="power3.inOut" props='{{"direction":"left"}}' />""")
+        body_parts.append(block)
+
+    body = "\n\n".join(body_parts)
     return f"""<vml id="{escape(EDITION_OVERVIEW_SLUG)}" title="{escape(title)}" fps="30" width="1280" height="720">
   {voiceover_xml}
 

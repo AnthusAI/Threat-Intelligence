@@ -1,9 +1,12 @@
 import React, { useEffect } from 'react';
 import type { Preview } from '@storybook/react'
+import { applyReaderTheme } from '@/components/reader-settings';
+import type { ReaderThemeSetting } from '@/components/reader-settings';
 import '../app/globals.css';
 
 const preview: Preview = {
   parameters: {
+    papyrusTheme: 'dark',
     controls: {
       matchers: {
        color: /(background|color)$/i,
@@ -14,11 +17,12 @@ const preview: Preview = {
 };
 
 preview.decorators = [
-  (Story) => {
+  (Story, context) => {
+    const theme = (context.parameters.papyrusTheme as ReaderThemeSetting | undefined) ?? 'dark';
     useEffect(() => {
       document.documentElement.setAttribute('data-site-brand', 'threat-intelligence');
-      document.documentElement.classList.add('dark-theme');
-    }, []);
+      applyReaderTheme(theme);
+    }, [theme]);
     return (
       <div className="min-h-screen text-[color:var(--foreground)] bg-[color:var(--background)]">
         <Story />
