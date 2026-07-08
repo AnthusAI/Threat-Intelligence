@@ -1,6 +1,6 @@
 import { defineAuth, secret } from "@aws-amplify/backend";
-import { getAuthRedirectUrls } from "../../lib/site-brand-auth";
 import { manageUserRole } from "../functions/manage-user-role/resource";
+import { getAuthRedirectUrls } from "./publication-redirects";
 
 const authRedirectUrls = getAuthRedirectUrls();
 
