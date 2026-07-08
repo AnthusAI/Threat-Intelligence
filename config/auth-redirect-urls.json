@@ -1,0 +1,16 @@
+{
+  "local": [
+    "http://localhost:3000/",
+    "http://localhost:3001/",
+    "http://localhost:3003/"
+  ],
+  "papyrus": [
+    "https://p.apyr.us/",
+    "https://main.dbsyytcm9drqa.amplifyapp.com/",
+    "https://codex-rehydration-api-split.dbsyytcm9drqa.amplifyapp.com/"
+  ],
+  "threat-intelligence": [
+    "https://threat-intelligence.anth.us/",
+    "https://main.d3on1y5vlrxmam.amplifyapp.com/"
+  ]
+}
