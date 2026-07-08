@@ -1534,6 +1534,48 @@ function UntrustedModPictogram({ alt, palette, timing }: RegisteredPictogramProp
   );
 }
 
+function ThreatActorGlyphPictogram({ alt, palette, timing }: RegisteredPictogramProps) {
+  const nodePalette = {
+    ...palette,
+    muted: "color-mix(in srgb, var(--foreground-strong) 54%, var(--background) 46%)",
+  };
+
+  return (
+    <PictogramSvg alt={alt} viewBox="0 0 320 320">
+      <style>
+        {`
+          @keyframes ti-glyph-color {
+            0%, 5% { color: ${nodePalette.muted}; }
+            10%, 90% { color: ${palette.user}; }
+            95%, 100% { color: ${nodePalette.muted}; }
+          }
+          @keyframes ti-glyph-hat {
+            0%, 5% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+            95%, 100% { opacity: 0; transform: translateY(-10px); }
+          }
+          @keyframes ti-glyph-bg {
+            0%, 5% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+            95%, 100% { opacity: 0; }
+          }
+        `}
+      </style>
+      <Actor
+        palette={palette}
+        x={160}
+        y={160}
+        scale={6}
+        baseColor={timing.prefersReducedMotion ? palette.user : undefined}
+        state={timing.prefersReducedMotion ? "threat" : "user"}
+        colorAnimation={timing.prefersReducedMotion ? "none" : `ti-glyph-color ${timing.cycleS}s ease-in-out infinite`}
+        hatAnimation={timing.prefersReducedMotion ? "none" : `ti-glyph-hat ${timing.cycleS}s ease-in-out infinite`}
+        bgAnimation={timing.prefersReducedMotion ? "none" : `ti-glyph-bg ${timing.cycleS}s ease-in-out infinite`}
+      />
+    </PictogramSvg>
+  );
+}
+
 export const THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY: Record<ThreatIntelligencePictogramSlug, PictogramRegistryEntry> = {
   "the-balance-of-power-is-shifting": { aspectRatio: 1, render: BalanceShiftPictogram },
   "how-our-newsroom-learns": { aspectRatio: 1, render: NewsroomFlowPictogram },
@@ -1555,6 +1597,7 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_REGISTRY: Record<ThreatIntelligencePi
   "treat-mods-and-launchers-like-untrusted-code": { aspectRatio: 1, render: UntrustedModPictogram },
   "threat-actors-scaling-out": { aspectRatio: 1, render: ThreatActorsScalingOutPictogram },
   "threat-actors-scaling-up": { aspectRatio: 1, render: ThreatActorsScalingUpPictogram },
+  "threat-actor-glyph": { aspectRatio: 1, render: ThreatActorGlyphPictogram },
   "attackers-vs-defenders-old": { aspectRatio: 2, render: AttackersVsDefendersOldPictogram },
   "attackers-vs-defenders-new": { aspectRatio: 2, render: AttackersVsDefendersNewPictogram },
 };

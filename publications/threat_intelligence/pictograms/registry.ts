@@ -24,6 +24,7 @@ export const THREAT_INTELLIGENCE_PICTOGRAM_PHASE_OFFSETS = {
   "treat-mods-and-launchers-like-untrusted-code": 19_400,
   "threat-actors-scaling-out": 1_000,
   "threat-actors-scaling-up": 2_000,
+  "threat-actor-glyph": 1_500,
   "attackers-vs-defenders-old": 3_000,
   "attackers-vs-defenders-new": 4_000,
 } as const;
