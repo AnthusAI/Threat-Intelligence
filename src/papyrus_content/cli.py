@@ -146,6 +146,7 @@ from .catalog import (
     build_prepared_reference_catalog,
     build_reference_catalog_registration_records,
     catalog_items,
+    registration_note_from,
 )
 from .corpora import (
     build_corpus_status,
@@ -829,7 +830,9 @@ def references_prepare_catalog(flags: list[str]) -> None:
     )
     write_json_file(options["output"], prepared)
     items = catalog_items(prepared)
-    rationale_count = sum(1 for item in items if item.get("ingestion_rationale") or item.get("ingestionRationale"))
+    rationale_count = sum(
+        1 for item in items if registration_note_from(item)
+    )
     print(
         f"references\tprepare-catalog\t{options['corpus-key']}\t{options['output']}\t"
         f"{len(items)} items\t{rationale_count} rationales"

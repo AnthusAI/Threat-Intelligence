@@ -73,9 +73,9 @@ def build_prepared_reference_catalog(catalog: dict[str, Any], options: dict[str,
 
     def prepare_item(item: dict[str, Any]) -> dict[str, Any]:
         item = catalog_item_with_external_item_id(item)
-        if ingestion_rationale_from(item):
-            return item
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if registration_note_from(item):
+            return item
         title = _string_or_null(item.get("title") or metadata.get("title")) or _string_or_null(
             item.get("id") or item.get("item_id") or item.get("externalItemId")
         ) or "Untitled source material"
@@ -101,10 +101,13 @@ def build_prepared_reference_catalog(catalog: dict[str, Any], options: dict[str,
         )
         return {
             **item,
-            "ingestion_rationale": (
-                f"{title} is a reference prospect for {publication_name}.{focus_clause}{type_clause}"
-                f"{source_clause}{summary_clause}"
-            ),
+            "metadata": {
+                **metadata,
+                "registration_note": (
+                    f"{title} is a reference prospect for {publication_name}.{focus_clause}{type_clause}"
+                    f"{source_clause}{summary_clause}"
+                ),
+            },
         }
 
     output = {
@@ -113,7 +116,7 @@ def build_prepared_reference_catalog(catalog: dict[str, Any], options: dict[str,
         "preparation": {
             "tool": "papyrus references prepare-catalog",
             "corpus_key": corpus_key,
-            "rationale_policy": "derived-from-title-abstract-source-when-missing",
+            "rationale_policy": "registration-note-in-metadata-when-missing",
         },
     }
     if isinstance(items_value, list):
@@ -223,7 +226,8 @@ def build_reference_catalog_registration_records(catalog: dict[str, Any], option
                 "importRunId": import_run_id,
                 "now": now,
                 "actor": options.get("actor") or "Papyrus content CLI",
-                "createCurationAssignment": status == "pending" or bool(options.get("createCurationAssignment")),
+                "createCurationAssignment": bool(options.get("createCurationAssignment")),
+                "createIngestionRationaleMessage": bool(options.get("createIngestionRationaleMessage")),
             },
         )
         records.extend(item_records)
@@ -235,7 +239,7 @@ def build_reference_catalog_registration_records(catalog: dict[str, Any], option
                     action="reject",
                     status=status,
                     reason_code=reason_code,
-                    note=item.get("curation_note") or item.get("ingestion_rationale"),
+                    note=item.get("curation_note") or registration_note_from(item),
                     actor=options.get("actor") or "papyrus-register-catalog",
                     source="papyrus-register-catalog",
                     import_run_id=import_run_id,
@@ -278,20 +282,29 @@ def normalize_catalog_reference_item(
     storage_path = _string_or_null(item.get("storage_path") or item.get("storagePath"))
     if not storage_path and relpath and configured_path:
         storage_path = f"{configured_path.rstrip('/')}/{relpath.lstrip('/')}"
-    item_ingestion_rationale = _string_or_null(ingestion_rationale) or ingestion_rationale_from(item)
+    item_registration_note = (
+        _string_or_null(ingestion_rationale)
+        or registration_note_from(item)
+    )
     curation_note = (
         _string_or_null(note)
         or _string_or_null(item.get("curation_note") or item.get("curationNote"))
-        or item_ingestion_rationale
+        or item_registration_note
     )
-    if status == "pending" and not item_ingestion_rationale:
-        raise ValueError(
-            f"Pending reference {item.get('id') or item.get('item_id') or 'unknown'} requires ingestion_rationale or --ingestion-rationale."
-        )
     if status == "rejected" and not curation_note:
         raise ValueError(
-            f"Rejected reference {item.get('id') or item.get('item_id') or 'unknown'} requires --note or catalog rationale."
+            f"Rejected reference {item.get('id') or item.get('item_id') or 'unknown'} requires --note or catalog registration note."
         )
+    normalized_metadata = {
+        **metadata,
+        "reference_intake_batch_id": batch_id,
+        "reference_intake_status": status,
+        "curation_status": status,
+        "curation_reason_code": reason_code,
+        "registered_at": now,
+    }
+    if item_registration_note:
+        normalized_metadata["registration_note"] = item_registration_note
     return {
         **item,
         "item_id": item.get("item_id") or item.get("externalItemId") or item.get("id"),
@@ -305,15 +318,7 @@ def normalize_catalog_reference_item(
         "media_type": item.get("media_type") or item.get("mediaType") or metadata.get("media_type"),
         "curation_status": status,
         "curation_note": curation_note,
-        "ingestion_rationale": item_ingestion_rationale,
-        "metadata": {
-            **metadata,
-            "reference_intake_batch_id": batch_id,
-            "reference_intake_status": status,
-            "curation_status": status,
-            "curation_reason_code": reason_code,
-            "registered_at": now,
-        },
+        "metadata": normalized_metadata,
     }
 
 
@@ -322,9 +327,11 @@ def reference_records(item: dict[str, Any], context: dict[str, Any]) -> list[dic
     records = [
         reference,
         *reference_attachment_records(item, reference["expected"], context),
-        *reference_message_records(item, reference["expected"], context),
+        *reference_assignment_lineage_records(item, reference["expected"], context),
     ]
-    if context.get("createCurationAssignment", True):
+    if context.get("createIngestionRationaleMessage"):
+        records.extend(reference_message_records(item, reference["expected"], context))
+    if context.get("createCurationAssignment"):
         records.extend(reference_curation_assignment_records(item, reference["expected"], context))
     return records
 
@@ -368,7 +375,7 @@ def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str,
         "curationStatusReason": (
             "trusted import"
             if curation_status == "accepted"
-            else _string_or_null(item.get("curation_note") or item.get("ingestion_rationale"))
+            else _string_or_null(item.get("curation_note") or registration_note_from(item))
         ),
         "newsroomFeedKey": "references",
         "reviewedFeedKey": None if curation_status == "pending" else "references#reviewed",
@@ -415,6 +422,48 @@ def reference_attachment_records(item: dict[str, Any], reference: dict[str, Any]
             )
         )
     return records
+
+
+def reference_assignment_lineage_records(
+    item: dict[str, Any], reference: dict[str, Any], context: dict[str, Any]
+) -> list[dict[str, Any]]:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    assignment_id = _string_or_null(
+        metadata.get("research_assignment_id")
+        or metadata.get("researchAssignmentId")
+        or item.get("research_assignment_id")
+        or item.get("researchAssignmentId")
+    )
+    if not assignment_id:
+        return []
+    return [
+        semantic_relation_record(
+            {
+                "predicate": "derived_from",
+                "subjectKind": "reference",
+                "subjectId": reference["id"],
+                "subjectLineageId": reference["lineageId"],
+                "subjectVersionNumber": reference.get("versionNumber"),
+                "objectKind": "assignment",
+                "objectId": assignment_id,
+                "objectLineageId": assignment_id,
+                "objectVersionNumber": None,
+                "rank": 1,
+                "importRunId": context["importRunId"],
+                "importedAt": context["now"],
+                "metadata": {
+                    "lifecycle": "reference-catalog-registration",
+                    "sourceKind": "research_assignment",
+                    "researchAssignmentId": assignment_id,
+                    "researchPacketMessageId": _string_or_null(
+                        metadata.get("research_packet_message_id") or metadata.get("researchPacketMessageId")
+                    ),
+                    "externalItemId": reference.get("externalItemId"),
+                    "corpusId": reference.get("corpusId"),
+                },
+            }
+        )
+    ]
 
 
 def reference_message_records(item: dict[str, Any], reference: dict[str, Any], context: dict[str, Any]) -> list[dict[str, Any]]:
@@ -802,14 +851,22 @@ def normalize_storage_path(value: Any) -> dict[str, str | None]:
     return {"storagePath": None, "sourceUri": raw}
 
 
-def ingestion_rationale_from(item: dict[str, Any]) -> str | None:
+def registration_note_from(item: dict[str, Any]) -> str | None:
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     return _string_or_null(
-        item.get("ingestion_rationale")
+        item.get("registration_note")
+        or item.get("registrationNote")
+        or metadata.get("registration_note")
+        or metadata.get("registrationNote")
+        or item.get("ingestion_rationale")
         or item.get("ingestionRationale")
         or metadata.get("ingestion_rationale")
         or metadata.get("ingestionRationale")
     )
+
+
+def ingestion_rationale_from(item: dict[str, Any]) -> str | None:
+    return registration_note_from(item)
 
 
 def _utc_now() -> str:

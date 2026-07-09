@@ -67,6 +67,24 @@ PYTHONPATH=src python -m papyrus.cli references create-from-catalog \
   --status accepted
 ```
 
+`prepare-catalog` writes optional operator context to each item's
+`metadata.registration_note` only. It does not create GraphQL `Message` rows.
+
+### Cleaning up legacy intake noise (optional)
+
+If an earlier bootstrap registered references as `pending` with auto intake
+assignments or `ingestion_rationale` messages, you can tidy the live desk
+without re-importing corpus files:
+
+1. Cancel or complete open `curation.reference-intake` and
+   `curation.reference-refresh` assignments that only exist because of bulk
+   registration (keep real research/reporting assignments).
+2. Delete `Message` rows with `messageKind = ingestion_rationale` that are
+   boilerplate from `prepare-catalog` (keep explicit `insight` and
+   `reference_curation` audit rows).
+3. Re-run `references create-from-catalog --status accepted` only for net-new
+   catalog items; existing `externalItemId` rows remain deduped.
+
 Sync accession to S3:
 
 ```bash

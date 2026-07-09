@@ -96,8 +96,9 @@ Papyrus-visible registration contract.
    missing. Do not rewrite source catalogs for a rehearsal.
 7. Register the catalog into GraphQL. The registration must create a
    `KnowledgeImportRun`, a sanitized `KnowledgeRawPayload`, one `Reference` per
-   source material, attachments, rationale messages, semantic links, and one
-   open `curation.reference-intake` assignment per pending reference.
+   source material, attachments, and semantic links when research lineage
+   applies. It must not auto-create intake assignments or ingestion-rationale
+   messages.
 8. Curate an initial accepted evidence set.
 9. Export accepted-only analysis and scope-training manifests.
 10. Preview analysis command plans with `analysis reindex-plan`.
@@ -276,8 +277,9 @@ For a successful bootstrap rehearsal, verify:
 - source accession files exist in the expected S3 prefix;
 - `Reference` rows exist for registered catalog entries;
 - a `KnowledgeImportRun` exists for the registration batch;
-- every pending reference has exactly one open `curation.reference-intake`
-  assignment linked by `requests_work_on`;
+- registration did not auto-create `curation.reference-intake` assignments or
+  `ingestion_rationale` messages (research-proposal intake may add `derived_from`
+  lineage to source assignments);
 - only accepted current references appear in exported analysis manifests;
 - `analysis.reindex` assignments preserve profile key, corpus key, mode,
   overrides, command plan, and destructive preview;

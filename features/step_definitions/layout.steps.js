@@ -1535,8 +1535,7 @@ Then("the assignments desk should render", async function () {
   await page.locator("[data-news-desk-tab='assignments'][aria-current='page']").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-news-desk-assignments]").waitFor({ state: "visible", timeout: 10_000 });
   await page.locator("[data-newsroom-card-grid]").waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator('[data-newsroom-card][data-assignment-candidate="assignment-demo-reference-intake-history-001"]').waitFor({ state: "visible", timeout: 10_000 });
-  await page.locator('[data-newsroom-card][data-assignment-candidate="assignment-demo-reference-intake-history-002"][data-assignment-status="claimed"]').waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator('[data-newsroom-card][data-assignment-candidate="assignment-demo-reporting-news-001"]').waitFor({ state: "visible", timeout: 10_000 });
   const detailOpen = await page.locator("[data-news-desk-assignments]").first().getAttribute("data-detail-open");
   assert.equal(detailOpen, "false", `Expected assignments detail to start closed, found ${detailOpen}`);
 });

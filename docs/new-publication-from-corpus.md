@@ -156,8 +156,10 @@ duplicate extracted text into a second canonical location.
 
 5. Register source materials into the GraphQL workflow. This creates a
    `KnowledgeImportRun` for the batch. Each source material becomes a
-   `Reference`; pending references also get one open
-   `curation.reference-intake` assignment linked by `requests_work_on`.
+   `Reference` (plus `ReferenceAttachment` when source paths are present).
+   Registration does not auto-create intake assignments or ingestion-rationale
+   messages. Research-proposal intake adds `derived_from` lineage to the source
+   Assignment when `metadata.research_assignment_id` is set.
 
    ```bash
    poetry run papyrus references prepare-catalog \

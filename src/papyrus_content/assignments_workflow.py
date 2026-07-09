@@ -1880,6 +1880,18 @@ def build_research_proposal_catalog_items(
             continue
         title = normalize_string(proposal.get("title") or proposal.get("name"))
         item_id = f"research-proposal-{hash_short(url)}"
+        explicit_note = normalize_string(
+            proposal.get("ingestion_rationale")
+            or proposal.get("ingestionRationale")
+            or proposal.get("rationale")
+        )
+        item_metadata: dict[str, Any] = {
+            "research_assignment_id": assignment["id"],
+            "research_packet_message_id": message.get("id"),
+            "research_mode": packet.get("researchMode"),
+        }
+        if explicit_note:
+            item_metadata["registration_note"] = explicit_note
         items.append(
             {
                 "id": item_id,
@@ -1887,17 +1899,7 @@ def build_research_proposal_catalog_items(
                 "title": title,
                 "source_uri": url,
                 "media_type": normalize_string(proposal.get("media_type") or proposal.get("mediaType")) or "text/html",
-                "ingestion_rationale": normalize_string(
-                    proposal.get("ingestion_rationale")
-                    or proposal.get("ingestionRationale")
-                    or proposal.get("rationale")
-                )
-                or f"{title or 'This source'} was proposed by research assignment {assignment.get('title') or assignment['id']}.",
-                "metadata": {
-                    "research_assignment_id": assignment["id"],
-                    "research_packet_message_id": message.get("id"),
-                    "research_mode": packet.get("researchMode"),
-                },
+                "metadata": item_metadata,
             }
         )
     return items

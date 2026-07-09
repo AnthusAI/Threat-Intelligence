@@ -220,13 +220,14 @@ poetry run papyrus assignments process-research-now \
   --json
 ```
 
-These commands deduplicate proposals by normalized URL, preserve each proposal's
-`ingestion_rationale`, write a run-local
+These commands deduplicate proposals by normalized URL, preserve explicit proposal
+notes when provided, write a run-local
 `.papyrus-runs/<run-id>/research-proposals-catalog.json`, and use targeted
 deterministic record lookups for research-generated catalogs instead of broad
-model scans. They create pending `Reference` rows and
-`curation.reference-intake` assignments only; they do not accept references,
-create evidence relations, create publication items, or run analysis.
+model scans. They create pending `Reference` rows linked back to the source
+research Assignment with `derived_from`; they do not spawn intake assignments,
+accept references, create evidence relations, create publication items, or run
+analysis.
 
 For automation, prefer `poetry run papyrus ... --json`. The JSON
 result includes a compact `references[]` list with reference id, item id, title,
@@ -362,9 +363,9 @@ poetry run papyrus references create-from-catalog \
    ```
 
 5. The mapper creates or updates private `Reference` rows, private
-   `ReferenceAttachment` rows, optional ingestion-rationale `Message`
-   rows, `curation.reference-intake` `Assignment` rows, and `SemanticRelation`
-   links.
+   `ReferenceAttachment` rows, optional `derived_from` lineage when a reference
+   originated from a research Assignment, and `SemanticRelation` links. It does
+   not auto-create intake assignments or ingestion-rationale messages.
 6. The Newsroom reads the private models for signed-in editor/admin users.
 
 Prefer the full repeatable cycle when the goal is category/reference visibility
@@ -384,10 +385,12 @@ files changed.
 After import, verify from the editor/private side:
 
 - `/newsroom/references` shows the new references or updated reference counts.
-- `/newsroom/assignments` shows `curation.reference-intake` assignments for
-  references that need human or agent review.
-- a selected reference has attachment metadata, ingestion rationale if available,
-  and semantic links to categories or other graph objects when expected.
+- `/newsroom/assignments` shows only real workflow assignments (research,
+  reporting, accession, editor-initiated refresh) — not one auto intake row per
+  registered reference.
+- a selected reference has attachment metadata, optional `registration_note`
+  metadata, research `derived_from` lineage when applicable, and semantic links
+  to categories or other graph objects when expected.
 - the curation-cycle `verification.json` has nonzero current references and no
   unresolved reference relations when projections were expected.
 
@@ -447,10 +450,16 @@ poetry run papyrus references create-from-catalog \
 
 `create-from-catalog` applies by default. With `--dry-run`, it only previews a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference`,
-`ReferenceAttachment`, curation `Message`, `curation.reference-intake`
-`Assignment`, and audit/workflow `SemanticRelation` rows. Pending references get
-one open curation assignment each. Rejected registrations create curation
-commentary but no open review assignment unless explicitly requested. It must
+`ReferenceAttachment`, and audit/workflow `SemanticRelation` rows. Registration
+does **not** create `ingestion_rationale` Messages or `curation.reference-intake`
+Assignments by default. Optional `registration_note` text is stored on Reference
+metadata (for example from `references prepare-catalog`). Research-proposal
+intake links each new Reference back to its source research Assignment with
+`derived_from` when `metadata.research_assignment_id` is present.
+
+Rejected bulk registrations still create `reference_curation` commentary.
+Legacy opt-in flags `createCurationAssignment` and `createIngestionRationaleMessage`
+may still be passed to the catalog planner for narrow migration scenarios. It must
 not create `Item`, `EditionItem`, `classified_as`, or `uses_evidence` records.
 
 To start from a live assignment research packet:

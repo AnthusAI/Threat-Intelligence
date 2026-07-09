@@ -148,7 +148,7 @@ class PapyrusContentTests(unittest.TestCase):
                     "item_id": "item-1",
                     "title": "Sample paper",
                     "source_uri": "https://arxiv.org/abs/0000.00001",
-                    "ingestion_rationale": "Prospect for the pilot corpus.",
+                    "metadata": {"registration_note": "Prospect for the pilot corpus."},
                 }
             ]
         }
@@ -165,16 +165,58 @@ class PapyrusContentTests(unittest.TestCase):
         self.assertEqual(plan["itemCount"], 1)
         models = {entry["modelName"] for entry in plan["records"]}
         self.assertIn("Reference", models)
-        self.assertIn("Assignment", models)
         self.assertIn("KnowledgeImportRun", models)
+        self.assertNotIn("Assignment", models)
+        self.assertNotIn("Message", models)
 
-    def test_prepare_catalog_adds_missing_rationale(self) -> None:
+    def test_build_reference_catalog_registration_records_links_research_assignment(self) -> None:
+        config = load_steering_config(str(REPO_ROOT / "corpora" / "papyrus-steering.yml"))
+        assert config is not None
+        corpus = require_corpus_config(config, config["canonicalTopicSet"]["corpusKey"])
+        catalog = {
+            "items": [
+                {
+                    "item_id": "item-research-1",
+                    "title": "Proposed source",
+                    "source_uri": "https://example.com/paper",
+                    "metadata": {"research_assignment_id": "assignment-research-001"},
+                }
+            ]
+        }
+        plan = build_reference_catalog_registration_records(
+            catalog,
+            {
+                "corpusConfig": corpus,
+                "corpusId": knowledge_corpus_id(corpus),
+                "classifierId": config["canonicalTopicSet"]["classifierId"],
+                "status": "pending",
+                "actor": "test",
+            },
+        )
+        relations = [
+            entry["expected"]
+            for entry in plan["records"]
+            if entry["modelName"] == "SemanticRelation"
+        ]
+        derived = [
+            relation
+            for relation in relations
+            if relation.get("predicate") == "derived_from"
+            and relation.get("subjectKind") == "reference"
+            and relation.get("objectKind") == "assignment"
+        ]
+        self.assertEqual(len(derived), 1)
+        self.assertEqual(derived[0]["objectId"], "assignment-research-001")
+
+    def test_prepare_catalog_adds_registration_note(self) -> None:
         prepared = build_prepared_reference_catalog(
             {"items": [{"item_id": "x", "title": "Title", "source_uri": "https://example.com/paper"}]},
             {"corpusKey": "demo", "publicationName": "Demo Publication"},
         )
         item = catalog_items(prepared)[0]
-        self.assertIn("ingestion_rationale", item)
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        self.assertIn("registration_note", metadata)
+        self.assertNotIn("ingestion_rationale", item)
 
     def test_prepare_catalog_assigns_youtube_item_id_and_media_type(self) -> None:
         prepared = build_prepared_reference_catalog(

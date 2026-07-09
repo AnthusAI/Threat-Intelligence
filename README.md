@@ -653,10 +653,12 @@ status; it does not execute inline curation stages.
 `references register-catalog` is the canonical bridge from corpus accession
 files into Papyrus workflow state. In default apply mode, it creates a
 `KnowledgeImportRun`, sanitized `KnowledgeRawPayload`, `Reference` and
-`ReferenceAttachment` records, ingestion-rationale `Message` rows, workflow
-`SemanticRelation` links, and one open `curation.reference-intake` `Assignment`
-per pending reference. The filesystem catalog is not the queue after
-registration; pending references and assignments are.
+`ReferenceAttachment` records, and workflow `SemanticRelation` links when
+research lineage applies. It does **not** create ingestion-rationale `Message`
+rows or `curation.reference-intake` `Assignment` rows unless explicitly
+requested via planner opt-in flags. Optional registration notes live on
+Reference metadata; durable commentary uses explicit `insight` Messages or
+curation review actions.
 
 For routine reference curation, use the operator runbook:
 

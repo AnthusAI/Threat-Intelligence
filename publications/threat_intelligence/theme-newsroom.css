@@ -7,9 +7,15 @@
 
 :root[data-site-brand="threat-intelligence"] .news-desk-shell {
   --news-desk-progress-padding-x: var(--ti-body-page-padding-x);
+  --muted-strong: var(--foreground);
+  --muted: var(--muted-foreground);
   background: var(--background);
   color: var(--foreground);
   font-family: var(--site-ui-font);
+}
+
+:root[data-site-brand="threat-intelligence"] .news-desk-shell .story-label {
+  color: var(--foreground-strong);
 }
 
 :root[data-site-brand="threat-intelligence"] .news-desk-shell .paper-page {
@@ -120,8 +126,33 @@
 }
 
 :root[data-site-brand="threat-intelligence"] .news-desk-lede p,
-:root[data-site-brand="threat-intelligence"] .newsroom-card__body {
+:root[data-site-brand="threat-intelligence"] .newsroom-card__body,
+:root[data-site-brand="threat-intelligence"] .news-desk-detail-copy,
+:root[data-site-brand="threat-intelligence"] .topic-steering-proposal p,
+:root[data-site-brand="threat-intelligence"] .news-desk-assignment-row__main > p {
+  color: var(--foreground);
   font-family: var(--site-body-font);
+}
+
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell[data-news-desk-section="references"] .newsroom-card__body {
+  color: var(--foreground);
+}
+
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail__subheading,
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-semantic-detail__summary {
+  color: var(--foreground);
+}
+
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-topic-state-row strong {
+  color: var(--foreground-strong);
+}
+
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-topic-state-row span {
+  color: var(--muted-foreground);
+}
+
+:root[data-site-brand="threat-intelligence"] .newsroom-list-detail-shell [data-news-desk-reference-detail] .news-desk-reference-topic-state-row__meta p {
+  color: var(--foreground);
 }
 
 :root[data-site-brand="threat-intelligence"] .newsroom-card {

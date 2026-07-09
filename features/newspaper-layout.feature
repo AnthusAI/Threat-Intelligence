@@ -469,13 +469,13 @@ Feature: Newspaper layout scenarios
     And no browser console errors should occur
 
   @brand-agnostic
-  Scenario: Newsroom claims and completes reference curation assignments
+  Scenario: Newsroom claims and completes reporting assignments
     Given I open the assignments newsroom at 1280 by 900
     Then the assignments desk should render
-    When I claim assignment "assignment-demo-reference-intake-history-001" with note "Taking this one"
-    Then assignment "assignment-demo-reference-intake-history-001" should be claimed
-    When I complete assignment "assignment-demo-reference-intake-history-001" with note "Reviewed"
-    Then assignment "assignment-demo-reference-intake-history-001" should be completed
+    When I claim assignment "assignment-demo-reporting-news-001" with note "Taking this one"
+    Then assignment "assignment-demo-reporting-news-001" should be claimed
+    When I complete assignment "assignment-demo-reporting-news-001" with note "Reviewed"
+    Then assignment "assignment-demo-reporting-news-001" should be completed
     And no browser console errors should occur
 
   @brand-agnostic
