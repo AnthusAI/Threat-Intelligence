@@ -4,9 +4,9 @@ Feature: Research and Reporting Context Contracts
   I need doctrine and knowledge-first context behavior to stay enforceable
   So research/reporting runs are auditable and desk-aligned.
 
-  Scenario: News desk policy seeds journalistic-source preference
+  Scenario: Newsroom desk policy seeds journalistic-source preference
     Given the newsroom sections seed file
-    When I read the section with id "news"
+    When I read the section with id "newsroom"
     Then its editorial policy prefers journalistic and official sources over academic papers as the default
 
   Scenario: Research and reporting procedures require broad internal orientation before optional web checks

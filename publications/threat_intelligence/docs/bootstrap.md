@@ -7,7 +7,7 @@ Anthus Threat Intelligence uses the standard Papyrus publication bootstrap path 
 | File | Purpose |
 |------|---------|
 | `corpora/papyrus-publication-doctrine.yml` | Global mission and policy |
-| `corpora/papyrus-newsroom-sections.yml` | TI desk definitions (Mission, AWS, Data & AI Assets, …) |
+| `corpora/papyrus-newsroom-sections.yml` | TI desk definitions (Mission, Newsroom, AWS, Azure, AI, Gaming) |
 | `corpora/papyrus-steering.yml` | Canonical corpus `threat-intelligence` |
 | `corpora/papyrus-public-topics.yml` | Public topic teasers |
 | `corpora/papyrus-analysis-profiles.yml` | Biblicus re-index profiles for TI |
@@ -129,15 +129,15 @@ PYTHONPATH=src python -m papyrus.cli knowledge vector-index --action sync
 
 ## Newsroom sections
 
+Match the seed edition reader desks only:
+
 | id | title |
 |----|-------|
 | `mission` | Mission |
-| `cloud` | AWS |
-| `data-ai-assets` | Data & AI Assets |
-| `identity-access` | Identity & Access |
-| `incidents-research` | Incidents & Research |
-| `controls-checks` | Controls & Checks |
-| `supply-chain` | Supply Chain |
+| `newsroom` | Newsroom |
+| `aws` | AWS |
+| `azure` | Azure |
+| `ai` | AI |
 | `gaming` | Gaming |
 
 See also: [`docs/new-publication-from-corpus.md`](new-publication-from-corpus.md), [`skills/publication-bootstrap/SKILL.md`](../skills/publication-bootstrap/SKILL.md).

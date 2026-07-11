@@ -152,24 +152,18 @@ copywriting, or draft, with reporting candidates grouped by edition and section.
 
 ## Section Lenses
 
-The `culture` CLI alias maps to the configured `arts` desk, which is a
-**floating** optional desk in `corpora/papyrus-newsroom-sections.yml`. Use it for
-story-cycle smoke tests, but treat it as step-2 optional-desk material in
-edition forum kickoff messages—not as the edition theme decision in phase 1.
+Threat Intelligence desks come only from
+`corpora/papyrus-newsroom-sections.yml` and match the seed edition:
 
-The canonical smoke uses:
+- `mission`: capability shifts and threat-model framing
+- `newsroom`: how the desk learns and hands off evidence
+- `aws`: AWS exposure queues, findings pipelines, data reachability
+- `azure`: Entra/identity paths and temporary privilege
+- `ai`: OpenAI workspaces, keys, connectors as production identities
+- `gaming`: consumer blast-radius isolation (rotating)
 
-- `culture`: creative workflows, game design, player experience, generative
-  media (alias for optional `arts` desk).
-- `methods`: implementation patterns, NPC behavior, procedural generation,
-  evaluation.
-- `business`: studios, tooling markets, labor, production economics.
-- `law`: copyright, likeness, licensing, liability, platform policy.
-
-If runtime section ids differ, use the configured `NewsroomSection` ids. The
-story-cycle code currently maps common operator aliases such as `culture` to the
-configured `arts` section and `law` to `law-policy` when those are the deployed
-section ids.
+Use these `NewsroomSection` ids in story-cycle smoke tests. Do not invent
+extra desks (news, business, arts, methods, etc.) for this publication.
 
 ## Reporting Assignment Shape
 
