@@ -1,5 +1,6 @@
 {
-  "id": "ea1686cc-ef82-4864-97ec-31cfc87da971",
+  "id": "kanbus-ea1686cc-ef82-4864-97ec-31cfc87da971",
+  "type": "bug",
   "title": "Resolve canonical source for 3 legacy references",
   "description": "As discovered in kanbus-88ab2a, there are exactly 3 accepted references in production that lack both a source attachment and a resolvable canonical URI, causing them to be blocked at the find stage gate.\n\nThese references need their canonical sources resolved so they can be processed for URL text extraction.\n\nBlocked Reference IDs:\n- reference-knowledge-corpus-ai-ml-journalism-web-businessinsider-openclaw-token-bill-2026-5-v1\n- reference-knowledge-corpus-ai-ml-research-context-rot-4-v1\n- reference-knowledge-corpus-ai-ml-research-yann-lecun-path-towards-autonomous-machine-intelligence-openreview-v1",
   "status": "todo",
@@ -10,5 +11,6 @@
   "custom": {
     "project_label": "kanbus",
     "source": "shared"
-  }
+  },
+  "type": "bug"
 }
