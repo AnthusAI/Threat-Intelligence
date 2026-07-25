@@ -175,12 +175,24 @@ def review_reference_curation(
     actor_label: str = "",
     note: str = "",
     reason_code: str = "",
+    auto_reject_rule: str = "",
+    auto_archive_rule: str = "",
 ) -> dict[str, Any]:
     resolved_reference_id = _required(reference_id, "reference_id")
     resolved_action = _normalize_curation_action(action)
     next_status = REFERENCE_CURATION_STATUSES[resolved_action]
     actor = _optional(actor_label) or "Papyrus newsroom"
     user_note = _optional(note)
+    resolved_auto_reject_rule = _optional(auto_reject_rule)
+    resolved_auto_archive_rule = _optional(auto_archive_rule)
+    if resolved_auto_reject_rule and resolved_auto_archive_rule:
+        raise ValueError("Specify only one of auto_reject_rule or auto_archive_rule.")
+    if resolved_action == "accept" and (resolved_auto_reject_rule or resolved_auto_archive_rule):
+        raise ValueError("Assisted triage refuses auto-accept paths.")
+    if resolved_auto_reject_rule and resolved_action != "reject":
+        raise ValueError("auto_reject_rule is only valid with action=reject.")
+    if resolved_auto_archive_rule and resolved_action != "archive":
+        raise ValueError("auto_archive_rule is only valid with action=archive.")
     now = _now_iso()
     reference = _get_required_reference(graphql, resolved_reference_id)
     reference_lineage_id = _optional(reference.get("lineageId")) or resolved_reference_id
@@ -215,6 +227,33 @@ def review_reference_curation(
             }
         },
     )
+    message_metadata = {
+        "action": resolved_action,
+        "curationStatus": next_status,
+        "reasonCode": _optional(reason_code),
+        "referenceId": resolved_reference_id,
+        "referenceLineageId": reference_lineage_id,
+    }
+    if resolved_auto_reject_rule:
+        message_metadata.update(
+            {
+                "autoReject": True,
+                "autoRejectRule": resolved_auto_reject_rule,
+                "mechanicalDisposition": True,
+                "reversible": True,
+                "assistedTriage": True,
+            }
+        )
+    if resolved_auto_archive_rule:
+        message_metadata.update(
+            {
+                "autoArchive": True,
+                "autoArchiveRule": resolved_auto_archive_rule,
+                "mechanicalDisposition": True,
+                "reversible": True,
+                "assistedTriage": True,
+            }
+        )
     _create_message(
         graphql,
         message_id=message_id,
@@ -224,14 +263,32 @@ def review_reference_curation(
         body=user_note or f"{actor} marked this reference {next_status}.",
         actor_label=actor,
         now=now,
-        metadata={
-            "action": resolved_action,
-            "curationStatus": next_status,
-            "reasonCode": _optional(reason_code),
-            "referenceId": resolved_reference_id,
-            "referenceLineageId": reference_lineage_id,
-        },
+        metadata=message_metadata,
     )
+    relation_metadata = {
+        "action": resolved_action,
+        "curationStatus": next_status,
+        "reasonCode": _optional(reason_code),
+        "messageKind": "reference_curation",
+    }
+    if resolved_auto_reject_rule:
+        relation_metadata.update(
+            {
+                "autoReject": True,
+                "autoRejectRule": resolved_auto_reject_rule,
+                "mechanicalDisposition": True,
+                "assistedTriage": True,
+            }
+        )
+    if resolved_auto_archive_rule:
+        relation_metadata.update(
+            {
+                "autoArchive": True,
+                "autoArchiveRule": resolved_auto_archive_rule,
+                "mechanicalDisposition": True,
+                "assistedTriage": True,
+            }
+        )
     _create_semantic_relation(
         graphql,
         relation_id=relation_id,
@@ -244,12 +301,7 @@ def review_reference_curation(
         object_id=resolved_reference_id,
         object_lineage_id=reference_lineage_id,
         object_version_number=_optional_int(reference.get("versionNumber")),
-        metadata={
-            "action": resolved_action,
-            "curationStatus": next_status,
-            "reasonCode": _optional(reason_code),
-            "messageKind": "reference_curation",
-        },
+        metadata=relation_metadata,
         now=now,
     )
     return {
@@ -258,6 +310,8 @@ def review_reference_curation(
         "referenceId": resolved_reference_id,
         "status": next_status,
         "reasonCode": _optional(reason_code),
+        "autoRejectRule": resolved_auto_reject_rule,
+        "autoArchiveRule": resolved_auto_archive_rule,
         "messageId": message_id,
         "relationId": relation_id,
     }

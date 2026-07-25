@@ -35,6 +35,7 @@ from .options import (
     normalize_positive_integer,
     normalize_string,
     parse_boolean_option,
+    parse_comma_list,
     parse_options,
     parse_repeated_option,
     resolve_mutation_apply,
@@ -75,6 +76,15 @@ from .reference_labels import (
     resolve_reference_any,
     resolve_reference_for_label,
 )
+from .assisted_curation_triage import (
+    apply_mechanical_dispositions,
+    build_assisted_triage_plan,
+    list_mechanical_dispositions,
+    load_triage_plan,
+    reverse_mechanical_disposition,
+    run_triage_review_session,
+    write_triage_plan,
+)
 from .reference_policy import normalize_reference_rejection_reason_code
 from .source_readiness import build_extraction_index
 from .steering import load_steering_config, require_corpus_config, require_steering_config
@@ -112,6 +122,213 @@ def references_review_curation(flags: list[str]) -> None:
     print(
         f"references\treview-curation\t{review.get('referenceId')}\t{review.get('action')}\t"
         f"{review.get('status')}\t{review.get('reasonCode') or ''}\t{review.get('messageId') or ''}"
+    )
+
+
+def references_triage_plan(flags: list[str]) -> None:
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references triage-plan requires --corpus-key <key>.")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    max_pending = normalize_non_negative_integer(options.get("max-pending"), "--max-pending")
+    json_output = parse_boolean_option(options.get("json"), False, "--json")
+    client, _ = create_authoring_client()
+    plan = build_assisted_triage_plan(
+        corpus_id=corpus_id,
+        references=client.list_records("Reference"),
+        attachments=client.list_records("ReferenceAttachment"),
+        messages=client.list_records("Message"),
+        relations=client.list_records("SemanticRelation"),
+        max_pending=max_pending,
+    )
+    output_dir = normalize_string(options.get("output-dir"))
+    manifest_path = write_triage_plan(plan, run_dir=Path(output_dir) if output_dir else None)
+    plan = load_triage_plan(manifest_path)
+    if json_output:
+        print(json.dumps(plan, indent=2, sort_keys=True))
+        return
+    counts = plan.get("counts") or {}
+    lanes = counts.get("lanes") or {}
+    history = plan.get("historySignal") or {}
+    print(f"references\ttriage-plan\trun\t{plan.get('runId')}")
+    print(f"references\ttriage-plan\tmanifest\t{manifest_path}")
+    print(f"references\ttriage-plan\tpending-scanned\t{counts.get('pendingScanned', 0)}")
+    print(f"references\ttriage-plan\thuman-queue\t{counts.get('humanQueue', 0)}")
+    print(f"references\ttriage-plan\tmechanical-dispositions\t{counts.get('mechanicalDispositions', 0)}")
+    print(f"references\ttriage-plan\tmechanical-archives\t{counts.get('mechanicalArchives', 0)}")
+    print(f"references\ttriage-plan\tmechanical-rejects\t{counts.get('mechanicalRejects', 0)}")
+    print(f"references\ttriage-plan\tclusters\t{counts.get('clusterCount', 0)}")
+    print(f"references\ttriage-plan\tlane-uncertain\t{lanes.get('uncertain', 0)}")
+    print(f"references\ttriage-plan\tlane-likely-accept\t{lanes.get('likely_accept', 0)}")
+    print(f"references\ttriage-plan\tlane-likely-reject\t{lanes.get('likely_reject', 0)}")
+    print(f"references\ttriage-plan\thistory-thin\t{'yes' if history.get('thinHistory') else 'no'}")
+    print("references\ttriage-plan\tnote\tmechanically_unavailable uses archive (not reject)")
+    print("references\ttriage-plan\tnext\treferences triage-review --plan " + str(manifest_path))
+    print(
+        "references\ttriage-plan\tnext\treferences triage-auto-reject --plan "
+        + str(manifest_path)
+        + " --dry-run"
+    )
+
+
+def references_triage_review(flags: list[str]) -> None:
+    options = parse_options(flags)
+    plan_path = normalize_string(options.get("plan"))
+    if not plan_path:
+        raise ValueError("references triage-review requires --plan <plan.json|run-dir>.")
+    plan = load_triage_plan(plan_path)
+    dry_run = parse_boolean_option(options.get("dry-run"), True, "--dry-run")
+    # Explicit --apply-decisions turns writes on; default remains dry-run for safety.
+    if parse_boolean_option(options.get("apply-decisions"), False, "--apply-decisions"):
+        dry_run = False
+    lanes = parse_comma_list(options.get("lanes")) or None
+    limit = normalize_non_negative_integer(options.get("limit"), "--limit")
+    actor = normalize_string(options.get("actor")) or "Papyrus content CLI"
+    client = None
+    graphql = None
+    if not dry_run:
+        client, _ = create_authoring_client()
+        graphql = client.graphql
+    session = run_triage_review_session(
+        plan,
+        graphql=graphql,
+        lanes=lanes,
+        limit=limit,
+        dry_run=dry_run,
+        actor_label=actor,
+    )
+    metrics = session.get("metrics") or {}
+    print(f"references\ttriage-review\tplan\t{plan.get('runId')}")
+    print(f"references\ttriage-review\tdry-run\t{'yes' if dry_run else 'no'}")
+    print(f"references\ttriage-review\treviewed\t{metrics.get('prospectsReviewed', 0)}")
+    print(f"references\ttriage-review\taccepted\t{metrics.get('accepted', 0)}")
+    print(f"references\ttriage-review\trejected\t{metrics.get('rejected', 0)}")
+    print(f"references\ttriage-review\tskipped\t{metrics.get('skipped', 0)}")
+    print(f"references\ttriage-review\tmean-seconds\t{metrics.get('meanSecondsToDecision')}")
+    for lane, rate in (metrics.get("acceptRateByLane") or {}).items():
+        print(f"references\ttriage-review\taccept-rate\t{lane}\t{rate}")
+
+
+def references_triage_auto_reject(flags: list[str]) -> None:
+    """Apply mechanical dispositions from a triage plan (archive stubs / reject URI dups).
+
+    Command name kept for compatibility; mechanically_unavailable uses archive.
+    """
+    options = parse_options(flags)
+    plan_path = normalize_string(options.get("plan"))
+    if not plan_path:
+        raise ValueError("references triage-auto-reject requires --plan <plan.json|run-dir>.")
+    plan = load_triage_plan(plan_path)
+    # Default dry-run. Explicit --apply-auto-rejects writes; --dry-run false also writes.
+    dry_run = True
+    if options.get("dry-run") is not None:
+        dry_run = parse_boolean_option(options.get("dry-run"), True, "--dry-run")
+    if parse_boolean_option(options.get("apply-auto-rejects"), False, "--apply-auto-rejects"):
+        dry_run = False
+    if parse_boolean_option(options.get("apply-dispositions"), False, "--apply-dispositions"):
+        dry_run = False
+    if options.get("apply") is not None:
+        raise ValueError(
+            "references triage-auto-reject does not accept --apply. "
+            "Use --apply-auto-rejects / --apply-dispositions to write, or --dry-run (default) to preview."
+        )
+    limit = normalize_non_negative_integer(options.get("limit"), "--limit")
+    actor = normalize_string(options.get("actor")) or "Papyrus content CLI"
+    client, _ = create_authoring_client()
+    audit = apply_mechanical_dispositions(
+        client.graphql,
+        plan,
+        actor_label=actor,
+        dry_run=dry_run,
+        limit=limit,
+    )
+    print(f"references\ttriage-auto-reject\tplan\t{plan.get('runId')}")
+    print(f"references\ttriage-auto-reject\tdry-run\t{'yes' if dry_run else 'no'}")
+    print(f"references\ttriage-auto-reject\tcount\t{audit.get('count', 0)}")
+    print(f"references\ttriage-auto-reject\tarchives\t{audit.get('archiveCount', 0)}")
+    print(f"references\ttriage-auto-reject\trejects\t{audit.get('rejectCount', 0)}")
+    for result in audit.get("results") or []:
+        print(
+            "\t".join(
+                [
+                    "mechanical-disposition",
+                    str(result.get("mechanicalAction") or "-"),
+                    str(result.get("status") or "-"),
+                    str(result.get("mechanicalRule") or "-"),
+                    str(result.get("reasonCode") or "-"),
+                    str(result.get("referenceId") or "-"),
+                    str(result.get("messageId") or "-"),
+                ]
+            )
+        )
+
+
+def references_triage_auto_rejects(flags: list[str]) -> None:
+    """List current mechanical archives and rejects (enumerable / reversible)."""
+    options = parse_options(flags)
+    corpus_id = None
+    if options.get("corpus-key"):
+        steering_config = load_steering_config(options.get("config")) or require_steering_config()
+        corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+        corpus_id = knowledge_corpus_id(corpus_config)
+    limit = normalize_non_negative_integer(options.get("limit"), "--limit")
+    client, _ = create_authoring_client()
+    rows = list_mechanical_dispositions(
+        references=client.list_records("Reference"),
+        messages=client.list_records("Message"),
+        relations=client.list_records("SemanticRelation"),
+        corpus_id=corpus_id,
+    )
+    if limit is not None:
+        rows = rows[:limit]
+    print(f"references\ttriage-auto-rejects\tcount\t{len(rows)}")
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    "mechanical-disposition",
+                    str(row.get("mechanicalAction") or "-"),
+                    str(row.get("curationStatus") or "-"),
+                    str(row.get("mechanicalRule") or row.get("autoRejectRule") or row.get("autoArchiveRule") or "-"),
+                    str(row.get("reasonCode") or "-"),
+                    str(row.get("referenceId") or "-"),
+                    str(row.get("messageId") or "-"),
+                    str(row.get("disposedAt") or row.get("rejectedAt") or "-"),
+                    str(row.get("title") or "-"),
+                ]
+            )
+        )
+
+
+def references_triage_reverse_auto_reject(flags: list[str]) -> None:
+    """Reopen a mechanical archive or reject (reverse disposition)."""
+    options = parse_options(flags)
+    reference_id = options.get("reference") or options.get("reference-id")
+    if not reference_id:
+        raise ValueError("references triage-reverse-auto-reject requires --reference <id>.")
+    if options.get("apply") is not None:
+        raise ValueError(
+            "references triage-reverse-auto-reject does not accept --apply. "
+            "Default is dry-run; pass --dry-run false to reopen."
+        )
+    dry_run = parse_boolean_option(options.get("dry-run"), True, "--dry-run")
+    actor = normalize_string(options.get("actor")) or "Papyrus content CLI"
+    note = normalize_string(options.get("note")) or "Reopened assisted-triage mechanical disposition."
+    if dry_run:
+        print(f"references\ttriage-reverse-auto-reject\tdry-run\tyes\t{reference_id}")
+        return
+    client, _ = create_authoring_client()
+    result = reverse_mechanical_disposition(
+        client.graphql,
+        reference_id=str(reference_id),
+        actor_label=actor,
+        note=note,
+    )
+    print(
+        f"references\ttriage-reverse-auto-reject\t{result.get('referenceId')}\t"
+        f"{result.get('action')}\t{result.get('status')}\t{result.get('messageId') or ''}"
     )
 
 

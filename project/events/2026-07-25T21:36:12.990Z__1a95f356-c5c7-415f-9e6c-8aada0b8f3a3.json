@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "1a95f356-c5c7-415f-9e6c-8aada0b8f3a3",
+  "issue_id": "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac",
+  "event_type": "field_updated",
+  "occurred_at": "2026-07-25T21:36:12.990Z",
+  "actor_id": "ryan",
+  "payload": {
+    "changes": {
+      "parent": {
+        "from": null,
+        "to": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d"
+      }
+    }
+  }
+}

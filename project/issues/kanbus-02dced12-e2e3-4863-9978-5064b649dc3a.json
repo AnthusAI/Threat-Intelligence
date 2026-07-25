@@ -1,0 +1,25 @@
+{
+  "id": "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a",
+  "title": "Calibrate triage lanes once rejection reason-codes accumulate",
+  "description": "## Context\nMeasurement for kanbus-1f97c7 found 0 rejected references and empty reason-code history. v1 therefore uses thin-history-safe heuristics (accepted-set similarity, mechanical unavailability, dedupe) and keeps uncertain as the default lane.\n\n## Goal\nOnce operators have logged meaningful reject reason-codes (`out_of_scope`, `policy_exclusion`, etc.), calibrate likely-accept / likely-reject thresholds against holdout decisions and report accept-rate-by-lane drift. Do not introduce auto-accept.\n\n## Acceptance\n- Offline calibration report from accepted vs scope-negative rejected history\n- Threshold updates only after measured lane accept-rate review\n- Exploratory prospects remain exempt from history-based scoring",
+  "type": "story",
+  "status": "open",
+  "priority": 3,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
+  "labels": [],
+  "dependencies": [],
+  "comments": [
+    {
+      "id": "2538d47d-7c0f-4394-888f-c9d03a744d6a",
+      "author": "ryan",
+      "text": "## Note from assisted triage (kanbus-1f97c7)\n\nMechanical unavailable stubs are now **archived**, not rejected, specifically so they do not poison rejection history used for lane calibration.\n\nBulk apply on TI production: **815 archived** with `autoArchive` / `autoArchiveRule=mechanically_unavailable`. Rejection count remains editorial-only (still ~0 reason-coded rejects). When this story calibrates lanes, train on `rejected` + scope-negative reason codes only — do not treat `archived` mechanical stubs as negative scope examples.",
+      "created_at": "2026-07-25T21:36:08.572613Z"
+    }
+  ],
+  "created_at": "2026-07-25T18:05:17.023913Z",
+  "updated_at": "2026-07-25T21:36:08.572613Z",
+  "closed_at": null,
+  "custom": {}
+}

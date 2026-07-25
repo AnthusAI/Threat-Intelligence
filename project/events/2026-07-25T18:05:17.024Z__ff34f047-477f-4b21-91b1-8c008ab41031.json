@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "ff34f047-477f-4b21-91b1-8c008ab41031",
+  "issue_id": "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-25T18:05:17.024Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Context\nMeasurement for kanbus-1f97c7 found 0 rejected references and empty reason-code history. v1 therefore uses thin-history-safe heuristics (accepted-set similarity, mechanical unavailability, dedupe) and keeps uncertain as the default lane.\n\n## Goal\nOnce operators have logged meaningful reject reason-codes (`out_of_scope`, `policy_exclusion`, etc.), calibrate likely-accept / likely-reject thresholds against holdout decisions and report accept-rate-by-lane drift. Do not introduce auto-accept.\n\n## Acceptance\n- Offline calibration report from accepted vs scope-negative rejected history\n- Threshold updates only after measured lane accept-rate review\n- Exploratory prospects remain exempt from history-based scoring",
+    "issue_type": "story",
+    "labels": [],
+    "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
+    "priority": 3,
+    "status": "open",
+    "title": "Calibrate triage lanes once rejection reason-codes accumulate"
+  }
+}

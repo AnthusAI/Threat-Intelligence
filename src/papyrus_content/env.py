@@ -21,9 +21,12 @@ def resolve_papyrus_root() -> Path:
 
 PAPYRUS_ROOT = resolve_papyrus_root()
 BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
+# JWT/TTL may be refreshed into .env and should win over a stale shell export.
+# PAPYRUS_GRAPHQL_ENDPOINT must NOT be in this set: silently rewriting a
+# process-level production endpoint to a sandbox value from .env has caused
+# wrong-environment measure/mutate risk (see Kanbus env footgun issue).
 _DOTENV_OVERRIDE_KEYS = frozenset({
     "PAPYRUS_GRAPHQL_JWT",
-    "PAPYRUS_GRAPHQL_ENDPOINT",
     "PAPYRUS_JWT_TTL_SECONDS",
 })
 

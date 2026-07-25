@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "920b7f8c-61e0-4e91-8f40-fc86168a378e",
+  "issue_id": "kanbus-ec55555e-f1ef-456f-b2b6-8c5e3519e431",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-25T18:52:03.250Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Context\nFull-queue triage + a 30-item uncertain review session showed that mechanical auto-reject and dedupe carry the operator-time win today. Uncertain-lane rationales are mostly factual inventory (domain, item id, “no accepted match”) and were **not** specific enough to decide from without opening the source.\n\n## Goal\nLead each uncertain prospect with 1–2 sentences grounded in checkable corpus facts: named accepted refs, category/coverage gaps, citation links, or summary overlap — not “none matched closely.”\n\n## Acceptance\n- In a hand-checked sample of uncertain prospects, an operator can accept or reject from the rationale alone more often than today\n- Still no auto-accept; exploratory remains exempt from history-based scoring",
+    "issue_type": "story",
+    "labels": [],
+    "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
+    "priority": 2,
+    "status": "open",
+    "title": "Ground uncertain-lane rationales in corpus connections"
+  }
+}
