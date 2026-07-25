@@ -12,7 +12,7 @@ import { PICTOGRAM_PALETTE } from "../pictograms/system";
 const PICTOGRAM_FRAME_STYLE: CSSProperties = {
   aspectRatio: "var(--pictogram-aspect-ratio, 1)",
   background: "var(--background)",
-  border: "1px solid rgba(145, 145, 152, 0.28)",
+  border: "none",
   display: "block",
   overflow: "hidden",
   position: "relative",

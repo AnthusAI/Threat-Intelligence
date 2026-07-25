@@ -50,7 +50,7 @@ const TI_SCENE_STYLES_DARK = {
     "--ti-pictogram-edge": "#363a3f",
     "--ti-pictogram-node": "#2e3135",
     "--ti-pictogram-muted": "#43484e",
-    "--ti-pictogram-user": "#d4d8de",
+    "--ti-pictogram-user": "#eeeeec",
     "--ti-pictogram-throb": "#ac4d39",
     "--ti-pictogram-compromised": "#e54d2e",
     "--ti-pictogram-accent-glow": "rgba(251, 146, 60, 0.2)",

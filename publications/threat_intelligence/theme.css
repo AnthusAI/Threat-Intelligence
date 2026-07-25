@@ -245,7 +245,7 @@
   --ti-pictogram-edge: var(--slate-6);
   --ti-pictogram-node: var(--slate-5);
   --ti-pictogram-muted: var(--slate-7);
-  --ti-pictogram-user: #d4d8de;
+  --ti-pictogram-user: #eeeeec;
   --ti-pictogram-throb: var(--tomato-8);
   --ti-pictogram-core-glow: var(--ti-alarm-red);
   --ti-pictogram-compromised: var(--ti-alarm-red);
