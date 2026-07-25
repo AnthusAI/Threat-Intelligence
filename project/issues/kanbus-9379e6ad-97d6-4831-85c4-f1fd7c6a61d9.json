@@ -1,24 +1,21 @@
 {
-  "id": "kanbus-ea1686cc-ef82-4864-97ec-31cfc87da971",
-  "type": "bug",
+  "id": "kanbus-9379e6ad-97d6-4831-85c4-f1fd7c6a61d9",
   "title": "Resolve canonical source for 3 legacy references",
   "description": "As discovered in kanbus-88ab2a, there are exactly 3 accepted references in production that lack both a source attachment and a resolvable canonical URI, causing them to be blocked at the find stage gate.\n\nThese references need their canonical sources resolved so they can be processed for URL text extraction.\n\nBlocked Reference IDs:\n- reference-knowledge-corpus-ai-ml-journalism-web-businessinsider-openclaw-token-bill-2026-5-v1\n- reference-knowledge-corpus-ai-ml-research-context-rot-4-v1\n- reference-knowledge-corpus-ai-ml-research-yann-lecun-path-towards-autonomous-machine-intelligence-openreview-v1",
+  "type": "bug",
   "status": "open",
-  "author": "agent",
-  "created_at": "2026-07-25T16:43:51.974079Z",
-  "updated_at": "2026-07-25T16:43:51.974118Z",
-  "comments": [],
-  "custom": {
-    "project_label": "kanbus",
-    "source": "shared"
-  },
   "priority": 2,
   "assignee": null,
   "creator": null,
-  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "parent": null,
   "labels": [
     "ingestion",
     "tech-debt"
   ],
-  "dependencies": []
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-25T16:51:04.378854Z",
+  "updated_at": "2026-07-25T16:51:04.378854Z",
+  "closed_at": null,
+  "custom": {}
 }
