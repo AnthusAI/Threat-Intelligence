@@ -95,10 +95,18 @@ def build_record_changes_targeted_by_id(
     client: PapyrusGraphQLAuthoringClient,
     records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    # Expand Reference/Message/Assignment metadata (and similar private payloads)
+    # into ModelAttachment rows before targeted get/upsert. Without this step,
+    # Reference updates that still carry a `metadata` key fail against AppSync
+    # because Reference has no GraphQL metadata field.
+    expanded = expand_private_payload_records(list(records))
     changes: list[dict[str, Any]] = []
-    for record in records:
+    for record in expanded:
         current = client.get_record(record["modelName"], record["expected"]["id"])
-        changes.append(build_record_change_from_current(record["modelName"], record["expected"], current))
+        change = build_record_change_from_current(record["modelName"], record["expected"], current)
+        if "attachmentBody" in record:
+            change["attachmentBody"] = record["attachmentBody"]
+        changes.append(change)
     return changes
 
 

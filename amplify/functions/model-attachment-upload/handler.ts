@@ -145,7 +145,8 @@ async function completeModelAttachmentUpload(event: Parameters<CompleteUploadHan
     importRunId: input.importRunId,
     createdAt: current.data?.createdAt ?? now,
     updatedAt: now,
-    status: input.status,
+    // Successful upload completion always makes the payload downloadable.
+    status: "active",
   };
   if (current.data) {
     await requireDataResult(client.models.ModelAttachment.update(record), "update ModelAttachment");

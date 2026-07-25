@@ -604,6 +604,7 @@ def run_reference_url_text_extraction(
 ) -> dict[str, Any]:
     from .records import build_record_changes, build_record_changes_targeted_by_id
 
+    references = hydrate_reference_metadata_from_model_attachments(client, references)
     planned = build_reference_url_text_attachment_plans(
         references=references,
         attachments=attachments,
@@ -3543,6 +3544,83 @@ def _reference_metadata_update_record(
     }
 
 
+def hydrate_reference_metadata_from_model_attachments(
+    client: Any,
+    references: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Attach private ModelAttachment metadata payloads onto Reference rows.
+
+    Reference has no GraphQL `metadata` field on the lean TI schema. Find/process
+    persist enrichment as ModelAttachment(role=metadata). Process reads that
+    payload via `_reference_metadata_object`, so hydrate before planning.
+    """
+    from .model_attachments import download_attachment_buffer, parse_jsonish
+
+    if not references:
+        return references
+    try:
+        model_attachments = client.list_records("ModelAttachment")
+    except Exception:
+        return references
+    by_owner: dict[str, list[dict[str, Any]]] = {}
+    for attachment in model_attachments:
+        if str(attachment.get("ownerKind") or "") != "reference":
+            continue
+        if str(attachment.get("role") or "") != "metadata":
+            continue
+        if str(attachment.get("status") or "").lower() == "deleted":
+            continue
+        owner_id = str(attachment.get("ownerId") or "").strip()
+        if not owner_id:
+            continue
+        by_owner.setdefault(owner_id, []).append(attachment)
+
+    hydrated: list[dict[str, Any]] = []
+    for reference in references:
+        reference_id = str(reference.get("id") or "").strip()
+        if not reference_id:
+            hydrated.append(reference)
+            continue
+        existing = _reference_metadata_object(reference)
+        if existing:
+            hydrated.append(reference)
+            continue
+        candidates = by_owner.get(reference_id) or []
+        if not candidates:
+            hydrated.append(reference)
+            continue
+        candidates = sorted(
+            candidates,
+            key=lambda row: (
+                0 if str(row.get("status") or "").lower() == "active" else 1,
+                str(row.get("updatedAt") or ""),
+            ),
+        )
+        # Prefer active, then newest updatedAt.
+        candidates.sort(key=lambda row: str(row.get("updatedAt") or ""), reverse=True)
+        candidates.sort(key=lambda row: 0 if str(row.get("status") or "").lower() == "active" else 1)
+        payload: dict[str, Any] | None = None
+        for attachment in candidates:
+            try:
+                buffer = download_attachment_buffer(client, attachment)
+            except Exception:
+                continue
+            if buffer is None:
+                continue
+            parsed = parse_jsonish(buffer.decode("utf-8", errors="replace"))
+            if isinstance(parsed, dict) and parsed:
+                payload = parsed
+                break
+        if payload is None:
+            hydrated.append(reference)
+            continue
+        next_reference = dict(reference)
+        next_reference["metadata"] = payload
+        hydrated.append(next_reference)
+    return hydrated
+
+
 def _reference_metadata_object(reference: dict[str, Any]) -> dict[str, Any]:
     metadata = reference.get("metadata")
     if isinstance(metadata, dict):
@@ -3615,10 +3693,30 @@ def _resolve_process_source_uri(
     canonical_uri = _resolve_existing_canonical_uri(reference)
     if canonical_uri:
         return canonical_uri, None
+    # Find-stage metadata lives on ModelAttachment (role=metadata). When callers
+    # hydrate that onto Reference.metadata, canonical resolution above succeeds.
+    # As a last resort for URL-only prospects, use the Reference.sourceUri after
+    # find has already run (metadata may be present even when hydration failed).
+    direct_source_uri = normalize_http_url(reference.get("sourceUri"))
+    if direct_source_uri and _reference_has_find_stage_marker(reference):
+        return direct_source_uri, None
     return None, {
         "code": "needs_find_missing_canonical_source",
         "message": "Reference processing requires find-stage canonical source resolution first.",
     }
+
+
+def _reference_has_find_stage_marker(reference: dict[str, Any]) -> bool:
+    metadata = _reference_metadata_object(reference)
+    if not metadata:
+        return False
+    identifiers = metadata.get("identifiers") if isinstance(metadata.get("identifiers"), dict) else {}
+    resolved = identifiers.get("resolved") if isinstance(identifiers.get("resolved"), dict) else {}
+    if resolved.get("canonical_uri") or resolved.get("source_uri"):
+        return True
+    papyrus = metadata.get("papyrus") if isinstance(metadata.get("papyrus"), dict) else {}
+    source_resolution = papyrus.get("source_resolution") if isinstance(papyrus.get("source_resolution"), dict) else {}
+    return bool(source_resolution)
 
 
 def _reference_find_seed_uri(reference: dict[str, Any]) -> str | None:

@@ -114,7 +114,10 @@ def upload_attachment_body(
     body: bytes | str,
 ) -> dict[str, Any]:
     buffer = body if isinstance(body, (bytes, bytearray)) else str(body).encode("utf-8")
-    slot = client.create_model_attachment_upload(attachment)
+    # Downloads require status=active. Payload builders historically defaulted to
+    # "ready"; force active on complete so research-packet metadata is readable.
+    attachment_for_upload = {**attachment, "status": "active"}
+    slot = client.create_model_attachment_upload(attachment_for_upload)
     headers = {str(key): str(value) for key, value in (slot.get("requiredHeaders") or {}).items()}
     request = urllib.request.Request(
         slot["uploadUrl"],
@@ -132,7 +135,7 @@ def upload_attachment_body(
             f"Failed to upload ModelAttachment {attachment['id']} to {slot.get('storagePath')}: "
             f"{error.code} {error.reason} {detail[:240]}"
         ) from error
-    completed = client.complete_model_attachment_upload(slot["uploadId"], attachment)
+    completed = client.complete_model_attachment_upload(slot["uploadId"], attachment_for_upload)
     if isinstance(completed, dict):
         completed_status = str(completed.get("status") or "").strip().lower()
         normalized_status = "active" if completed_status in {"", "ready"} else completed_status
