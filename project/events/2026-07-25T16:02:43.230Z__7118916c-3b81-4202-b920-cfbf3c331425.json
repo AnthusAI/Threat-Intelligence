@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "7118916c-3b81-4202-b920-cfbf3c331425",
+  "issue_id": "kanbus-6ea1d5ac-5483-44c0-9408-9f6cc9ba5311",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-25T16:02:43.230Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Temporary card test for kanbus_display; safe to close.",
+    "issue_type": "task",
+    "labels": [],
+    "parent": null,
+    "priority": 3,
+    "status": "open",
+    "title": "Matrix bridge E2E test 120243"
+  }
+}
