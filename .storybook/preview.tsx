@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import type { Preview } from '@storybook/react'
-import { applyReaderTheme } from '@/components/reader-settings';
-import type { ReaderThemeSetting } from '@/components/reader-settings';
+import { applyReaderTheme, type ReaderThemeSetting } from '@/lib/reader-theme';
 import '../app/globals.css';
 
 const preview: Preview = {

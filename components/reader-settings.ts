@@ -3,11 +3,13 @@
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import type { EditionPresentationFormat } from "../lib/content-types";
+import { applyReaderTheme, type ReaderThemeSetting } from "../lib/reader-theme";
 import { SITE_BRAND, enforcePresentation, getPresentationChoices } from "../lib/site-brand";
 import { configureAmplifyClient } from "./amplify-client-provider";
 import { isUnauthenticatedError, loadReaderSessionSnapshot } from "./reader-auth-state";
 
-export type ReaderThemeSetting = "system" | "light" | "dark";
+export type { ReaderThemeSetting } from "../lib/reader-theme";
+export { applyReaderTheme };
 export type ReaderMotionSetting = "standard" | "low";
 
 export type ReaderSettings = {
@@ -118,13 +120,6 @@ export function writeLocalReaderSettings(settings: ReaderSettings) {
   window.localStorage.setItem(LEGACY_PRESENTATION_STORAGE_KEY, normalized.presentation);
   applyReaderTheme(normalized.theme);
   window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail: normalized }));
-}
-
-export function applyReaderTheme(theme: ReaderThemeSetting) {
-  if (typeof document === "undefined") return;
-  document.documentElement.dataset.papyrusTheme = theme;
-  applyReaderThemeClass(theme);
-  updateThemeMeta(theme);
 }
 
 export function subscribeReaderSettingsChanges(listener: (settings: ReaderSettings) => void): () => void {
@@ -292,33 +287,6 @@ function cleanupLegacyPresentationCookie() {
   if (window.localStorage.getItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY) === "true") return;
   document.cookie = `${LEGACY_PRESENTATION_COOKIE}=; path=/; max-age=0; samesite=lax`;
   window.localStorage.setItem(LEGACY_COOKIE_CLEANUP_STORAGE_KEY, "true");
-}
-
-function updateThemeMeta(theme: ReaderThemeSetting) {
-  const colorScheme = theme === "dark" ? "dark" : theme === "light" ? "light" : "light dark";
-  let meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"][data-papyrus-theme-meta="true"]');
-  if (!meta) {
-    meta = document.createElement("meta");
-    meta.name = "color-scheme";
-    meta.setAttribute("data-papyrus-theme-meta", "true");
-    document.head.appendChild(meta);
-  }
-  meta.content = colorScheme;
-}
-
-function applyReaderThemeClass(theme: ReaderThemeSetting) {
-  if (typeof document === "undefined") return;
-  const isDark = resolveReaderThemeIsDark(theme);
-  document.documentElement.classList.toggle("dark", isDark);
-  document.documentElement.classList.toggle("dark-theme", isDark);
-  document.documentElement.classList.toggle("light", !isDark);
-  document.documentElement.classList.toggle("light-theme", !isDark);
-}
-
-function resolveReaderThemeIsDark(theme: ReaderThemeSetting) {
-  if (theme === "dark") return true;
-  if (theme === "light") return false;
-  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function assertNoDataErrors(errors: DataClientErrors, operation: string): void {

@@ -1,9 +1,37 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { StorybookConfig } from "@storybook/nextjs";
+import type { StorybookConfig } from "@storybook/react-vite";
+import type { Plugin } from "vite";
 
 const storybookDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(storybookDir, "..");
+
+function fixJsonImportMimeType(): Plugin {
+  return {
+    name: "storybook-fix-json-import-mime",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? "";
+        if (!/\.json(?:\?|&).*import/.test(url)) {
+          next();
+          return;
+        }
+        const originalSetHeader = res.setHeader.bind(res);
+        res.setHeader = (name, value) => {
+          if (
+            typeof name === "string" &&
+            name.toLowerCase() === "content-type" &&
+            value === "application/json"
+          ) {
+            return originalSetHeader("content-type", "text/javascript");
+          }
+          return originalSetHeader(name, value);
+        };
+        next();
+      });
+    },
+  };
+}
 
 const config: StorybookConfig = {
   stories: [
@@ -21,6 +49,7 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(config) {
+    config.plugins = [...(config.plugins ?? []), fixJsonImportMimeType()];
     config.resolve = config.resolve ?? {};
     config.resolve.alias = {
       ...config.resolve.alias,
