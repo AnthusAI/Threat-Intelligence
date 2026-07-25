@@ -1,4 +1,10 @@
-"""Pluggable web search providers for Papyrus reference research."""
+"""Web search providers for Papyrus reference research.
+
+Tavily is the only default. Missing ``TAVILY_API_KEY`` fails loudly — there is
+no automatic fallback to OpenAI or any other provider. ``WEB_SEARCH_PROVIDER=
+openai`` (or an explicit ``provider="openai"`` argument) is a deliberate
+opt-in for tests only, never a recovery path when Tavily is unset or fails.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +21,18 @@ WEB_SEARCH_PROVIDER_ENV = "WEB_SEARCH_PROVIDER"
 WEB_SEARCH_PATH = "papyrus.reference.web_search"
 DEFAULT_WEB_SEARCH_PROVIDER: WebSearchProviderName = "tavily"
 _SUPPORTED_PROVIDERS: frozenset[str] = frozenset({"tavily", "openai"})
+_TAVILY_KEY_REQUIRED = (
+    "TAVILY_API_KEY is required for web search. Set TAVILY_API_KEY in the "
+    "environment; do not set WEB_SEARCH_PROVIDER=openai as a workaround."
+)
 
 
 def normalize_web_search_provider(value: Any) -> WebSearchProviderName:
+    """Resolve provider from an explicit value, else env, else Tavily.
+
+    Unknown values are ignored (Tavily remains the default). OpenAI is used
+    only when the caller or ``WEB_SEARCH_PROVIDER`` explicitly names it.
+    """
     text = str(value or "").strip().lower()
     if text in _SUPPORTED_PROVIDERS:
         return text  # type: ignore[return-value]
@@ -46,6 +61,7 @@ def reference_web_search(
     except (TypeError, ValueError):
         limit = 20
     limit = max(1, min(limit, 50))
+    # OpenAI only when explicitly selected — never as recovery from missing Tavily.
     if provider_name == "openai":
         payload = _search_with_openai(
             query=query,
@@ -121,7 +137,7 @@ def _title_subtitle_search_query(
 def _search_with_tavily(*, query: str, max_results: int) -> dict[str, Any]:
     api_key = os.environ.get("TAVILY_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("TAVILY_API_KEY is required for Tavily web search.")
+        raise RuntimeError(_TAVILY_KEY_REQUIRED)
     payload = {
         "query": query,
         "max_results": max_results,

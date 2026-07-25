@@ -27,7 +27,7 @@ def execute_tactus(
     """Execute a Papyrus Tactus snippet through the newsroom runtime.
 
     Use harness="research" when the caller should provide only the research body.
-    The research harness preloads the assignment item, OpenAI web search helper,
+    The research harness preloads the assignment item, Tavily web_search helper,
     corpus key, and dry-run research-plan finisher.
     """
 

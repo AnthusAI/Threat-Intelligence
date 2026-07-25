@@ -380,6 +380,7 @@ standard web module:
 local web = require("tactus.web")
 ```
 
-Use `web.search{...}` or `web.synthesize{...}` with `provider = "openai"`.
+Use `web.search{...}` or `web.synthesize{...}` with Tavily (default). Set
+`TAVILY_API_KEY`; do not switch to OpenAI web search when Tavily is missing.
 Papyrus consumes the normalized result in private packet fields; it does not
 write accepted source records directly from web search.

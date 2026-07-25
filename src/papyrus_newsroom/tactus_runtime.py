@@ -809,13 +809,12 @@ DOCS: dict[str, dict[str, Any]] = {
         "content": (
             "Inside research harness snippets, use web_search(query) directly. "
             "Outside that harness, call papyrus.reference.web_search{ query = ..., "
-            "max_results = ..., provider = ... }. Tavily is the default provider "
-            "(WEB_SEARCH_PROVIDER=tavily); set provider=\"openai\" to use OpenAI web search. "
-            "The harness first tries Tactus "
-            "stdlib web.search and falls back to papyrus.reference.web_search when "
-            "tactus.web is unavailable. Keep web discoveries as reference prospects "
-            "until intake accepts them; do not write GraphQL records from search "
-            "results alone."
+            "max_results = ... }. Tavily is the only default provider; set "
+            "TAVILY_API_KEY. Do not set WEB_SEARCH_PROVIDER=openai when Tavily is "
+            "missing — that is not a recovery path (openai is test-only opt-in). "
+            "Missing TAVILY_API_KEY fails loudly. Keep web discoveries as "
+            "reference prospects until intake accepts them; do not write GraphQL "
+            "records from search results alone."
         ),
     },
 }

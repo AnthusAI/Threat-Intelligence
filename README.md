@@ -561,14 +561,13 @@ rediscovers the applied private state from GraphQL. The older
 `assignments story-cycle-output` commands remain compatibility surfaces while
 operators migrate.
 
-Fresh external web research is a Tactus standard-library capability, not a
-Papyrus adapter. Researcher and reporter snippets should use
-`local web = require("tactus.web")` and then call `web.search{...}` or
-`web.synthesize{...}` with `provider = "openai"` when the assignment context
-requests current web evidence. Web results stay in private `research_packet` or
-`reporting_context_packet` proposed-reference fields until reference intake
-registers them; Papyrus does not write accepted evidence records directly from
-web search.
+Fresh external web research uses Tavily by default via
+`papyrus.reference.web_search` / the research-harness `web_search` helper.
+Set `TAVILY_API_KEY`. Do not set `WEB_SEARCH_PROVIDER=openai` when Tavily is
+missing — that is not a recovery path. Web results stay in private
+`research_packet` or `reporting_context_packet` proposed-reference fields until
+reference intake registers them; Papyrus does not write accepted evidence
+records directly from web search.
 
 Copy `.env.example` to `.env` when you need local overrides. `.env*` is ignored
 by git, while `.env.example` is intentionally committed as the template.

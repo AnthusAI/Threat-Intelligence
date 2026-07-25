@@ -8,12 +8,13 @@ prospects.
 ## Required automation secrets
 
 Configure these in the Cursor automation secret list (in addition to
-`OPENAI_API_KEY` for web search execution):
+`OPENAI_API_KEY` for LLM agent calls and `TAVILY_API_KEY` for web search):
 
 | Secret | Purpose |
 | --- | --- |
 | `PAPYRUS_JWT_SECRET` | Mint short-lived `PAPYRUS_GRAPHQL_JWT` without AWS CLI |
 | `PAPYRUS_GRAPHQL_ENDPOINT` | Optional; defaults to production AppSync URL |
+| `TAVILY_API_KEY` | Required for research harness web search (no OpenAI fallback) |
 
 Alternatively provide `PAPYRUS_GRAPHQL_JWT` directly (short-lived; must be
 refreshed periodically).

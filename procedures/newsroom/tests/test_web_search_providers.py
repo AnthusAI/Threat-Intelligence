@@ -11,6 +11,11 @@ class WebSearchProvidersTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(web_search_providers.normalize_web_search_provider(None), "tavily")
 
+    def test_normalize_ignores_unknown_and_stays_on_tavily(self):
+        with mock.patch.dict(os.environ, {"WEB_SEARCH_PROVIDER": "bing"}, clear=True):
+            self.assertEqual(web_search_providers.normalize_web_search_provider(None), "tavily")
+            self.assertEqual(web_search_providers.normalize_web_search_provider("not-a-provider"), "tavily")
+
     def test_normalize_respects_env_override(self):
         with mock.patch.dict(os.environ, {"WEB_SEARCH_PROVIDER": "openai"}, clear=False):
             self.assertEqual(web_search_providers.normalize_web_search_provider(None), "openai")
@@ -90,6 +95,19 @@ class WebSearchProvidersTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"WEB_SEARCH_PROVIDER": "tavily"}, clear=True):
             os.environ.pop("TAVILY_API_KEY", None)
             with self.assertRaisesRegex(RuntimeError, "TAVILY_API_KEY"):
+                web_search_providers.reference_web_search(query="test query")
+
+    def test_missing_tavily_does_not_fall_back_to_openai(self):
+        """Having OPENAI_API_KEY must not silently select OpenAI web search."""
+        with mock.patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "sk-present"},
+            clear=True,
+        ):
+            os.environ.pop("TAVILY_API_KEY", None)
+            os.environ.pop("WEB_SEARCH_PROVIDER", None)
+            self.assertEqual(web_search_providers.configured_web_search_provider(), "tavily")
+            with self.assertRaisesRegex(RuntimeError, r"TAVILY_API_KEY.*do not set WEB_SEARCH_PROVIDER=openai"):
                 web_search_providers.reference_web_search(query="test query")
 
     @mock.patch("papyrus_newsroom.web_search_providers.reference_web_search")

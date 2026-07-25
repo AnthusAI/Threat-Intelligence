@@ -41,8 +41,8 @@ Required policy sequence:
 1. Read assignment context and budgeted agent context when assignment_id is live.
 2. Run one broad knowledge_query using compact researcher context: higher top_k, low per-source detail, source diversity, and a small token budget.
 3. Optionally inspect promising papyrus:// URIs with papyrus.resolve_uri or anchored knowledge_query follow-ups.
-4. Use OpenAI web search only for freshness, gaps, or assignment requests for external evidence. In source_discovery and full_research modes, at least one web search is required unless the final packet includes blockedReason.
-   The research-harness web_search helper performs bounded deterministic retry diversification; do not stop discovery after a zero-result first attempt.
+4. Use web search (Tavily; requires TAVILY_API_KEY) only for freshness, gaps, or assignment requests for external evidence. In source_discovery and full_research modes, at least one web search is required unless the final packet includes blockedReason.
+   Do not switch to OpenAI web search when Tavily is missing. The research-harness web_search helper performs bounded deterministic retry diversification; do not stop discovery after a zero-result first attempt.
 5. Finalize a packet with researchTrace: queries run, Papyrus URIs inspected, web searches run, accepted evidence ids selected, proposed references, and unresolved gaps.
 
 Evidence rules:

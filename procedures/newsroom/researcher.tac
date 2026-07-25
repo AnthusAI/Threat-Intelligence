@@ -21,9 +21,10 @@ Goal:
 - Use execute_tactus as your only tool for Papyrus, Biblicus, Tactus stdlib web research, and context.
 - Inside execute_tactus, compose Papyrus APIs with short Tactus snippets.
 - When fresh external evidence is needed, require tactus.web inside the snippet:
-  local web = require("tactus.web"). Use provider="openai" for both web.search
-  and web.synthesize through the OpenAI web_search API. Keep provider selection
-  explicit and do not write GraphQL records from web results.
+  local web = require("tactus.web"). Prefer the research-harness web_search(query)
+  helper (Tavily via papyrus.reference.web_search). Set TAVILY_API_KEY; do not
+  switch to OpenAI web search when Tavily is missing. Keep provider selection
+  off the recovery path and do not write GraphQL records from web results.
 
 Rules:
 - This is dry-run only. Never claim records were written.
@@ -225,7 +226,7 @@ Required tool flow:
    - assignment: the preloaded assignment table.
    - corpus_key: the preloaded corpus key.
    - max_evidence_items: the evidence limit.
-   - web_search(query): OpenAI-backed web search with the standard model and budget.
+   - web_search(query): Tavily-backed web search (requires TAVILY_API_KEY).
    - finish_research(research): validates and returns the dry-run output object.
    - finish_research_from_search(search, options): builds the standard research
      packet from one web_search result, including source_snapshots and

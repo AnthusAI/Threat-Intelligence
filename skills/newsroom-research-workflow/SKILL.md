@@ -196,9 +196,10 @@ paths in `papyrus`; do not hand-edit
 
    Policy for that procedure is internal-first: assignment context, broad
    `knowledge_query`, optional `papyrus://` URI lookup or anchored follow-up,
-   mode-dependent OpenAI web search, then one final Message-backed research
+   mode-dependent Tavily web search (requires `TAVILY_API_KEY`), then one final Message-backed research
    packet. In `source_discovery` and `full_research`, web search is mandatory
-   unless the packet records a `blockedReason`. Use it for exploratory and
+   unless the packet records a `blockedReason`. Do not set
+   `WEB_SEARCH_PROVIDER=openai` when Tavily is missing. Use it for exploratory and
    gap-finding work; keep `researcher.tac` for the constrained one-shot web
    handoff.
 
@@ -522,21 +523,22 @@ path for live assignment work.
 
 ## Web Search And Source Prospects
 
-Fresh web search is provided by the Tactus standard library, not Papyrus-owned
-provider adapters. Inside Tactus snippets:
+Fresh web search defaults to Tavily via `papyrus.reference.web_search` and the
+research-harness `web_search` helper. Set `TAVILY_API_KEY`. Missing Tavily fails
+loudly — do not set `WEB_SEARCH_PROVIDER=openai` as a workaround (openai is
+test-only opt-in). Inside Tactus snippets you may also call:
 
 ```tactus
 local web = require("tactus.web")
 local search = web.search{
-  provider = "openai",
+  provider = "tavily",
   query = "current source about automated publication systems in newsroom workflows",
-  model = "gpt-5.4-mini",
   max_results = 3,
 }
 ```
 
-For coding-agent use, prefer the researcher harness when possible because it
-preloads the correct requirements and helper functions. `knowledge_search`
+Prefer the researcher harness when possible because it preloads the correct
+requirements and helper functions. `knowledge_search`
 returns accepted Papyrus knowledge context; `web_search` returns fresh external
 reference prospects. `resolve_papyrus_uri(uri)` hydrates a promising internal
 object, and `knowledge_search_uri(uri, options)` runs an anchored follow-up

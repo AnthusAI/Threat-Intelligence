@@ -32,7 +32,8 @@ Goal:
 - For live reporting assignments, orient from internal Papyrus knowledge first:
   one broad knowledge_query is required before optional web freshness checks.
 - If drafting needs fresh source verification, require tactus.web inside the
-  snippet and use provider="openai" with web.search or web.synthesize. Treat web
+  snippet (or papyrus.reference.web_search). Use Tavily; set TAVILY_API_KEY and
+  do not fall back to OpenAI web search when Tavily is missing. Treat web
   results as evidence inputs only; do not write GraphQL records from web search.
 
 Rules:
