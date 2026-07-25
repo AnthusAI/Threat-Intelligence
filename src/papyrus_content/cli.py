@@ -114,6 +114,7 @@ from .references_commands import (
     references_attach_extracted_text,
     references_backfill_corpus_storage_paths,
     references_backfill_reviewed_feed_key,
+    references_backfill_source_archives,
     references_create_doi_backfill_assignment,
     references_create_identifier_backfill_assignment,
     references_curate_recent,
@@ -255,6 +256,7 @@ PORTED_COMMANDS = frozenset(
         "references:export-scope-training",
         "references:backfill-reviewed-feed-key",
         "references:backfill-corpus-storage-paths",
+        "references:backfill-source-archives",
         "assignments:list",
         "assignments:create-research",
         "assignments:create-reporting",
@@ -492,6 +494,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_backfill_reviewed_feed_key(flags)
     elif route == "references:backfill-corpus-storage-paths":
         references_backfill_corpus_storage_paths(flags)
+    elif route == "references:backfill-source-archives":
+        references_backfill_source_archives(flags)
     elif route == "assignments:list":
         assignments_list(flags)
     elif route == "assignments:create-research":

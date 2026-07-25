@@ -4,7 +4,7 @@
   "description": "Add named scope bundles so a query can say `scopeName: \"apt-desk\"` instead of hand-assembling corpus/category/kind filters, and so desks and procedures get sensible defaults. Cerebras calls these \"projects\"; ours operate entirely within one publication instance (desks, corpora, initiatives) — the publication boundary is the installation itself, so bundles never need publication awareness.\n\n## Current state (verified 2026-07-19)\n\n- The filter mechanism exists end-to-end: scope keys pass through `_normalize_request` (`src/papyrus_knowledge_query/engine.py:298-419`) to the S3 Vectors metadata filter (`_metadata_filter`, `services.py:397-433`; supports corpusId, categorySetId, classifierId, curationStatus, vectorKind and more).\n- Tactus procedures already inject per-procedure scope defaults: `knowledge_query_scope` parameter (`src/papyrus_newsroom/tactus_runtime.py:1112`) parsed and merged in Lua (`parse_requested_knowledge_scope`, `tactus_runtime.py:1251-1290`) — this demonstrates the intended merge pattern (defaults under explicit values).\n- The knowledge-query CLI (`src/papyrus_knowledge_query/cli.py:203-226`) builds scope from kind flags only — no corpus flag, no bundle concept.\n- Unknown-value handling convention to copy: unknown ranking profile → warning + fallback (`ranking.py:53-59`).\n\n## Design decisions (current thinking — challenge them if you have better information)\n\n1. **Registry = a JSON file inside the package: `src/papyrus_knowledge_query/scope_bundles.json`.** JSON, not YAML — the Lambda is stdlib-only and pyyaml is not available. The file ships to the Lambda automatically because bundling copies the package verbatim. A freshly spun-up instance ships a starter file; per-instance customization is a repo edit + deploy (acceptable at this stage; an S3-override env var is a noted follow-up, not v1).\n2. **Schema**: `{\"bundles\": {\"<name>\": {\"description\": str, \"scope\": {<any keys _normalize_request accepts>}, \"ranking\": {\"profile\": str, \"diversity\": str}}}}`. Validate bundle scope keys against the known-key set at load; warn on unknown keys rather than failing.\n3. **Resolution**: new `scope.scopeName` handled early in `_normalize_request`: load bundle, apply its scope/ranking values as DEFAULTS, then let explicitly provided request keys override. Unknown scopeName → append warning, proceed unscoped (mirror the ranking-profile convention). Lazy-load + cache the registry at module level.\n4. **CLI**: add `--scope-name` to the knowledge-query command; list available bundles in `--help` epilog or a `--list-scopes` flag (implementer's choice, document it).\n5. **Tactus**: allow `knowledge_query_scope` defaults to carry `scopeName` so a procedure (e.g. reporter) can pin a desk bundle; the existing Lua merge already passes unknown scope keys through — verify, don't assume.\n6. **Starter bundles for this instance**: `\"default\"` (empty scope — documents the schema), `\"accepted-references\"` (curationStatus accepted, reference kinds). Do NOT invent desk-specific bundles without checking actual corpusId values in the deployed data — leave a TODO listing where to find them (`KnowledgeCorpus` records via GraphQL).\n\n## Files to modify\n\n- NEW `src/papyrus_knowledge_query/scope_bundles.json` — starter registry.\n- NEW loader (either in `engine.py` or a small `scope_bundles.py` module — prefer the module; keep engine.py from growing).\n- `src/papyrus_knowledge_query/engine.py` — `_normalize_request` resolution.\n- `src/papyrus_knowledge_query/cli.py` — `--scope-name`.\n- `src/papyrus_newsroom/tactus_runtime.py` — only if scopeName doesn't already pass through the Lua scope merge (verify first).\n- `procedures/newsroom/tests/test_knowledge_query.py` — merge-precedence tests (bundle default vs explicit override), unknown-name warning test, unknown-key-in-bundle warning test.\n\n## What could go wrong\n\n- **Precedence bugs are the whole risk.** The invariant: explicit request keys ALWAYS beat bundle values; bundle values ALWAYS beat engine defaults. Test all three layers in one test.\n- **Key drift**: `_normalize_request` accepts a specific key set that will grow (dates, entity filters from other epics). The bundle validator must warn-not-fail on unknown keys so an old deploy doesn't break on a newer bundle file.\n- **The Lambda reads the packaged file** — use a path relative to `__file__` (or importlib.resources), never CWD, or it breaks in the Lambda bundle layout.\n- **Ranking overrides**: bundle ranking.profile must flow through `normalize_ranking_config` (which validates), not bypass it.\n\n## Out of scope\n\nS3-hosted runtime-editable registry (follow-up), per-user defaults (not a newsroom concept), any UI.",
   "type": "epic",
   "status": "open",
-  "priority": 2,
+  "priority": 4,
   "assignee": null,
   "creator": null,
   "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
@@ -12,9 +12,19 @@
     "retrieval"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "51dfdd94-8de1-49b9-891f-279c39dae5f9",
+      "author": "ryan",
+      "text": "Deferred to P4. At a few hundred references, unscoped search works fine — this is YAGNI until the corpus grows. It also pulls against the exploratory-research epic (kanbus-ef3134), which deliberately widens scope to surface unsteered territory. Revisit when corpus size makes unscoped results noisy.",
+      "created_at": "2026-07-25T14:49:59.536546Z"
+    }
+  ],
   "created_at": "2026-07-19T19:00:14.355279Z",
-  "updated_at": "2026-07-19T19:00:14.355279Z",
+  "updated_at": "2026-07-25T14:49:59.536546Z",
   "closed_at": null,
-  "custom": {}
+  "custom": {
+    "project_label": "kanbus",
+    "source": "shared"
+  }
 }

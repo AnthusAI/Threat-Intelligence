@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "02e21a99-c112-4661-b604-02fd49cac6d6",
+  "issue_id": "kanbus-7311e1cf-789e-4dc1-9402-b301dd5d5b00",
+  "event_type": "field_updated",
+  "occurred_at": "2026-07-25T14:49:59.525Z",
+  "actor_id": "ryan",
+  "payload": {
+    "changes": {
+      "priority": {
+        "from": 3,
+        "to": 4
+      }
+    }
+  }
+}

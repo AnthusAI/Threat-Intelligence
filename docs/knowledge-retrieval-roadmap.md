@@ -526,7 +526,22 @@ full re-embed.
    visible. The identifier category is expected to score poorly at baseline —
    that failure is the business case for the next item.
 
-**Phase 1 — cheap, high-confidence, no rebuild.**
+Alongside it, and tracked on the board rather than here because it is an
+ingestion concern rather than a retrieval one: **archive raw source bytes for
+every accepted reference**. Everything in this document is re-derivable from
+stored artifacts — chunking, embeddings, distillation, entity extraction, the
+whole index. The original fetched bytes are the exception, and today they are
+archived only for PDFs. That gap, not retrieval architecture, is what actually
+gates growing the corpus.
+
+**Phase 1 — subtract, then add cheaply.**
+
+0.5. **Delete dead ranking configuration.** Nothing in the codebase ever sets
+   `ranking.profile` or `ranking.diversity` — three ranking profiles, three
+   diversity profiles, roughly 27 constants, and exactly one path has ever
+   executed. Deleting them (plus the 0.05-weight `graphContext` signal and its
+   four hand-tuned constants, which AD-1 supersedes) is a net negative diff that
+   simplifies the very code the next two items modify. Do it first.
 
 1. **Passage-scoring cleanup** — retire the prior corpus's boosts, extend
    heading boosts for threat-intel report structure, fix the token regex.
@@ -550,9 +565,17 @@ full re-embed.
 7. **Contextual chunks + gating** — prepend document context to embedded chunks,
    gate low-signal chunks, lift the 8-chunk cap. Batch its re-embed with item 5.
 
-**Phase 3 — surfaces and polish.**
+**Phase 3 — discovery, surfaces, polish.**
 
-8. **MCP primitives** — once hybrid search exists to expose.
+7.5. **Exploratory research budget.** Every other item here narrows focus, and
+   ranking by similarity structurally cannot surface what you did not ask about.
+   Deliberately spending a fraction of research effort on adjacent, unsteered
+   territory is the counterweight that lets the system surprise its operators.
+   It has to be budgeted on purpose; it will not emerge from better retrieval.
+
+8. **MCP primitives** — once hybrid search exists to expose. *Deferred:* useful,
+   not load-bearing, since agents already reach retrieval via the Tactus
+   harness.
 9. **In-engine rerank** — last: the only recurring per-query LLM cost in the
    roadmap, and the fused, decayed, and distilled stack may make it unnecessary
    outside the chat profile. Its context-expansion half is cheap and lands

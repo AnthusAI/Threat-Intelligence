@@ -423,7 +423,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertIsNone(canonical_metadata["filterRetryLastCode"])
         self.assertEqual(canonical_metadata["filterAgenticLoop"]["version"], "article-text-react-v1")
 
-    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=(b"%PDF-test", {"contentType": "application/pdf", "contentLength": 9}))
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
     def test_build_reference_url_text_attachment_plans_passthrough_for_pdf_sources(
@@ -509,7 +509,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(result["plannedCount"], 0)
         self.assertEqual(result["skippedNonPdfCount"], 1)
 
-    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=(b"%PDF-test", {"contentType": "application/pdf", "contentLength": 9}))
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     def test_build_reference_url_text_attachment_plans_records_grobid_metadata(
@@ -580,7 +580,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(raw_metadata["method"], "grobid")
         self.assertEqual(raw_metadata["grobid"]["base_url"], "http://127.0.0.1:8070")
 
-    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=(b"%PDF-test", {"contentType": "application/pdf", "contentLength": 9}))
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     def test_pdf_grobid_publication_date_overwrites_reference_source_published_at(
@@ -650,7 +650,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(resolution["resolvedSourcePublishedAt"], "2024-03-01")
         self.assertEqual(resolution["selectedRaw"], "2024-03")
 
-    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=(b"%PDF-test", {"contentType": "application/pdf", "contentLength": 9}))
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     def test_pdf_grobid_publication_date_invalid_preserves_existing_reference_source_published_at(
@@ -2044,7 +2044,7 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(raw_metadata["sourceUriOriginal"], "https://arxiv.org/html/2504.16736v2")
         self.assertEqual(raw_metadata["sourcePlugin"], "arxiv")
 
-    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=b"%PDF-test")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri", return_value=(b"%PDF-test", {"contentType": "application/pdf", "contentLength": 9}))
     @mock.patch("papyrus_content.reference_url_text.resolve_source_site_enrichment")
     @mock.patch("papyrus_content.reference_url_text._extract_url_text")
     @mock.patch("papyrus_content.reference_url_text._filter_article_text")
@@ -2192,3 +2192,104 @@ class ReferenceCommandsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DownloadSourceAttachmentTests(unittest.TestCase):
+    @mock.patch("papyrus_content.reference_url_text.urlopen")
+    def test_download_enforces_25mb_limit_via_content_length(self, mock_urlopen):
+        from papyrus_content.reference_url_text import _download_source_attachment_from_uri
+        mock_response = mock.MagicMock()
+        mock_response.status = 200
+        mock_response.url = "https://example.com/huge.pdf"
+        mock_response.headers = {"Content-Type": "application/pdf", "Content-Length": str((25 * 1024 * 1024) + 1)}
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        
+        with self.assertRaises(ValueError) as context:
+            _download_source_attachment_from_uri("https://example.com/huge.pdf")
+        self.assertIn("exceeds 26214400 bytes", str(context.exception))
+
+    @mock.patch("papyrus_content.reference_url_text.urlopen")
+    def test_download_enforces_25mb_limit_via_streaming(self, mock_urlopen):
+        from papyrus_content.reference_url_text import _download_source_attachment_from_uri
+        mock_response = mock.MagicMock()
+        mock_response.status = 200
+        mock_response.url = "https://example.com/huge.pdf"
+        mock_response.headers = {"Content-Type": "application/pdf"}
+        chunk1 = b"0" * (15 * 1024 * 1024)
+        chunk2 = b"1" * (15 * 1024 * 1024)
+        mock_response.read.side_effect = [chunk1, chunk2, b""]
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        
+        with self.assertRaises(ValueError) as context:
+            _download_source_attachment_from_uri("https://example.com/huge.pdf")
+        self.assertIn("exceeds 26214400 bytes during streaming", str(context.exception))
+
+    @mock.patch("papyrus_content.reference_url_text.resolve_accessible_pdf_url_for_reference")
+    @mock.patch("papyrus_content.reference_url_text.urlopen")
+    def test_download_uses_fallback_when_is_pdf_target_true(self, mock_urlopen, mock_resolve):
+        from papyrus_content.reference_url_text import _download_source_attachment_from_uri
+        
+        mock_fallback_response = mock.MagicMock()
+        mock_fallback_response.status = 200
+        mock_fallback_response.url = "https://fallback.com/paper.pdf"
+        mock_fallback_response.headers = {"Content-Type": "application/pdf", "Content-Length": "13"}
+        mock_fallback_response.read.side_effect = [b"%PDF-fallback", b""]
+        
+        mock_urlopen.side_effect = [Exception("Primary fetch failed"), mock.MagicMock(__enter__=mock.MagicMock(return_value=mock_fallback_response))]
+        
+        mock_resolve.return_value = {"selectedPdfUrl": "https://fallback.com/paper.pdf"}
+        
+        reference = {"id": "ref-1"}
+        content, provenance = _download_source_attachment_from_uri("https://example.com/paper.pdf", reference=reference, is_pdf_target=True)
+        
+        self.assertEqual(content, b"%PDF-fallback")
+        self.assertEqual(provenance["finalUrl"], "https://fallback.com/paper.pdf")
+        mock_resolve.assert_called_once_with(reference, source_uri="https://example.com/paper.pdf", failed_uri="https://example.com/paper.pdf")
+
+    @mock.patch("papyrus_content.reference_url_text.resolve_accessible_pdf_url_for_reference")
+    @mock.patch("papyrus_content.reference_url_text.urlopen")
+    def test_download_skips_fallback_when_is_pdf_target_false(self, mock_urlopen, mock_resolve):
+        from papyrus_content.reference_url_text import _download_source_attachment_from_uri
+        
+        mock_urlopen.side_effect = Exception("Primary fetch failed")
+        
+        reference = {"id": "ref-1"}
+        with self.assertRaises(Exception) as context:
+            _download_source_attachment_from_uri("https://example.com/paper.pdf", reference=reference, is_pdf_target=False)
+            
+        self.assertEqual(str(context.exception), "Primary fetch failed")
+        mock_resolve.assert_not_called()
+
+class BackfillSourceArchivesTests(unittest.TestCase):
+    @mock.patch("papyrus_content.references_commands.load_steering_config")
+    @mock.patch("papyrus_content.reference_url_text.apply_reference_url_text_attachment_changes")
+    @mock.patch("papyrus_content.records.build_record_changes")
+    @mock.patch("papyrus_content.reference_url_text._reference_source_attachment_record")
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri")
+    @mock.patch("papyrus_content.references_commands.create_authoring_client")
+    def test_references_backfill_source_archives_success(self, mock_create_client, mock_download, mock_record, mock_build, mock_apply, mock_load_config):
+        from papyrus_content.references_commands import references_backfill_source_archives
+        
+        mock_client = mock.MagicMock()
+        mock_create_client.return_value = (mock_client, None)
+        mock_load_config.return_value = {"corpora": [{"key": "corpus-1", "id": "knowledge-corpus-1"}]}
+        
+        mock_client.list_records.side_effect = [
+            [
+                {"id": "ref-1", "lineageId": "lin-1", "corpusId": "corpus-1", "sourceUri": "https://example.com/1.pdf", "versionState": "current", "curationStatus": "accepted"},
+                {"id": "ref-2", "lineageId": "lin-2", "corpusId": "corpus-1", "sourceUri": "https://example.com/2.pdf", "versionState": "current", "curationStatus": "accepted"},
+            ],
+            [
+                {"id": "att-1", "referenceLineageId": "lin-1", "role": "source", "sourceUri": "https://example.com/1.pdf"}
+            ]
+        ]
+        
+        mock_download.return_value = (b"content", {"contentType": "application/pdf"})
+        mock_record.return_value = {"id": "att-2", "__attachmentBody": b"content"}
+        mock_build.return_value = []
+        
+        references_backfill_source_archives(["--corpus-id", "corpus-1", "--config", "none"])
+        
+        mock_download.assert_called_once_with("https://example.com/2.pdf", reference=mock.ANY, is_pdf_target=False)
+        mock_record.assert_called_once()
+        mock_build.assert_called_once()
+        mock_apply.assert_called_once()

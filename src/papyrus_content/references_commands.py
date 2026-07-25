@@ -194,6 +194,107 @@ def references_backfill_reviewed_feed_key(flags: list[str]) -> None:
     print(f"references\tbackfill-reviewed-feed-key\tupdated\t{len(changes)}")
 
 
+def references_backfill_source_archives(flags: list[str]) -> None:
+    from .reference_url_text import (
+        _download_source_attachment_from_uri, 
+        _reference_source_attachment_record,
+        apply_reference_url_text_attachment_changes,
+        _utc_now,
+        _corpus_key_from_reference
+    )
+    from .records import build_record_changes
+    from .env import storage_bucket_from_amplify_outputs
+
+    options = parse_options(flags)
+    apply = resolve_mutation_apply(options, "references backfill-source-archives")
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    
+    corpus_key_by_id = {
+        knowledge_corpus_id(entry): str(entry.get("key") or "")
+        for entry in steering_config.get("corpora") or []
+        if isinstance(entry, dict)
+    }
+
+    client, _ = create_authoring_client()
+    references = client.list_records("Reference")
+    attachments = client.list_records("ReferenceAttachment")
+    
+    accepted_references = [
+        ref for ref in references 
+        if str(ref.get("curationStatus") or "").lower() == "accepted" 
+        and ref.get("versionState") == "current"
+    ]
+    
+    source_attachment_lineages = {
+        str(att.get("referenceLineageId") or "")
+        for att in attachments
+        if att.get("role") == "source"
+    }
+    
+    missing = [ref for ref in accepted_references if str(ref.get("lineageId") or "") not in source_attachment_lineages]
+    
+    print(f"references\tbackfill-source-archives\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"references\tbackfill-source-archives\taccepted\t{len(accepted_references)}")
+    print(f"references\tbackfill-source-archives\tmissing-archive\t{len(missing)}")
+    
+    if not apply:
+        print("references\tbackfill-source-archives\tapply\tskipped\tuse --apply to fetch and upload")
+        return
+        
+    archived_count = 0
+    unreachable_count = 0
+    bucket = storage_bucket_from_amplify_outputs()
+    
+    for index, reference in enumerate(missing, start=1):
+        source_uri = reference.get("sourceUri")
+        if not source_uri:
+            print(f"references\tbackfill-source-archives\tskip\t{reference['id']}\tno sourceUri")
+            unreachable_count += 1
+            continue
+            
+        corpus_key = corpus_key_by_id.get(str(reference.get("corpusId") or "")) or _corpus_key_from_reference(reference)
+        try:
+            content, provenance = _download_source_attachment_from_uri(source_uri, reference=reference, is_pdf_target=False)
+            source_metadata = {
+                "source": "backfill-source-archives",
+                "downloadedAt": _utc_now(),
+            }
+            source_metadata.update(provenance)
+            attachment_record = _reference_source_attachment_record(
+                reference=reference,
+                corpus_key=corpus_key,
+                source_uri=source_uri,
+                metadata=source_metadata,
+                content=content,
+                media_type=provenance.get("contentType") or "application/octet-stream",
+                existing_attachment=None,
+                warnings=None,
+            )
+            if attachment_record:
+                plan = {
+                    "reference": reference,
+                    "record": {"modelName": "ReferenceAttachment", "expected": attachment_record},
+                    "body": attachment_record.pop("__attachmentBody"),
+                }
+                changes = build_record_changes(client, [plan["record"]])
+                apply_reference_url_text_attachment_changes(
+                    client=client,
+                    changes=changes,
+                    plans=[plan],
+                    bucket=bucket,
+                )
+                archived_count += 1
+                print(f"references\tbackfill-source-archives\tsuccess\t{reference['id']}\t{source_uri}")
+        except Exception as e:
+            print(f"references\tbackfill-source-archives\tfailure\t{reference['id']}\t{e}")
+            unreachable_count += 1
+            
+        if index % 10 == 0:
+            print(f"references\tbackfill-source-archives\tprogress\t{index}/{len(missing)}")
+            
+    print(f"references\tbackfill-source-archives\tcompleted\tarchived: {archived_count}, unreachable: {unreachable_count}")
+
+
 def references_backfill_corpus_storage_paths(flags: list[str]) -> None:
     from .corpus_storage_paths import rewrite_corpus_storage_path
     from .env import storage_bucket_from_amplify_outputs

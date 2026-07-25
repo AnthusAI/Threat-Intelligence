@@ -163,36 +163,40 @@ def build_reference_url_text_attachment_plans(
                     )
                     if reference_record is not None:
                         reference_records.append(reference_record)
-                    if _looks_like_pdf_uri(extraction_source_uri):
-                        corpus_key = (
-                            corpus_key_by_id.get(str(reference.get("corpusId") or ""))
-                            or _corpus_key_from_reference(reference)
+                    existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
+                    try:
+                        content, provenance = _download_source_attachment_from_uri(
+                            extraction_source_uri,
+                            reference=reference,
+                            is_pdf_target=_looks_like_pdf_uri(extraction_source_uri),
                         )
-                        existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
+                        source_metadata = {
+                            "source": "reference-find-stage",
+                            "sourcePlugin": enrichment.get("pluginKey"),
+                            "doiResolution": _doi_resolution_for_metadata(enrichment),
+                            "downloadedAt": _utc_now(),
+                        }
+                        source_metadata.update(provenance)
                         source_attachment = _reference_source_attachment_record(
                             reference=reference,
                             corpus_key=corpus_key,
                             source_uri=extraction_source_uri,
-                            metadata={
-                                "source": "reference-find-stage",
-                                "sourcePlugin": enrichment.get("pluginKey"),
-                                "doiResolution": _doi_resolution_for_metadata(enrichment),
-                                "downloadedAt": _utc_now(),
-                            },
-                            content=_download_source_attachment_from_uri(
-                                extraction_source_uri,
-                                reference=reference,
-                            ),
-                            media_type="application/pdf",
+                            metadata=source_metadata,
+                            content=content,
+                            media_type=provenance.get("contentType") or "application/pdf",
                             existing_attachment=existing_source,
+                            warnings=None,
                         )
-                        plans.append(
-                            {
-                                "reference": reference,
-                                "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
-                                "body": source_attachment.pop("__attachmentBody"),
-                            }
-                        )
+                        if source_attachment:
+                            plans.append(
+                                {
+                                    "reference": reference,
+                                    "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
+                                    "body": source_attachment.pop("__attachmentBody"),
+                                }
+                            )
+                    except Exception as err:
+                        pass
                 planned_references += 1
                 items.append(
                     {
@@ -252,33 +256,42 @@ def build_reference_url_text_attachment_plans(
                 or _corpus_key_from_reference(reference)
             )
 
+            archive_warnings = []
             if allow_discovery:
                 existing_source = select_reference_attachment_by_role(reference, attachments, role="source")
-                if is_pdf_source:
+                try:
+                    content, provenance = _download_source_attachment_from_uri(
+                        extraction_source_uri,
+                        reference=reference,
+                        is_pdf_target=is_pdf_source,
+                    )
+                    source_metadata = {
+                        "source": "biblicus-url-text",
+                        "sourcePlugin": enrichment.get("pluginKey"),
+                        "doiResolution": _doi_resolution_for_metadata(enrichment),
+                        "downloadedAt": _utc_now(),
+                    }
+                    source_metadata.update(provenance)
                     source_attachment = _reference_source_attachment_record(
                         reference=reference,
                         corpus_key=corpus_key,
                         source_uri=extraction_source_uri,
-                        metadata={
-                            "source": "biblicus-url-text",
-                            "sourcePlugin": enrichment.get("pluginKey"),
-                            "doiResolution": _doi_resolution_for_metadata(enrichment),
-                            "downloadedAt": _utc_now(),
-                        },
-                        content=_download_source_attachment_from_uri(
-                            extraction_source_uri,
-                            reference=reference,
-                        ),
-                        media_type=str(extracted.get("contentType") or "application/pdf"),
+                        metadata=source_metadata,
+                        content=content,
+                        media_type=provenance.get("contentType") or str(extracted.get("contentType") or "application/pdf"),
                         existing_attachment=existing_source,
+                        warnings=archive_warnings,
                     )
-                    plans.append(
-                        {
-                            "reference": reference,
-                            "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
-                            "body": source_attachment.pop("__attachmentBody"),
-                        }
-                    )
+                    if source_attachment:
+                        plans.append(
+                            {
+                                "reference": reference,
+                                "record": {"modelName": "ReferenceAttachment", "expected": source_attachment},
+                                "body": source_attachment.pop("__attachmentBody"),
+                            }
+                        )
+                except Exception as dl_err:
+                    archive_warnings.append({"code": "source_archive_failed", "message": f"Failed to archive source bytes: {dl_err}"})
 
             if is_pdf_source:
                 filter_result = {
@@ -461,7 +474,7 @@ def build_reference_url_text_attachment_plans(
             citation_relations_created += int(graph_plan.get("citationRelationsCreated", 0))
             citation_graph_warnings.extend(graph_plan_warnings)
 
-            if graph_plan_warnings:
+            if graph_plan_warnings or archive_warnings:
                 existing_filter_warnings = canonical_metadata.get("filterWarnings")
                 warning_rows = (
                     list(existing_filter_warnings)
@@ -472,6 +485,12 @@ def build_reference_url_text_attachment_plans(
                     [
                         f"citation_graph:{str(row.get('code') or 'warning')}:{str(row.get('message') or '')}"
                         for row in graph_plan_warnings[-20:]
+                    ]
+                )
+                warning_rows.extend(
+                    [
+                        f"archive:{str(row.get('code') or 'warning')}:{str(row.get('message') or '')}"
+                        for row in archive_warnings[-20:]
                     ]
                 )
                 canonical_metadata["filterWarnings"] = warning_rows[-40:]
@@ -3384,7 +3403,8 @@ def _reference_source_attachment_record(
     content: bytes,
     media_type: str,
     existing_attachment: dict[str, Any] | None,
-) -> dict[str, Any]:
+    warnings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     now = _utc_now()
     lineage_id = str(reference.get("lineageId") or "")
     reference_folder = _attachment_reference_folder(reference)
@@ -3396,6 +3416,19 @@ def _reference_source_attachment_record(
     )
     body = bytes(content)
     sha256 = hashlib.sha256(body).hexdigest()
+    
+    if existing_attachment:
+        existing_sha256 = existing_attachment.get("sha256")
+        if existing_sha256 == sha256:
+            return None
+        if existing_sha256 and existing_sha256 != sha256:
+            if warnings is not None:
+                warnings.append({
+                    "code": "source_archive_mismatch",
+                    "message": f"Archived source content changed (existing sha256: {existing_sha256}, new sha256: {sha256}). Kept existing archive."
+                })
+            return None
+
     key = f"{lineage_id}\nsource\n{storage_path}"
     return {
         "id": existing_attachment.get("id") if existing_attachment else f"reference-attachment-{hash_short(key)}",
@@ -3419,16 +3452,55 @@ def _reference_source_attachment_record(
     }
 
 
-def _download_source_attachment_from_uri(source_uri: str, *, reference: dict[str, Any] | None = None) -> bytes:
+def _download_source_attachment_from_uri(
+    source_uri: str, 
+    *, 
+    reference: dict[str, Any] | None = None,
+    is_pdf_target: bool = False,
+) -> tuple[bytes, dict[str, Any]]:
     parsed = urlparse(source_uri)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError(f"Unsupported source URI scheme for source attachment download: {source_uri}")
-    request = Request(source_uri, headers={"User-Agent": "Papyrus reference source downloader"})
-    try:
+        
+    max_bytes = 25 * 1024 * 1024
+    
+    def _fetch(uri: str) -> tuple[bytes, dict[str, Any]]:
+        request = Request(uri, headers={"User-Agent": "Papyrus reference source downloader"})
         with urlopen(request, timeout=45) as response:
-            payload = response.read()
+            status = response.status
+            final_url = response.url
+            content_type = response.headers.get("Content-Type")
+            content_length_str = response.headers.get("Content-Length")
+            content_length = int(content_length_str) if content_length_str and content_length_str.isdigit() else None
+            
+            if content_length and content_length > max_bytes:
+                raise ValueError(f"Source payload from {uri} exceeds {max_bytes} bytes (reported: {content_length})")
+                
+            chunks = []
+            downloaded = 0
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                downloaded += len(chunk)
+                if downloaded > max_bytes:
+                    raise ValueError(f"Source payload from {uri} exceeds {max_bytes} bytes during streaming")
+                chunks.append(chunk)
+            payload = b"".join(chunks)
+            if not payload:
+                raise ValueError(f"Downloaded empty source payload from {uri}")
+                
+            return payload, {
+                "finalUrl": final_url,
+                "status": status,
+                "contentType": content_type,
+                "contentLength": len(payload),
+            }
+
+    try:
+        return _fetch(source_uri)
     except Exception as error:
-        if reference is None:
+        if reference is None or not is_pdf_target:
             raise
         fallback = resolve_accessible_pdf_url_for_reference(
             reference,
@@ -3438,15 +3510,11 @@ def _download_source_attachment_from_uri(source_uri: str, *, reference: dict[str
         fallback_uri = normalize_http_url(fallback.get("selectedPdfUrl"))
         if not fallback_uri or fallback_uri == normalize_http_url(source_uri):
             raise
-        request = Request(fallback_uri, headers={"User-Agent": "Papyrus reference source downloader"})
-        with urlopen(request, timeout=45) as response:
-            payload = response.read()
-        if not payload:
-            raise ValueError(f"Downloaded empty source payload from {fallback_uri}") from error
-        return payload
-    if not payload:
-        raise ValueError(f"Downloaded empty source payload from {source_uri}")
-    return payload
+        
+        try:
+            return _fetch(fallback_uri)
+        except Exception as fallback_error:
+            raise ValueError(f"Downloaded empty source payload from {fallback_uri}") from fallback_error
 
 
 def _source_filename_for_uri(*, source_uri: str, media_type: str) -> str:
