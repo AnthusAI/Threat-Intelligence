@@ -1,0 +1,28 @@
+{
+  "id": "kanbus-bb12d39b-89a3-4c76-ad1f-a39206627911",
+  "title": "Recency (age-decay) ranking signal",
+  "description": "Add a recency signal to ranking so that when relevance and quality are otherwise equal, newer evidence wins. Threat-intel evidence rots fast; today a reference's age has zero influence, and publication dates aren't even stored in the vector index.\n\n## Current state (verified 2026-07-19)\n\n- `sourcePublishedAt`/`sourceUpdatedAt` are used only in display text. `_base_reference_metadata` (`src/papyrus_knowledge_query/vector_index.py:759-788`) writes NO date fields into vector metadata, even though the reference listing already fetches them.\n- Ranking: `score_record` (`ranking.py:236-266`) blends relevance/quality/graphContext per `PROFILE_WEIGHTS` (`ranking.py:13-17`). Weights are normalized to sum 1.0 in `normalize_ranking_config` (`ranking.py:50-87`).\n- The missing-value convention to copy: `missingQuality` defaults to 0.5 (`ranking.py:75-79`).\n- CRITICAL PLUMBING DETAIL: `_normalize_semantic_matches` in `engine.py` copies a specific allowlist of metadata keys from vector matches onto normalized records (around `engine.py:1190-1202` — locate the copy list). New metadata keys are silently dropped unless added there. The same applies to passage ranking assignment (`_assign_passage_ranking`, around `engine.py:2214`).\n\n## Design decisions (current thinking — challenge them if you have better information)\n\n1. **Metadata**: add `sourcePublishedAtDay`, `sourceUpdatedAtDay`, `retrievedAtDay` as epoch-day INTEGERS (filterable; S3 Vectors filters need scalars) in `_base_reference_metadata`. Parse ISO-8601 including trailing `Z`; treat naive datetimes as UTC.\n2. **Ranking**: add a `recency` component to `score_record` and all three `PROFILE_WEIGHTS` entries. Score: `0.5 ** (age_days / half_life)` with `half_life` configurable as `ranking.recencyHalfLifeDays`, default 180. Missing date → 0.5 (neutral, mirroring missingQuality). Clamp negative ages (future dates) to 0.\n3. **Weight: small.** Default `recency: 0.07` taken proportionally from the existing weights before renormalization (balanced becomes ~0.65/0.23/0.05/0.07). Recency is a TIE-BREAKER — an authoritative two-year-old reference must still beat a thin fresh one. Do not exceed 0.10 in any default profile.\n4. **Rank-side only.** No provider-side date filtering or decay (avoid double-counting). Use the freshest available date: max(sourceUpdatedAtDay, sourcePublishedAtDay).\n5. `normalize_ranking_config` accepts `recencyHalfLifeDays` and a `recency` weight override, with the same validation/warning patterns as existing keys.\n\n## Files to modify\n\n- `src/papyrus_knowledge_query/vector_index.py` — `_base_reference_metadata` date fields (verify the reference listing query already selects the date columns; it does per the audit, near the top of the file).\n- `src/papyrus_knowledge_query/ranking.py` — `PROFILE_WEIGHTS`, `normalize_ranking_config`, `score_record`, plus a `recency_score(age_days, half_life)` helper.\n- `src/papyrus_knowledge_query/engine.py` — add the new date keys to the metadata copy allowlist in `_normalize_semantic_matches` and thread them to `_assign_passage_ranking` / graph-resolved records (graph records can read dates from the reference row directly — full effect on vector matches needs the rebuild).\n- `procedures/newsroom/tests/test_knowledge_query.py` — decay math unit tests; a two-otherwise-equal-records test where the newer wins; a missing-date-neutral test; a weights-renormalization test.\n\n## What could go wrong\n\n- **Existing score snapshots shift** because renormalization changes all weights slightly. Update expectations deliberately, not mechanically — verify orderings that should be stable stay stable.\n- **The metadata allowlist.** If the new keys aren't added to `_normalize_semantic_matches`, the feature silently no-ops for vector matches (dates lost in normalization). Add a test that a synthetic vector match with a date metadata field produces a non-neutral recency score.\n- **Rebuild required for full effect.** Vector metadata only updates on re-put. Do NOT trigger a solo rebuild for this — the change is backward-compatible (missing dates are neutral), so it can ride along with the next rebuild (the distillation/contextual-chunks epics batch one). State this in the PR description.\n- **Timezone bugs**: use `datetime.now(timezone.utc)`; never naive `now()`.\n\n## Out of scope\n\nProvider-side date range filters (nice-to-have; note as follow-up), any embedding changes, the rebuild itself.",
+  "type": "epic",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "retrieval"
+  ],
+  "dependencies": [
+    {
+      "target": "kanbus-8e325221-e1e7-46cc-97ab-a30acd728db5",
+      "type": "blocked-by"
+    }
+  ],
+  "comments": [],
+  "created_at": "2026-07-19T19:00:14.343964Z",
+  "updated_at": "2026-07-19T19:00:14.343964Z",
+  "closed_at": null,
+  "custom": {
+    "project_label": "kanbus",
+    "source": "shared"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "f7fd805f-e8cf-4925-a68a-91a989001ebe",
+  "issue_id": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-19T19:00:04.777Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Adopt the best retrieval techniques from Cerebras's knowledge-base writeup (https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) into the Papyrus knowledge-query engine, without violating our cost model.\n\nFull design doc: `docs/knowledge-retrieval-roadmap.md` (read it first — it contains verified current-state facts with file:line references). Background on the current retrieval path: `docs/internal-knowledge-research.md`.\n\n## Strategy\n\nPapyrus retrieval today is embedding-only (S3 Vectors, OpenAI text-embedding-3-small, 1536-dim). Cerebras's core lesson — never trust a single retrieval technique; run several and fuse the ranked lists — is the one we haven't absorbed. This matters acutely for threat intelligence: CVE IDs, hashes, actor aliases, and domains are exact tokens that embeddings blur.\n\n## Hard constraints (non-negotiable)\n\n1. **Scale to zero.** No provisioned-capacity services, no always-on components, no fixed monthly floors. Everything pay-per-use. This is why OpenSearch is disqualified (~$350/month floor × N instances).\n2. **Fleet of single-publication instances, NOT multi-tenant.** Each Papyrus installation is one publication with its own stack. Never introduce tenant awareness. The economics: many instances run simultaneously, almost all idle.\n3. **The knowledge-query Lambda is stdlib-only.** `amplify/functions/knowledge-query/resource.ts` bundles by copying `src/papyrus_knowledge_query` verbatim with an intentionally empty requirements.txt. Python 3.12, ARM64, 512 MB. No new pip dependencies in anything the Lambda imports.\n\n## Epic sequencing\n\nPriority order: (1) domain-scoring cleanup, (2) hybrid lexical + RRF, (3) age decay, (4) scope bundles, (5) distillation, (6) contextual chunks + gating, (7) MCP primitives, (8) rerank.\n\nDependencies: contextual-chunks is blocked by hybrid-lexical (needs its IDF/document-frequency table) and by distillation (both change embedding input — batch into ONE corpus re-embed). MCP primitives and rerank are blocked by hybrid-lexical. Age decay, scope bundles, and the scoring cleanup are independent and good first assignments.\n\n**Rebuild coupling:** age decay, distillation, and contextual chunks all mutate vector metadata or embedding input. Batch into at most two index rebuilds: age-decay metadata can ride along with any sync; distillation + contextual chunks share one full re-embed (cost: dollars, not hundreds, at current corpus size).\n\n## For implementers\n\n- Verify every file:line reference before editing — they were verified 2026-07-19 and drift.\n- Tests live in `procedures/newsroom/tests/` (see `test_knowledge_query.py`). Add tests with every change.\n- Local smoke: `PYTHONPATH=src python -m papyrus_newsroom knowledge-query --query \"...\" --format structured --execution local` (see docs/internal-knowledge-research.md for full CLI usage and required env vars).\n- Repo-visible content constraint: keep examples generic (CVE IDs, hashes, domains); no ransomware/exfiltration/key-leak themed examples.",
+    "issue_type": "initiative",
+    "labels": [
+      "retrieval",
+      "knowledge-query"
+    ],
+    "parent": null,
+    "priority": 1,
+    "status": "open",
+    "title": "Retrieval improvements: Cerebras-inspired hybrid search, distillation, and ranking"
+  }
+}

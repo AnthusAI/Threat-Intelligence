@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "a718645f-038b-4d4a-8c6d-cdd6dae802c0",
+  "issue_id": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "event_type": "field_updated",
+  "occurred_at": "2026-07-25T13:31:57.399Z",
+  "actor_id": "ryan",
+  "payload": {
+    "changes": {
+      "title": {
+        "from": "Retrieval improvements: Cerebras-inspired hybrid search, distillation, and ranking",
+        "to": "Retrieval improvements: hybrid search, entity graph, and ranking"
+      }
+    }
+  }
+}

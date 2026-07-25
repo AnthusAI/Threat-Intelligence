@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "03c9c5e4-ff6e-4fe7-80a8-c409b56dfe84",
+  "issue_id": "kanbus-4b0aa611-6ded-4427-a9e1-1241f55613ac",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-25T13:31:10.569Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Own the vector-index rebuilds that several epics depend on. This exists as its own tracked task because \"batch the rebuilds\" is an instruction to PEOPLE, written across three epic briefs that different agents will finish weeks apart. The predictable failure: features merge, nobody runs the rebuild, retrieval behavior does not change, and everyone assumes the work is done.\n\nA feature that requires a rebuild is NOT done when its PR merges. It is done when the rebuild has run and the eval harness confirms the effect.\n\n## Trigger conditions\n\n**Rebuild A — metadata only (cheap, no re-embed).**\nTrigger: the age-decay epic has merged.\nEffect: writes `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay` into vector metadata. Until it runs, age decay is a silent no-op for vector matches (missing dates score neutral) — backward-compatible, so it may ride along with any convenient sync rather than forcing its own run.\n\n**Rebuild B — full re-embed (the expensive one).**\nTrigger: BOTH the entity-extraction epic AND the contextual-chunks epic have merged.\nEffect: changes embedding INPUT (distilled artifact text; contextual chunk prefixes) and lifts the per-reference chunk cap. Do NOT run this after only one of the two lands — that is two re-embeds where one would do.\nCost at current corpus size: dollars, not hundreds. Verify with a dry run first.\n\n## Procedure\n\n1. Run the eval harness and record the pre-rebuild baseline.\n2. Dry-run the index operation first (`--dry-run` / `--action audit`) and read the reported deltas: reference count, chunk count, gated-chunk count, artifact sizes. Sanity-check that the vector-count delta is explainable before writing anything.\n3. Run the rebuild (`knowledge vector-index --action rebuild`, or `sync --force` where sufficient — confirm which against `src/papyrus_knowledge_query/vector_index.py` `index_reference_passages` semantics at the time).\n4. Re-run the eval harness. Compare per-category, not just aggregate.\n5. Record both reports and the observed cost in a comment on this task.\n6. If results regress, the rebuild is not \"done\" — open a follow-up rather than leaving the corpus in a worse state.\n\n## What could go wrong\n\n- **Nobody runs it.** The whole reason this task exists. Whoever merges the triggering epic must move this task to in_progress.\n- **Half-batched Rebuild B** — running after extraction lands but before contextual chunks (or vice versa) doubles the cost for no benefit. Check both epics are merged.\n- **Positional chunk keys**: chunk vector keys are `sha256(lineageId:storagePath:chunkIndex)`, so changing embedded TEXT does not change the key. A plain `sync` may consider existing chunks already present and skip them. Confirm whether `rebuild` or `--force` is required for embeddings to actually refresh — this is the single most likely way to \"run the rebuild\" and have nothing change.\n- **Partial-failure states**: a rebuild that dies midway can leave the index mixed-generation. Confirm the operation's resumability and, if it is not resumable, run it in a window where it can complete.\n- **Corpus growth** may make future rebuilds slower than this one; record the wall-clock and cost so the next person can plan.",
+    "issue_type": "chore",
+    "labels": [
+      "retrieval",
+      "ops"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 2,
+    "status": "open",
+    "title": "Coordinate vector index rebuilds"
+  }
+}

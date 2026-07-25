@@ -1,0 +1,36 @@
+{
+  "id": "kanbus-7053038d-d569-4c20-9eb5-2ada186ae384",
+  "title": "Contextual chunk embeddings + low-signal gating; lift 8-chunk cap",
+  "description": "Embed passage chunks WITH document context prepended (title, source, date, section heading) instead of naked text, gate low-signal chunks out of the index, and lift the 8-chunk cap that currently makes only the first ~1,440 words of long reports searchable. Based on Anthropic's contextual-retrieval result, which Cerebras applied as \"bursting.\"\n\nBLOCKED BY: hybrid-lexical epic (needs its document-frequency table for IDF gating) and distillation epic (both change embedding input — batch into ONE corpus re-embed).\n\n## Current state (verified 2026-07-19)\n\n- `_prepare_chunks` (`src/papyrus_knowledge_query/vector_index.py:720-756`) embeds the raw cleaned chunk text only. Title/subtitle/summary are threaded in as `reference_metadata_payload` but go only into metadata, never the embedded string.\n- `_chunk_text` (`engine.py:2954-2982`) already captures each chunk's section `heading` — currently DISCARDED at index time (`_prepare_chunks` doesn't read it).\n- Gating today: 120-char floor (`vector_index.py:731`) and a hard cap `max_chunks_per_reference: 8` (`VectorIndexOptions`, `vector_index.py:79`); at `chunk_words: 180` that's ~1,440 words of coverage per reference.\n- Chunk keys are POSITIONAL: `sha256(lineageId:storagePath:chunkIndex)` (`vector_index.py:733`) — changing embedded text does NOT change keys, so sync dedup logic keyed on vector keys will consider unchanged-position chunks \"already present\". A forced rebuild is required for the new embeddings to take effect (this is expected; see rebuild coupling).\n\n## Design decisions (current thinking — challenge them if you have better information)\n\n1. **Contextual prefix**: embed `f\"{title} — {subtitle or source_org} ({published_date}). Section: {heading}.\n\n{chunk_text}\"`. Omit empty parts cleanly. Cap the prefix portion at 300 chars. `source_org`/`published_date` come from reference fields/distillation artifact when present; degrade gracefully.\n2. **Stored metadata `text`/`summary` stay the RAW chunk** — rendered evidence must not show the synthetic prefix.\n3. **Gating (replaces the bare 120-char floor)**: reject a chunk if (a) < 40 tokens, OR (b) stopword ratio > 0.65, OR (c) IDF-sum below threshold, where IDF comes from the document-frequency table produced by the lexical-index build (import from `lexical_index.py`; if the DF table is unavailable, skip criterion (c) and log). All thresholds configurable via `VectorIndexOptions`.\n4. **Cap**: raise `max_chunks_per_reference` default 8 → 64 (still configurable). With gating, indexing full documents is safe.\n5. **Audit-first rollout**: add a dry-run mode that reports per-reference gated-chunk counts and total vector count delta WITHOUT writing, so we can sanity-check thresholds against the real corpus before the rebuild.\n\n## Files to modify\n\n- `src/papyrus_knowledge_query/vector_index.py` — `_prepare_chunks` (prefix + heading threading + gating), `VectorIndexOptions` (cap + thresholds), audit reporting.\n- `src/papyrus_knowledge_query/lexical_index.py` — expose the DF/IDF table for reuse.\n- Tests: prefix-format tests (empty-part handling), gating boundary tests, a fixture long-document test proving chunks beyond position 8 are now indexed, raw-text-in-metadata regression test.\n\n## What could go wrong\n\n- **Over-gating loses recall silently.** This is why audit-first is mandatory: run the dry-run against the real corpus, eyeball what gets dropped, then tune. Log gated counts at sync time permanently.\n- **Prefix pollution of evidence**: if any code path reads embedded text instead of metadata text for display, the synthetic prefix leaks into rendered evidence. Grep consumers of chunk `text` metadata before assuming.\n- **Vector count growth**: lifting the cap multiplies vectors for long documents (cost is per-vector storage + query; S3 Vectors is cheap, but log the delta in the audit).\n- **Rebuild discipline**: positional keys mean a plain `sync` will NOT refresh existing chunks' embeddings. The rollout requires `--action rebuild` (or force), batched with the distillation epic's re-embed. One rebuild, not two.\n- **Token counting for the 40-token floor**: tiktoken is OPTIONAL in the Lambda environment; the tokens module has a regex fallback (`src/papyrus_knowledge_query/tokens.py`) — use it, don't import tiktoken directly.\n\n## Acceptance criteria\n\n- A distinctive passage at word ~3,000 of a long fixture document is findable via semantic search after rebuild.\n- \"sounds good, thanks!\"-grade chunks (short, common-token) are gated out; a short chunk containing a rare identifier survives (IDF criterion working).\n- Rendered evidence shows no synthetic prefixes.\n\n## Out of scope\n\nRe-chunking strategy changes (chunk size stays 180 words), insight-message vectors (reference passages only for v1), the rebuild execution itself (coordinate with distillation epic).",
+  "type": "epic",
+  "status": "open",
+  "priority": 3,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "retrieval"
+  ],
+  "dependencies": [
+    {
+      "target": "kanbus-a61c1227-e181-48fa-a38c-d379622950a7",
+      "type": "blocked-by"
+    },
+    {
+      "target": "kanbus-5cbc538f-bac6-49c3-b0a5-7be6ded1a77f",
+      "type": "blocked-by"
+    },
+    {
+      "target": "kanbus-8e325221-e1e7-46cc-97ab-a30acd728db5",
+      "type": "blocked-by"
+    }
+  ],
+  "comments": [],
+  "created_at": "2026-07-19T19:00:22.667091Z",
+  "updated_at": "2026-07-19T19:00:22.667091Z",
+  "closed_at": null,
+  "custom": {
+    "project_label": "kanbus",
+    "source": "shared"
+  }
+}

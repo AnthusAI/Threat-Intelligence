@@ -60,3 +60,4 @@ storybook-static/
 /babulus_test.xml
 /*.code-workspace
 
+project/.overlay/
