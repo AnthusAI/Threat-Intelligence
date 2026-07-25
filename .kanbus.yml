@@ -3,7 +3,7 @@ virtual_projects: {}
 new_issue_project: null
 ignore_paths: []
 console_port: null
-project_key: kanbus
+project_key: TI
 project_management_template: null
 hierarchy:
 - initiative

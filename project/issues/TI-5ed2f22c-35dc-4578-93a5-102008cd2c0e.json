@@ -1,0 +1,25 @@
+{
+  "id": "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e",
+  "title": "Document and implement repeatable retrieval evaluation environments",
+  "description": "",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": null,
+  "labels": [],
+  "dependencies": [],
+  "comments": [
+    {
+      "id": "3ce86dd8-b290-45f0-8c00-c3402959f7e7",
+      "author": "ryan",
+      "text": "During the retrieval evaluation harness implementation, we discovered that evaluating against realistic data requires a populated vector index and corresponding corpus data. Because the sandbox lacked this data, we ended up performing ad-hoc bulk copies of production corpus data and forcing vector index rebuilds. This gap needs to be addressed so future evaluations don't rely on moving production data. We should establish a documented, repeatable way to point the harness at a known environment (e.g. a seeded sandbox, a documented read-only production procedure, or a small fixture corpus in the repo).",
+      "created_at": "2026-07-25T22:45:51.450983Z"
+    }
+  ],
+  "created_at": "2026-07-25T22:45:45.158486Z",
+  "updated_at": "2026-07-25T22:45:51.450983Z",
+  "closed_at": null,
+  "custom": {}
+}
