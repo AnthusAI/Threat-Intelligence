@@ -200,7 +200,8 @@ def references_backfill_source_archives(flags: list[str]) -> None:
         _reference_source_attachment_record,
         apply_reference_url_text_attachment_changes,
         _utc_now,
-        _corpus_key_from_reference
+        _corpus_key_from_reference,
+        _looks_like_pdf_uri
     )
     from .records import build_record_changes
     from .env import storage_bucket_from_amplify_outputs
@@ -254,7 +255,7 @@ def references_backfill_source_archives(flags: list[str]) -> None:
             
         corpus_key = corpus_key_by_id.get(str(reference.get("corpusId") or "")) or _corpus_key_from_reference(reference)
         try:
-            content, provenance = _download_source_attachment_from_uri(source_uri, reference=reference, is_pdf_target=False)
+            content, provenance = _download_source_attachment_from_uri(source_uri, reference=reference, is_pdf_target=_looks_like_pdf_uri(source_uri))
             source_metadata = {
                 "source": "backfill-source-archives",
                 "downloadedAt": _utc_now(),

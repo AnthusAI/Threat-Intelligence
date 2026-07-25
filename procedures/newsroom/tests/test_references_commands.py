@@ -65,6 +65,15 @@ from papyrus_content.references_commands import (  # noqa: E402
 
 
 class ReferenceCommandsTests(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.find_stage_patcher = mock.patch("papyrus_content.reference_url_text._reference_has_find_stage_marker", return_value=True)
+        self.find_stage_patcher.start()
+
+    def tearDown(self):
+        self.find_stage_patcher.stop()
+        super().tearDown()
+
     @mock.patch("papyrus_content.references_commands._ensure_cli_grobid_runtime")
     @mock.patch("papyrus_content.references_commands.run_reference_identifier_dedupe")
     @mock.patch("papyrus_content.references_commands.run_reference_url_text_extraction")
@@ -463,6 +472,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             corpus_id="knowledge-corpus-ai-ml-research",
             curation_status="all",
             force=False,
+            allow_discovery=True,
         )
         mock_filter.assert_not_called()
         self.assertEqual(result["plannedAttachmentCount"], 3)
@@ -631,7 +641,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/paper.pdf",
                 "sourcePublishedAt": "2019-01-01",
-                "metadata": json.dumps({}),
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -693,7 +703,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/paper.pdf",
                 "sourcePublishedAt": "2019-01-01",
-                "metadata": json.dumps({}),
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -747,7 +757,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/article",
                 "sourcePublishedAt": "2018-11-20",
-                "metadata": json.dumps({}),
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -2016,7 +2026,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://arxiv.org/html/2504.16736v2",
-                "metadata": json.dumps({}),
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -2026,6 +2036,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             corpus_id="knowledge-corpus-ai-ml-research",
             curation_status="all",
             force=False,
+            allow_discovery=True,
         )
         mock_extract.assert_called_once_with(
             "https://arxiv.org/pdf/2504.16736v2.pdf",
@@ -2088,7 +2099,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                     "corpusId": "knowledge-corpus-ai-ml-research",
                     "externalItemId": "doi:10.1111/example",
                     "sourceUri": "https://doi.org/10.1111/example",
-                    "metadata": json.dumps({}),
+                    "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
                 }
             ],
             attachments=[],
@@ -2096,6 +2107,7 @@ class ReferenceCommandsTests(unittest.TestCase):
             corpus_id="knowledge-corpus-ai-ml-research",
             curation_status="all",
             force=True,
+            allow_discovery=True,
         )
         self.assertEqual(result["doiResolvedCount"], 1)
         self.assertEqual(result["doiPdfSelectedCount"], 1)
@@ -2289,7 +2301,113 @@ class BackfillSourceArchivesTests(unittest.TestCase):
         
         references_backfill_source_archives(["--corpus-id", "corpus-1", "--config", "none"])
         
-        mock_download.assert_called_once_with("https://example.com/2.pdf", reference=mock.ANY, is_pdf_target=False)
+        mock_download.assert_called_once_with("https://example.com/2.pdf", reference=mock.ANY, is_pdf_target=True)
         mock_record.assert_called_once()
         mock_build.assert_called_once()
         mock_apply.assert_called_once()
+
+class FindOnlyReferenceCommandsTests(unittest.TestCase):
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri")
+    @mock.patch("papyrus_content.reference_url_text.resolve_source_site_enrichment")
+    def test_find_only_discovery_produces_source_attachment_plan(
+        self,
+        mock_enrich,
+        mock_download,
+    ):
+        mock_enrich.return_value = {
+            "pluginKey": "arxiv",
+            "canonicalSourceUri": "https://arxiv.org/pdf/2504.16736v2.pdf",
+            "identifiers": {},
+            "warnings": [],
+        }
+        mock_download.return_value = (b"%PDF-test-bytes", {"contentType": "application/pdf"})
+        
+        references = [
+            {
+                "id": "reference-find-only-1",
+                "lineageId": "lineage-find",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-find",
+                "sourceUri": "https://arxiv.org/html/2504.16736v2",
+                # No find_stage_marker, so it requires find stage
+                "metadata": json.dumps({}),
+            }
+        ]
+        
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=False,
+            allow_discovery=True,
+            find_only=True,
+        )
+        
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual(item["status"], "found")
+        self.assertEqual(item["sourceUri"], "https://arxiv.org/pdf/2504.16736v2.pdf")
+        self.assertNotIn("warnings", item)
+        
+        # Verify it appended exactly one source attachment plan
+        self.assertEqual(len(result["plans"]), 1)
+        plan = result["plans"][0]
+        self.assertEqual(plan["record"]["expected"]["role"], "source")
+        self.assertEqual(plan["body"], b"%PDF-test-bytes")
+
+    @mock.patch("papyrus_content.reference_url_text._download_source_attachment_from_uri")
+    @mock.patch("papyrus_content.reference_url_text.resolve_source_site_enrichment")
+    def test_find_only_simulated_download_failure_records_warning(
+        self,
+        mock_enrich,
+        mock_download,
+    ):
+        mock_enrich.return_value = {
+            "pluginKey": "arxiv",
+            "canonicalSourceUri": "https://arxiv.org/pdf/2504.16736v2.pdf",
+            "identifiers": {},
+            "warnings": [],
+        }
+        mock_download.side_effect = ValueError("Network unreachable")
+        
+        references = [
+            {
+                "id": "reference-find-only-2",
+                "lineageId": "lineage-find",
+                "versionNumber": 1,
+                "versionState": "current",
+                "corpusId": "knowledge-corpus-ai-ml-research",
+                "externalItemId": "item-find",
+                "sourceUri": "https://arxiv.org/html/2504.16736v2",
+                "metadata": json.dumps({}),
+            }
+        ]
+        
+        result = build_reference_url_text_attachment_plans(
+            references=references,
+            attachments=[],
+            corpus_key_by_id={"knowledge-corpus-ai-ml-research": "AI-ML-research"},
+            corpus_id="knowledge-corpus-ai-ml-research",
+            curation_status="all",
+            force=False,
+            allow_discovery=True,
+            find_only=True,
+        )
+        
+        self.assertEqual(len(result["items"]), 1)
+        item = result["items"][0]
+        self.assertEqual(item["status"], "found")
+        self.assertEqual(item["sourceUri"], "https://arxiv.org/pdf/2504.16736v2.pdf")
+        
+        # Verify warning is recorded on the item
+        self.assertIn("warnings", item)
+        self.assertEqual(len(item["warnings"]), 1)
+        self.assertEqual(item["warnings"][0]["code"], "source_archive_failed")
+        self.assertIn("Network unreachable", item["warnings"][0]["message"])
+        
+        # It should not have created any attachment plans
+        self.assertEqual(len(result["plans"]), 0)

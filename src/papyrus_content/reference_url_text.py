@@ -149,6 +149,7 @@ def build_reference_url_text_attachment_plans(
                 skipped_existing += 1
                 continue
             if find_only:
+                find_warnings = []
                 if allow_discovery:
                     reference_record = _reference_metadata_update_record(
                         reference=reference,
@@ -177,6 +178,10 @@ def build_reference_url_text_attachment_plans(
                             "downloadedAt": _utc_now(),
                         }
                         source_metadata.update(provenance)
+                        corpus_key = (
+                            corpus_key_by_id.get(str(reference.get("corpusId") or ""))
+                            or _corpus_key_from_reference(reference)
+                        )
                         source_attachment = _reference_source_attachment_record(
                             reference=reference,
                             corpus_key=corpus_key,
@@ -185,7 +190,7 @@ def build_reference_url_text_attachment_plans(
                             content=content,
                             media_type=provenance.get("contentType") or "application/pdf",
                             existing_attachment=existing_source,
-                            warnings=None,
+                            warnings=find_warnings,
                         )
                         if source_attachment:
                             plans.append(
@@ -196,16 +201,17 @@ def build_reference_url_text_attachment_plans(
                                 }
                             )
                     except Exception as err:
-                        pass
+                        find_warnings.append({"code": "source_archive_failed", "message": f"Failed to archive source bytes: {err}"})
                 planned_references += 1
-                items.append(
-                    {
-                        "reference": _reference_row(reference),
-                        "status": "found",
-                        "sourcePlugin": enrichment.get("pluginKey") if allow_discovery else "none",
-                        "sourceUri": extraction_source_uri,
-                    }
-                )
+                find_item = {
+                    "reference": _reference_row(reference),
+                    "status": "found",
+                    "sourcePlugin": enrichment.get("pluginKey") if allow_discovery else "none",
+                    "sourceUri": extraction_source_uri,
+                }
+                if find_warnings:
+                    find_item["warnings"] = find_warnings
+                items.append(find_item)
                 if max_count and planned_references >= max_count:
                     break
                 continue
@@ -237,16 +243,15 @@ def build_reference_url_text_attachment_plans(
                         "details": {"sourceUri": extraction_source_uri},
                     }
                 )
-            if allow_discovery:
-                reference_record = _reference_metadata_update_record(
-                    reference=reference,
-                    enrichment=enrichment,
-                    source_uri=source_uri,
-                    canonical_uri=extraction_source_uri,
-                    publication_date_resolution=publication_date_resolution,
-                )
-                if reference_record is not None:
-                    reference_records.append(reference_record)
+            reference_record = _reference_metadata_update_record(
+                reference=reference,
+                enrichment=enrichment,
+                source_uri=source_uri,
+                canonical_uri=extraction_source_uri,
+                publication_date_resolution=publication_date_resolution,
+            )
+            if reference_record is not None:
+                reference_records.append(reference_record)
             raw_text = str(extracted.get("text") or "").strip()
             raw_markdown = str(extracted.get("markdown") or raw_text)
             if not raw_text:
