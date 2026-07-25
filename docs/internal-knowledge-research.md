@@ -8,7 +8,9 @@ Use this document when you need to search what the publication already knows.
 Use [skills/newsroom-research-workflow/SKILL.md](../skills/newsroom-research-workflow/SKILL.md)
 when the task is assignment workflow, research packets, or web handoff. Use
 [skills/knowledge-query/SKILL.md](../skills/knowledge-query/SKILL.md) for full
-query shape, ranking, vector indexing, and output tuning.
+query shape, ranking, vector indexing, and output tuning. For planned
+retrieval improvements (hybrid lexical search, age decay, distillation), see
+[docs/knowledge-retrieval-roadmap.md](knowledge-retrieval-roadmap.md).
 
 ## What counts as internal research
 
