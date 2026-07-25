@@ -65,14 +65,6 @@ from papyrus_content.references_commands import (  # noqa: E402
 
 
 class ReferenceCommandsTests(unittest.TestCase):
-    def setUp(self):
-        super().setUp()
-        self.find_stage_patcher = mock.patch("papyrus_content.reference_url_text._reference_has_find_stage_marker", return_value=True)
-        self.find_stage_patcher.start()
-
-    def tearDown(self):
-        self.find_stage_patcher.stop()
-        super().tearDown()
 
     @mock.patch("papyrus_content.references_commands._ensure_cli_grobid_runtime")
     @mock.patch("papyrus_content.references_commands.run_reference_identifier_dedupe")

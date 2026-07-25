@@ -3771,7 +3771,7 @@ def _resolve_process_source_uri(
     # As a last resort for URL-only prospects, use the Reference.sourceUri after
     # find has already run (metadata may be present even when hydration failed).
     direct_source_uri = normalize_http_url(reference.get("sourceUri"))
-    if direct_source_uri and _reference_has_find_stage_marker(reference):
+    if direct_source_uri:
         return direct_source_uri, None
     return None, {
         "code": "needs_find_missing_canonical_source",
