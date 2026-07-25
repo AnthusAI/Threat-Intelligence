@@ -389,6 +389,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/article",
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -455,6 +456,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/paper.pdf",
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -496,6 +498,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/article",
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -561,6 +564,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/paper.pdf",
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
@@ -1138,6 +1142,7 @@ class ReferenceCommandsTests(unittest.TestCase):
                 "corpusId": "knowledge-corpus-ai-ml-research",
                 "externalItemId": "item-1",
                 "sourceUri": "https://example.com/article",
+                "metadata": json.dumps({"papyrus": {"source_resolution": {"default": {}}}}),
             }
         ]
         result = build_reference_url_text_attachment_plans(
