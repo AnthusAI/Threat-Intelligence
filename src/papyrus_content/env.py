@@ -29,6 +29,7 @@ _DOTENV_OVERRIDE_KEYS = frozenset({
 
 
 def load_dotenv() -> None:
+    skip_auth_override = bool(os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "").strip())
     for filename in (".env", ".env.local"):
         path = PAPYRUS_ROOT / filename
         if not path.exists():
@@ -40,6 +41,8 @@ def load_dotenv() -> None:
             key, value = line.split("=", 1)
             key = key.strip()
             if not key:
+                continue
+            if skip_auth_override and key in _DOTENV_OVERRIDE_KEYS:
                 continue
             if key in os.environ and key not in _DOTENV_OVERRIDE_KEYS:
                 continue
