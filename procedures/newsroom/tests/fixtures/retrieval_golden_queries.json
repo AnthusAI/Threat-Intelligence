@@ -1,0 +1,232 @@
+[
+  {
+    "id": "q-ident-1",
+    "query": "1707.03141",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f"
+    ],
+    "category": "identifier",
+    "notes": "Exact arxiv ID for A Simple Neural Attentive Meta-Learner"
+  },
+  {
+    "id": "q-ident-2",
+    "query": "1703.06870",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581"
+    ],
+    "category": "identifier",
+    "notes": "Exact arxiv ID for Mask R-CNN"
+  },
+  {
+    "id": "q-ident-3",
+    "query": "2407.10671",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+    ],
+    "category": "identifier",
+    "notes": "Exact arxiv ID for Qwen2 Technical Report"
+  },
+  {
+    "id": "q-ident-4",
+    "query": "2401.04088",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e"
+    ],
+    "category": "identifier",
+    "notes": "Exact arxiv ID for Mixtral of Experts"
+  },
+  {
+    "id": "q-ident-5",
+    "query": "c399862d3b9d6b76c8436e924a68c45b",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06"
+    ],
+    "category": "identifier",
+    "notes": "NeurIPS hash for ImageNet Classification with Deep Convolutional Neural Networks"
+  },
+  {
+    "id": "q-para-1",
+    "query": "Paper proposing a meta-learning method with attention mechanisms",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f"
+    ],
+    "category": "paraphrase",
+    "notes": "Descriptive query for A Simple Neural Attentive Meta-Learner"
+  },
+  {
+    "id": "q-para-2",
+    "query": "Technique for visual recognition using bounding boxes and segmentation masks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581"
+    ],
+    "category": "paraphrase",
+    "notes": "Descriptive query for Mask R-CNN"
+  },
+  {
+    "id": "q-para-3",
+    "query": "Model replacing self-attention with multi-layer perceptrons in vision tasks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-629d54ae-ce05-5c7a-8c9d-ef35ae43b319"
+    ],
+    "category": "paraphrase",
+    "notes": "Descriptive query for hMLP"
+  },
+  {
+    "id": "q-para-4",
+    "query": "Sparse mixture of experts language model technical documentation",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e"
+    ],
+    "category": "paraphrase",
+    "notes": "Descriptive query for Mixtral of Experts"
+  },
+  {
+    "id": "q-para-5",
+    "query": "Early breakthrough in using large convolutional networks for image classification tasks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06"
+    ],
+    "category": "paraphrase",
+    "notes": "Descriptive query for AlexNet/ImageNet paper"
+  },
+  {
+    "id": "q-fresh-1",
+    "query": "Recent reinforcement learning approaches for self-evolving agent memory",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72"
+    ],
+    "category": "freshness",
+    "notes": "MemRL (2026) should rank above older RL papers like Apprenticeship Learning (2004)"
+  },
+  {
+    "id": "q-fresh-2",
+    "query": "Latest toolkits for ontology processing and alignment",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1"
+    ],
+    "category": "freshness",
+    "notes": "OntoAligner (2025) should rank above older ontology embedding surveys"
+  },
+  {
+    "id": "q-fresh-3",
+    "query": "Newest game-theoretic approaches for safe agentic systems",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031"
+    ],
+    "category": "freshness",
+    "notes": "MaMa (2026) should rank above older agent evaluation frameworks"
+  },
+  {
+    "id": "q-fresh-4",
+    "query": "Recent multi-agent evolutionary computation frameworks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b"
+    ],
+    "category": "freshness",
+    "notes": "Evolutionary Computation and LLMs (2025) should rank high"
+  },
+  {
+    "id": "q-fresh-5",
+    "query": "State of the art in automated meta-analysis using multi-agent systems",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-ad36c997-4a03-4b40-ab47-3d619e52ecac"
+    ],
+    "category": "freshness",
+    "notes": "Manalyzer should rank high"
+  },
+  {
+    "id": "q-qual-1",
+    "query": "Survey on evolutionary computation combined with large language models",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b"
+    ],
+    "category": "quality_tie",
+    "notes": "Explicitly asking for a survey should prioritize the survey paper"
+  },
+  {
+    "id": "q-qual-2",
+    "query": "Review of ontology embedding methods and resources",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-356b6461-2314-49db-bdff-3bc7e2ba8f2d"
+    ],
+    "category": "quality_tie",
+    "notes": "Survey paper should rank above specific implementations"
+  },
+  {
+    "id": "q-qual-3",
+    "query": "Foundational paper on residual connections in inception networks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de"
+    ],
+    "category": "quality_tie",
+    "notes": "Foundational Inception-ResNet paper"
+  },
+  {
+    "id": "q-qual-4",
+    "query": "Comprehensive technical report for the Qwen2 model architecture",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+    ],
+    "category": "quality_tie",
+    "notes": "Technical report should outrank random references to it"
+  },
+  {
+    "id": "q-qual-5",
+    "query": "Analysis of cognitive biases in LLMs and mitigation strategies",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-76a744ab-d4a5-4470-8277-535b5fc81702"
+    ],
+    "category": "quality_tie",
+    "notes": "Survey/experiments paper should outrank side mentions"
+  },
+  {
+    "id": "q-multi-1",
+    "query": "Comparing Mixtral of Experts architecture with Qwen2 performance",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e",
+      "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+    ],
+    "category": "multi_hop",
+    "notes": "Matches both model papers"
+  },
+  {
+    "id": "q-multi-2",
+    "query": "Using Mask R-CNN and Inception-ResNet for image tasks",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581",
+      "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de"
+    ],
+    "category": "multi_hop",
+    "notes": "Matches both vision architectures"
+  },
+  {
+    "id": "q-multi-3",
+    "query": "Integration of ontology alignment toolkits with large language models",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1",
+      "reference-knowledge-corpus-ai-ml-research-76a744ab-d4a5-4470-8277-535b5fc81702"
+    ],
+    "category": "multi_hop",
+    "notes": "Connects ontology alignment with LLM topics"
+  },
+  {
+    "id": "q-multi-4",
+    "query": "Evaluating game-theoretic safe agents in production environments",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031",
+      "reference-knowledge-corpus-ai-ml-research-e0225603-b00a-4d2f-9b29-c807f48e1bc7"
+    ],
+    "category": "multi_hop",
+    "notes": "Connects MaMa and Measuring Agents in Production"
+  },
+  {
+    "id": "q-multi-5",
+    "query": "Reinforcement learning techniques for self-evolving agent memory versus traditional apprenticeship learning",
+    "expect_reference_lineage_ids": [
+      "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72",
+      "reference-knowledge-corpus-ai-ml-research-273a68e9-7523-49bf-bc60-9fa4a5c29ba0"
+    ],
+    "category": "multi_hop",
+    "notes": "Connects MemRL and Apprenticeship Learning"
+  }
+]
