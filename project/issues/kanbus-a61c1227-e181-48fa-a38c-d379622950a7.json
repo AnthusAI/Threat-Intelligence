@@ -17,9 +17,16 @@
       "type": "blocked-by"
     }
   ],
-  "comments": [],
+  "comments": [
+    {
+      "id": "6cb96c0a-971d-4b79-af99-317c6eb2e687",
+      "author": "ryan",
+      "text": "## Amendment — read before you finish the tokenizer\n\nThe brief specifies preserving CVE IDs, hashes, domains, IPs, and ATT&CK technique IDs as atomic terms. That list is too narrow and reads as though Papyrus is a threat-intelligence system. It is not — it is a general CMS, and one installation is one publication. **The main P.apyr.us publication is about AI/ML and is DOI-centric**, so academic identifiers matter at least as much as security ones.\n\nI tested the current `_keywords` behaviour against academic identifiers:\n\n| Input | Tokens today |\n|---|---|\n| `978-0-13-235088-4` (ISBN) | `978-0-13-235088-4` ✓ |\n| `2401.04088` (arXiv) | `2401.04088` ✓ |\n| `PMID:31452104` | `pmid`, `31452104` — acceptable |\n| `10.1145/3442188.3445922` (DOI) | `10.1145`, `3442188.3445922` ✗ |\n\n**DOIs split at the slash.** A lexical query for a full DOI will not match it as one term — on the publication where DOIs are the primary identifier. That is a real gap and this epic is where it gets fixed.\n\nSo the tokenizer requirement is: preserve **identifiers generally**, with per-type handling. At minimum DOIs (`10.\\d{4,9}/\\S+`, slash and all), ISBNs, arXiv ids, PMIDs, alongside the CVE/hash/domain/IP/ATT&CK set already specified.\n\nFollow the shape the codebase already uses. `reference_url_text.py` has `_normalize_doi`, `_normalize_arxiv_id`, `_normalize_isbn`, `_normalize_pmid` — per-type normalizers composing into a general capability, with no publication assuming primacy. Reuse or mirror those rather than inventing a parallel security-flavoured set, and keep the defanging step (`hxxp`, `[.]`) as one normalizer among several rather than the organising idea.\n\nTest both families explicitly. A tokeniser that handles CVEs but mangles DOIs is a regression for the larger publication.\n\nRelated, but **not yours and not now**: `TI-95ddf1` covers moving passage heading weights out of engine code into per-corpus config, for the same generality reason. Do not touch that in this epic — it shares a code path and would tangle two changes that should land separately.",
+      "created_at": "2026-07-26T17:18:22.808179Z"
+    }
+  ],
   "created_at": "2026-07-19T19:00:14.333744Z",
-  "updated_at": "2026-07-19T19:00:14.333744Z",
+  "updated_at": "2026-07-26T17:18:22.808179Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",
