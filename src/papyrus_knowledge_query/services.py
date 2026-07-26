@@ -321,24 +321,7 @@ class S3VectorsProvider:
             return []
         vector = self._embed(query)
         query_limit = _semantic_query_limit(scope, limit)
-        diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
-        if diversity == "broad":
-            source_matches = (
-                self._query_vectors(vector, scope, query_limit, vector_kind="reference_summary")
-                + self._query_vectors(vector, scope, query_limit, vector_kind="reference_card")
-                + self._query_vectors(vector, scope, query_limit, vector_kind="insight_source")
-                + self._query_vectors(vector, scope, query_limit, vector_kind="insight_summary")
-            )
-            passage_limit = min(query_limit, max(limit, 40))
-            passage_matches = (
-                self._query_vectors(vector, scope, passage_limit, vector_kind="reference_passage")
-                + self._query_vectors(vector, scope, passage_limit, vector_kind="insight_passage")
-            )
-            matches = source_matches + passage_matches
-            if not matches:
-                matches = self._query_vectors(vector, scope, query_limit)
-        else:
-            matches = self._query_vectors(vector, scope, query_limit)
+        matches = self._query_vectors(vector, scope, query_limit)
         return diversify_vector_matches(matches, limit, max_per_source=_semantic_max_matches_per_source(scope))
 
     def _query_vectors(
@@ -884,11 +867,6 @@ def _semantic_query_limit(scope: dict[str, Any], limit: int) -> int:
             return max(limit, min(int(raw), 100))
         except (TypeError, ValueError):
             pass
-    diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
-    if diversity == "broad":
-        return max(limit, min(100, limit * 12))
-    if diversity == "focused":
-        return max(limit, min(100, limit * 4))
     return max(limit, min(100, limit * 6))
 
 
@@ -900,12 +878,7 @@ def _semantic_max_matches_per_source(scope: dict[str, Any]) -> int | None:
         except (TypeError, ValueError):
             return None
         return value if value > 0 else None
-    diversity = str(scope.get("rankingDiversity") or scope.get("diversity") or "balanced")
-    if diversity == "broad":
-        return 2
-    if diversity == "balanced":
-        return 4
-    return None
+    return 4
 
 
 def _vector_match_diversity_key(match: dict[str, Any]) -> str:

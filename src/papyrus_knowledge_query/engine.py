@@ -10,9 +10,11 @@ from typing import Any
 
 from .services import KnowledgeQueryServices, NoopSemanticSearchProvider, normalize_anchor
 from .ranking import (
+    PASSAGE_REPEAT_CAP,
     QUALITY_RELATION_KEYS,
+    SEE_ALSO_MAX_TOKENS,
+    SEE_ALSO_MIN_TOKENS,
     allocate_token_budgets,
-    DIVERSITY_PROFILES,
     normalize_ranking_config,
     quality_signal_from_relations,
     ranking_sort_key,
@@ -193,13 +195,9 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
 
     if semantic_search_enabled and request["semanticQuery"]:
         try:
-            semantic_scope = {
-                **request["scope"],
-                "rankingDiversity": request["ranking"].get("diversity", "balanced"),
-            }
             structured["semanticMatches"] = semantic_provider.search(
                 request["semanticQuery"],
-                semantic_scope,
+                request["scope"],
                 int(request["scope"]["topK"]),
             )
         except Exception as exc:
@@ -207,7 +205,6 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
     mark_stage("semantic_search", semanticMatchCount=len(structured["semanticMatches"]))
 
     _normalize_semantic_matches(structured, request, services)
-    _warn_if_source_spread_was_not_satisfied(structured, request, warnings)
     mark_stage("normalize_semantic_matches", semanticPassageCount=len(structured["semanticPassages"]))
     semantic_seed_profile: dict[str, Any] = {}
     if request["semanticQuery"] and not request["anchors"] and graph_provider:
@@ -275,11 +272,8 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
             "outputFormat": request["outputFormat"],
             "semanticQuery": request["semanticQuery"],
             "semanticQuerySource": request["semanticQuerySource"],
-            "rankingProfile": request["ranking"]["profile"],
-            "diversityProfile": request["ranking"]["diversity"],
             "uniqueSourceCount": _unique_source_count(public_structured),
             "semanticUniqueSourceCount": _unique_semantic_match_source_count(public_structured),
-            "semanticSourceTarget": _semantic_source_target(request),
             "sourceBudgetCount": len(public_structured.get("referenceTokenBudgets") or {}),
             "vectorDiversification": "source_round_robin" if semantic_search_enabled and request["semanticQuery"] else "not_applied",
             "relationPolicy": request["relationPolicy"],
@@ -1122,39 +1116,6 @@ def _unique_source_count(structured: dict[str, Any]) -> int:
     return len(keys)
 
 
-def _warn_if_source_spread_was_not_satisfied(
-    structured: dict[str, Any],
-    request: dict[str, Any],
-    warnings: list[str],
-) -> None:
-    if request["ranking"].get("diversity") != "broad" or not request.get("semanticQuery"):
-        return
-    unique_matches = _unique_semantic_match_source_count(structured)
-    target = _semantic_source_target(request)
-    structured.setdefault("retrievalDiagnostics", {})["semanticSourceSpread"] = {
-        "target": target,
-        "actual": unique_matches,
-        "semanticMatchCount": len(structured.get("semanticMatches") or []),
-    }
-    if unique_matches < target:
-        warnings.append(
-            f"Broad diversity requested about {target} semantic sources, but semantic search returned {unique_matches}; context cannot include more unique sources than retrieval provides"
-        )
-
-
-def _semantic_source_target(request: dict[str, Any]) -> int:
-    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
-    explicit = scope.get("semanticSourceTarget")
-    if explicit is not None:
-        try:
-            return max(1, int(explicit))
-        except (TypeError, ValueError):
-            pass
-    related_limit = int(scope.get("relatedRecordLimit") or 8)
-    top_k = int(scope.get("topK") or related_limit)
-    return max(4, min(related_limit, top_k, 12))
-
-
 def _unique_semantic_match_source_count(structured: dict[str, Any]) -> int:
     keys: set[str] = set()
     for match in structured.get("semanticMatches") or []:
@@ -1731,9 +1692,7 @@ def _seed_evidence_from_semantic_passages(
 ) -> None:
     if not structured.get("semanticPassages"):
         return
-    diversity = str(request["ranking"].get("diversity") or "balanced")
-    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
-    passage_repeat_cap = max(1, int(diversity_config.get("passageRepeatCap") or 3))
+    passage_repeat_cap = max(1, PASSAGE_REPEAT_CAP)
     summary_keys = {
         str(passage.get("referenceLineageId") or passage.get("referenceId") or "")
         for passage in structured.get("evidencePassages") or []
@@ -2160,23 +2119,12 @@ def _apply_quality_signal_to_reference_objects(structured: dict[str, Any], linea
 
 def _rank_structured_records(structured: dict[str, Any], request: dict[str, Any]) -> None:
     ranking_config = request["ranking"]
-    anchors = structured.get("anchors") or []
-    anchor_keys = {_object_key(anchor) for anchor in anchors if _object_key(anchor)}
-    graph_keys = {_object_key(obj) for obj in structured.get("expandedObjects") or [] if _object_key(obj)}
-    for anchor in anchors:
-        _assign_record_ranking(anchor, request, ranking_config, graph_context=1.0, relevance=1.0)
+    for anchor in structured.get("anchors") or []:
+        _assign_record_ranking(anchor, request, ranking_config, relevance=1.0)
     for match in structured.get("semanticMatches") or []:
-        key = _object_key(match)
-        graph_context = 0.0
-        if key in graph_keys:
-            graph_context = 0.9
-        elif _shares_context_metadata(match, anchors):
-            graph_context = 0.6
-        _assign_record_ranking(match, request, ranking_config, graph_context=graph_context)
+        _assign_record_ranking(match, request, ranking_config)
     for obj in structured.get("expandedObjects") or []:
-        key = _object_key(obj)
-        graph_context = 1.0 if key in anchor_keys else 0.8
-        _assign_record_ranking(obj, request, ranking_config, graph_context=graph_context)
+        _assign_record_ranking(obj, request, ranking_config)
     for passage in structured.get("semanticPassages") or []:
         _assign_passage_ranking(passage, structured, request)
     for passage in structured.get("evidencePassages") or []:
@@ -2188,7 +2136,6 @@ def _assign_record_ranking(
     request: dict[str, Any],
     ranking_config: dict[str, Any],
     *,
-    graph_context: float,
     relevance: float | None = None,
 ) -> None:
     existing = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
@@ -2196,7 +2143,6 @@ def _assign_record_ranking(
         record,
         ranking_config=ranking_config,
         semantic_query=request["semanticQuery"],
-        graph_context_score=graph_context,
         relevance_score=relevance,
     )
     ranking.update({key: value for key, value in existing.items() if key.startswith("quality") and value not in {None, ""}})
@@ -2205,7 +2151,6 @@ def _assign_record_ranking(
             {**record, "ranking": ranking},
             ranking_config=ranking_config,
             semantic_query=request["semanticQuery"],
-            graph_context_score=graph_context,
             relevance_score=relevance,
         )
     record["ranking"] = ranking
@@ -2226,22 +2171,17 @@ def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any],
     else:
         passage_relevance = min(1.0, passage_relevance / 12.0)
     quality_score = float(parent_ranking.get("qualityScore", request["ranking"].get("missingQuality", 0.5)))
-    graph_context = float(parent_ranking.get("graphContextScore", 0.0))
     weights = request["ranking"].get("weights") or {}
     final_score = (
-        float(weights.get("relevance", 0.7)) * max(0.0, min(1.0, passage_relevance))
-        + float(weights.get("quality", 0.25)) * max(0.0, min(1.0, quality_score))
-        + float(weights.get("graphContext", 0.05)) * max(0.0, min(1.0, graph_context))
+        float(weights.get("relevance", 0.70 / 0.95)) * max(0.0, min(1.0, passage_relevance))
+        + float(weights.get("quality", 0.25 / 0.95)) * max(0.0, min(1.0, quality_score))
     )
     passage["ranking"] = {
-        "profile": request["ranking"].get("profile", "balanced"),
-        "diversity": request["ranking"].get("diversity", "balanced"),
         "relevanceScore": round(max(0.0, min(1.0, passage_relevance)), 4),
         "qualityScore": round(max(0.0, min(1.0, quality_score)), 4),
         "qualityRating": parent_ranking.get("qualityRating"),
         "qualityKnown": bool(parent_ranking.get("qualityKnown")),
         "qualityRelationId": parent_ranking.get("qualityRelationId"),
-        "graphContextScore": round(max(0.0, min(1.0, graph_context)), 4),
         "finalScore": round(max(0.0, min(1.0, final_score)), 4),
         "tokenBudget": parent_ranking.get("tokenBudget"),
         "parentReferenceLineageId": reference_key,
@@ -2265,14 +2205,12 @@ def _reference_excerpt_token_budgets(structured: dict[str, Any], request: dict[s
         total_budget = max(max_passage_tokens, min(max_passages * max_passage_tokens, int(int(request["maxTokens"]) * 0.55)))
     else:
         total_budget = max_passages * max_passage_tokens
-    diversity = str(request["ranking"].get("diversity") or "balanced")
-    min_tokens, max_tokens = _source_budget_bounds(diversity, max_passage_tokens)
+    min_tokens, max_tokens = _source_budget_bounds(max_passage_tokens)
     budgets = allocate_token_budgets(
         references,
         total_budget,
         min_tokens=min_tokens,
         max_tokens=max_tokens,
-        diversity=diversity,
     )
     for reference in references:
         key = record_key(reference)
@@ -2280,17 +2218,12 @@ def _reference_excerpt_token_budgets(structured: dict[str, Any], request: dict[s
             continue
         ranking = reference.get("ranking") if isinstance(reference.get("ranking"), dict) else {}
         ranking["tokenBudget"] = budgets[key]
-        ranking["diversity"] = diversity
         ranking["sourceBudgetRole"] = "evidence_source"
         reference["ranking"] = ranking
     return budgets
 
 
-def _source_budget_bounds(diversity: str, max_passage_tokens: int) -> tuple[int, int]:
-    if diversity == "focused":
-        return min(60, max_passage_tokens), min(1400, max(240, max_passage_tokens * 5))
-    if diversity == "broad":
-        return min(90, max_passage_tokens), min(420, max(120, max_passage_tokens * 2))
+def _source_budget_bounds(max_passage_tokens: int) -> tuple[int, int]:
     return min(80, max_passage_tokens), min(1000, max(160, max_passage_tokens * 3))
 
 
@@ -2329,7 +2262,7 @@ def _build_related_records(
             continue
         records.append(_related_record(obj, rank, "graph context expansion", "graph_expansion", structured, services))
         rank += 1
-    records = select_records_by_diversity(_dedupe_related_records(records), limit, str(request["ranking"].get("diversity") or "balanced"))
+    records = select_records_by_diversity(_dedupe_related_records(records), limit)
     _allocate_related_record_budgets(records, request, services)
     return records
 
@@ -2579,14 +2512,11 @@ def _related_record_priority(record: dict[str, Any]) -> float:
 def _allocate_related_record_budgets(records: list[dict[str, Any]], request: dict[str, Any], services: KnowledgeQueryServices) -> None:
     if not records:
         return
-    diversity = str(request["ranking"].get("diversity") or "balanced")
-    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
     budgets = allocate_token_budgets(
         records,
         int(request.get("seeAlsoMaxTokens") or 300),
-        min_tokens=int(diversity_config["seeAlsoMinTokens"]),
-        max_tokens=int(diversity_config["seeAlsoMaxTokens"]),
-        diversity=diversity,
+        min_tokens=SEE_ALSO_MIN_TOKENS,
+        max_tokens=SEE_ALSO_MAX_TOKENS,
     )
     for record in records:
         key = record_key(record)
@@ -2595,7 +2525,6 @@ def _allocate_related_record_budgets(records: list[dict[str, Any]], request: dic
             continue
         ranking = record.get("ranking") if isinstance(record.get("ranking"), dict) else {}
         ranking["tokenBudget"] = budget
-        ranking["diversity"] = diversity
         ranking["sourceBudgetRole"] = "see_also"
         record["ranking"] = ranking
         # Keep room for the title, object URI, and reason lines rendered by See Also.
@@ -2719,9 +2648,7 @@ def _collect_reference_evidence(
                 if reference_budget < 80:
                     continue
             max_for_reference = max(1, min(remaining, (reference_budget + int(request["maxPassageTokens"]) - 1) // int(request["maxPassageTokens"])))
-            diversity = str(request["ranking"].get("diversity") or "balanced")
-            passage_repeat_cap = int((DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])).get("passageRepeatCap") or 3)
-            max_for_reference = min(max_for_reference, passage_repeat_cap)
+            max_for_reference = min(max_for_reference, PASSAGE_REPEAT_CAP)
             if _reference_needs_evidence(structured, reference):
                 max_for_reference = max(1, max_for_reference)
             max_passage_tokens = max(40, min(500, reference_budget // max_for_reference))
