@@ -1,8 +1,9 @@
+import hashlib
 import json
 import os
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import boto3
 
@@ -13,6 +14,19 @@ def get_openai_api_key():
     ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "us-east-1"))
     response = ssm.get_parameter(Name="/amplify/shared/papyrus/OPENAI_API_KEY", WithDecryption=True)
     return response["Parameter"]["Value"]
+
+
+def _git_provenance() -> dict:
+    """Identify the exact working-tree state used for an eval run."""
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    diff = subprocess.check_output(["git", "diff", "HEAD"], text=True)
+    dirty = bool(diff.strip())
+    return {
+        "git_sha": sha,
+        "git_dirty": dirty,
+        "git_diff_sha256": hashlib.sha256(diff.encode("utf-8")).hexdigest() if dirty else None,
+    }
+
 
 def main():
     os.environ["OPENAI_API_KEY"] = get_openai_api_key()
@@ -130,26 +144,31 @@ def main():
             c_metrics["hit_at_5_rate"] = c_metrics["hit_at_5"] / c_metrics["total"]
             c_metrics["hit_at_10_rate"] = c_metrics["hit_at_10"] / c_metrics["total"]
 
+    git_meta = _git_provenance()
     report = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "provenance": {
             "graphql_endpoint": os.environ.get("PAPYRUS_GRAPHQL_ENDPOINT", "unknown"),
             "vector_index_arn": os.environ.get("PAPYRUS_S3_VECTOR_INDEX_ARN", "unknown"),
             "corpus_id": "knowledge-corpus-ai-ml-research",
-            "git_sha": subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip(),
+            "git_sha": git_meta["git_sha"],
+            "git_dirty": git_meta["git_dirty"],
+            "git_diff_sha256": git_meta["git_diff_sha256"],
             "note": "Threat-intel exact-token retrieval (CVE / hash / ATT&CK) is still unmeasured. This baseline evaluates ai-ml-research only."
         },
         "metrics": metrics,
         "results": results
     }
     
-    report_path = reports_dir / "retrieval_baseline.json"
+    report_path = Path(os.environ.get("PAPYRUS_RETRIEVAL_EVAL_REPORT", reports_dir / "retrieval_baseline.json"))
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
         
     print(f"\nEvaluation complete. Report saved to {report_path}")
     print(f"Global MRR: {metrics.get('mrr', 0):.3f}")
     print(f"Global Hit@5: {metrics.get('hit_at_5_rate', 0):.1%}")
+    print(f"Provenance: sha={git_meta['git_sha'][:12]} dirty={git_meta['git_dirty']} diff={git_meta['git_diff_sha256']}")
 
 if __name__ == "__main__":
     main()

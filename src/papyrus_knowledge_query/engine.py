@@ -43,6 +43,7 @@ OPERATIONAL_RELATION_KEYS = {"comment", "ingestion_rationale", "requests_work_on
 SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
 INSIGHT_RELATION_KEY = "insight_about"
 PASSAGE_HEADING_BOOSTS = {
+    # Academic / AI-ML paper structure (retained — this instance still ingests that corpus)
     "abstract": 8,
     "introduction": 4,
     "evaluation": 5,
@@ -50,6 +51,18 @@ PASSAGE_HEADING_BOOSTS = {
     "findings": 5,
     "discussion": 3,
     "conclusion": 3,
+    # Threat-intel report structure
+    "executive summary": 8,
+    "key judgments": 6,
+    "iocs": 6,
+    "indicators of compromise": 6,
+    "attribution": 5,
+    "detections": 5,
+    "detection opportunities": 5,
+    "technical analysis": 4,
+    "mitigations": 4,
+    "recommendations": 4,
+    "timeline": 3,
 }
 PASSAGE_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into", "is", "it", "of", "on",
@@ -2923,7 +2936,16 @@ def _passage_score(text: str, heading: str, keywords: set[str]) -> float:
     if lowered_heading.startswith("references") or lowered_heading.startswith("bibliography"):
         return -10
     lowered_text = text.lower()
-    if any(marker in lowered_text for marker in ("correspondence to:", "project co-leads", "uc berkeley", "ibm research")):
+    if any(
+        marker in lowered_text
+        for marker in (
+            "about the author",
+            "copyright ©",
+            "subscribe to",
+            "newsletter",
+            "all rights reserved",
+        )
+    ):
         return -5
     if lowered_text.count("url http") >= 2 or lowered_text.count("arxiv.org/abs") >= 2 or "references " in lowered_text[:40]:
         return -8
@@ -2935,15 +2957,13 @@ def _passage_score(text: str, heading: str, keywords: set[str]) -> float:
             score += boost
     if "arxiv:" in lowered_text or lowered_text.startswith("(figure"):
         score -= 5
-    if any(term in tokens for term in {"reliability", "evaluation", "production", "agents", "practitioners"}):
-        score += 2
     return score
 
 
 def _keywords(text: str) -> set[str]:
     return {
         token.lower()
-        for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text or "")
+        for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]{2,}", text or "")
         if token.lower() not in PASSAGE_STOPWORDS
     }
 
