@@ -234,14 +234,21 @@ class LexicalIndexTests(unittest.TestCase):
                 }
             ],
             source_commit="abc123",
+            eligible_count=3,
+            skipped={"missing_extracted_text": 2},
+            corpus_id="corpus-a",
         )
         raw = dumps_lexical_index(artifact)
         self.assertTrue(raw[:2] == gzip.compress(b"x")[:2] or raw[:2] == b"\x1f\x8b")
         loaded = loads_lexical_index(raw)
         self.assertEqual(len(loaded["docs"]), 1)
         self.assertEqual(loaded["manifest"]["referenceCount"], 1)
+        self.assertEqual(loaded["manifest"]["eligibleCount"], 3)
+        self.assertEqual(loaded["manifest"]["skippedTotal"], 2)
+        self.assertEqual(loaded["manifest"]["skipped"]["missing_extracted_text"], 2)
         self.assertEqual(loaded["manifest"]["chunkCount"], 1)
         self.assertEqual(loaded["manifest"]["sourceCommit"], "abc123")
+        self.assertEqual(loaded["manifest"]["corpusId"], "corpus-a")
 
     def test_atomic_local_write_emits_manifest_sidecar(self):
         artifact = build_lexical_index(
@@ -280,12 +287,16 @@ class LexicalIndexTests(unittest.TestCase):
                 },
             ],
             source_commit="cafebabe",
+            eligible_count=3,
+            skipped={"missing_extracted_text": 1},
         )
         report = audit_lexical_artifact(artifact, {"ref-a", "ref-b", "ref-c"})
         self.assertEqual(report["manifest"]["referenceCount"], 2)
+        self.assertEqual(report["manifest"]["eligibleCount"], 3)
         self.assertEqual(report["liveAcceptedReferenceCount"], 3)
         self.assertEqual(report["manifestDrift"], 1)
-        self.assertTrue(any("diverges from live" in w for w in report["warnings"]))
+        self.assertTrue(report["internallyComplete"])
+        self.assertTrue(any("explained by attrition" in w for w in report["warnings"]))
         self.assertEqual(lexical_manifest_from_artifact(artifact)["sourceCommit"], "cafebabe")
 
     def test_query_without_artifact_stays_semantic_only(self):

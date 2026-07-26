@@ -163,7 +163,14 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         "warnings": [],
         "referenceResults": [],
         "_lexicalDocs": [],
+        "_lexicalSkipReasons": {},
+        "_lexicalEligibleIds": {
+            str(reference.get("lineageId") or reference.get("id") or "")
+            for reference in references
+            if reference.get("lineageId") or reference.get("id")
+        },
     }
+    stats["_lexicalEligibleIds"].discard("")
     insight_messages = _list_insight_messages(services.graph)
     prepared_insights = _prepare_insight_messages(services, insight_messages)
     eligible_insights = [entry for entry in prepared_insights if entry.get("relation") and _insight_body_text(entry)]
@@ -186,7 +193,8 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         missing_insight = sorted(selected_insight_keys - existing_insight_keys)
         stats["missingIndexedInsightMessages"] = len(missing_insight)
         stats["missingIndexedInsightMessageSample"] = missing_insight[:20]
-        stats["lexicalIndex"] = _audit_lexical_index(services, accepted_references)
+        # Audit against the same scoped accepted set the builder would index.
+        stats["lexicalIndex"] = _audit_lexical_index(services, references)
         return stats
 
     if options.action == "rebuild" and existing_keys and not options.dry_run:
@@ -344,6 +352,7 @@ def _consume_prepared_reference(
         stats["referencesPrepared"] += 1
     reference_result["candidateCount"] = len(candidates)
     wrote_any = False
+    lexical_docs_before = len(stats.get("_lexicalDocs") or [])
     for candidate in candidates:
         stats["vectorsPrepared"] += 1
         if candidate["metadata"].get("vectorKind") in {"reference_card", "reference_summary"}:
@@ -376,6 +385,13 @@ def _consume_prepared_reference(
             reference_result["status"] = "skipped_existing"
         elif options.dry_run:
             reference_result["status"] = "prepared"
+    # Attrition accounting for the lexical completeness manifest.
+    if len(stats.get("_lexicalDocs") or []) == lexical_docs_before:
+        skip_reason = str(result.get("status") or "unknown")
+        if skip_reason == "prepared":
+            skip_reason = "no_passage_chunks"
+        reasons = stats.setdefault("_lexicalSkipReasons", {})
+        reasons[skip_reason] = int(reasons.get(skip_reason) or 0) + 1
     stats["referenceResults"].append(reference_result)
     return pending_vectors
 
@@ -1387,19 +1403,38 @@ def _finalize_lexical_index(
     options: VectorIndexOptions,
 ) -> dict[str, Any]:
     docs = list(stats.pop("_lexicalDocs", []) or [])
+    skip_reasons = dict(stats.pop("_lexicalSkipReasons", {}) or {})
+    eligible_ids = set(stats.pop("_lexicalEligibleIds", set()) or set())
+    eligible_count = int(stats.get("referencesScanned") or len(eligible_ids) or 0)
     report: dict[str, Any] = {
         "docsCollected": len(docs),
         "uniqueKeys": len({doc.get("key") for doc in docs if doc.get("key")}),
+        "eligibleCount": eligible_count,
+        "skipped": skip_reasons,
     }
     if not docs:
         report["status"] = "skipped_empty"
         return report
-    artifact = build_lexical_index(docs)
+    artifact = build_lexical_index(
+        docs,
+        eligible_count=eligible_count,
+        skipped=skip_reasons,
+        corpus_id=options.corpus_id or None,
+    )
     inflated = int(artifact.get("inflatedBytes") or 0)
     report["inflatedBytes"] = inflated
     report["builtAt"] = artifact.get("builtAt")
     report["docs"] = len(artifact.get("docs") or [])
-    _progress(f"lexical index built: docs={report['docs']} inflatedBytes={inflated}")
+    report["manifest"] = artifact.get("manifest")
+    _progress(
+        "lexical index built: "
+        f"docs={report['docs']} refs={artifact['manifest'].get('referenceCount')}/"
+        f"{artifact['manifest'].get('eligibleCount')} "
+        f"skipped={artifact['manifest'].get('skippedTotal')} "
+        f"inflatedBytes={inflated}"
+    )
+    if skip_reasons:
+        _progress(f"lexical index skippedByReason: {json.dumps(skip_reasons, sort_keys=True)}")
     if inflated > 50_000_000:
         stats["warnings"].append(
             f"Lexical index inflated size {inflated} exceeds 50MB; revisit storage format if growth continues"
@@ -1413,24 +1448,42 @@ def _finalize_lexical_index(
             report["status"] = "written_local"
             report["path"] = local_path
             report["bytes"] = written
-            return report
-        if options.dry_run:
+        elif options.dry_run:
             report["status"] = "prepared"
-            return report
-        bucket = _storage_bucket_for_services(services)
-        if not bucket:
-            report["status"] = "skipped_no_bucket"
-            stats["warnings"].append("Lexical index built but not written (no storage bucket or local path)")
-            return report
-        written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket)
-        report["status"] = "written_s3"
-        report.update(written)
-        return report
+        else:
+            bucket = _storage_bucket_for_services(services)
+            if not bucket:
+                report["status"] = "skipped_no_bucket"
+                stats["warnings"].append("Lexical index built but not written (no storage bucket or local path)")
+                return report
+            written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket)
+            report["status"] = "written_s3"
+            report.update(written)
     except Exception as exc:  # noqa: BLE001
         report["status"] = "write_failed"
         report["error"] = str(exc)
         stats["warnings"].append(f"Lexical index write failed: {exc}")
         return report
+
+    # Completeness check is part of the build output — do not leave it as a
+    # separate step someone can forget to run against the artifact just written.
+    audit_ids = eligible_ids or {
+        str(doc.get("referenceLineageId") or "")
+        for doc in artifact.get("docs") or []
+        if doc.get("referenceLineageId")
+    }
+    audit_ids.discard("")
+    audit = audit_lexical_artifact(artifact, audit_ids)
+    report["audit"] = audit
+    for warning in audit.get("warnings") or []:
+        _progress(f"lexical audit warning: {warning}")
+        stats["warnings"].append(str(warning))
+    _progress(
+        "lexical audit: "
+        f"indexed={audit.get('uniqueReferences')} eligibleLive={audit.get('liveAcceptedReferenceCount')} "
+        f"drift={audit.get('manifestDrift')} missing={audit.get('missingReferences')}"
+    )
+    return report
 
 
 def _load_lexical_artifact_for_services(services: KnowledgeQueryServices) -> dict[str, Any]:

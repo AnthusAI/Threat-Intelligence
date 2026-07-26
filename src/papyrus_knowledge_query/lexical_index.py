@@ -265,11 +265,17 @@ def build_lexical_index(
     k1: float = DEFAULT_K1,
     b: float = DEFAULT_B,
     source_commit: str | None = None,
+    eligible_count: int | None = None,
+    skipped: dict[str, int] | None = None,
+    corpus_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a chunk-level BM25 artifact from passage documents.
 
     Each document requires: key, text, and optional metadata fields
     (referenceLineageId, chunkIndex, corpusId, curationStatus, title, storagePath).
+
+    ``eligible_count`` / ``skipped`` record build-scope attrition so
+    ``referenceCount`` has a denominator without a live GraphQL query.
     """
     docs: list[dict[str, Any]] = []
     postings: dict[str, list[list[int]]] = {}
@@ -312,12 +318,23 @@ def build_lexical_index(
     built_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     commit = (source_commit if source_commit is not None else _git_source_commit()).strip()
     avgdl = (total_dl / len(docs)) if docs else 0.0
+    skipped_counts = {
+        str(reason): int(count)
+        for reason, count in (skipped or {}).items()
+        if int(count or 0) > 0
+    }
+    indexed_count = len(reference_ids)
+    resolved_eligible = int(eligible_count) if eligible_count is not None else indexed_count + sum(skipped_counts.values())
     manifest = {
         "version": LEXICAL_INDEX_VERSION,
-        "referenceCount": len(reference_ids),
+        "referenceCount": indexed_count,
+        "eligibleCount": resolved_eligible,
+        "skippedTotal": sum(skipped_counts.values()),
+        "skipped": skipped_counts,
         "chunkCount": len(docs),
         "builtAt": built_at,
         "sourceCommit": commit,
+        "corpusId": (corpus_id or "").strip() or None,
     }
     artifact = {
         "version": LEXICAL_INDEX_VERSION,
@@ -710,6 +727,9 @@ def audit_lexical_artifact(
     live_count = len(accepted_reference_lineage_ids)
     manifest_refs = int(manifest.get("referenceCount") or 0)
     manifest_chunks = int(manifest.get("chunkCount") or 0)
+    eligible = int(manifest.get("eligibleCount") or 0)
+    skipped_total = int(manifest.get("skippedTotal") or 0)
+    skipped = manifest.get("skipped") if isinstance(manifest.get("skipped"), dict) else {}
     actual_chunks = len(artifact.get("docs") or [])
     warnings: list[str] = []
     if manifest_refs and manifest_refs != len(refs):
@@ -721,11 +741,28 @@ def audit_lexical_artifact(
             f"Lexical manifest chunkCount={manifest_chunks} disagrees with indexed chunks={actual_chunks}"
         )
     drift = abs(manifest_refs - live_count) if manifest_refs else abs(len(refs) - live_count)
+    internally_complete = bool(
+        eligible
+        and manifest_refs + skipped_total == eligible
+        and skipped_total == sum(int(v or 0) for v in skipped.values())
+    )
     if drift:
-        warnings.append(
-            f"Lexical index reference count diverges from live accepted listing "
-            f"(manifest={manifest_refs or len(refs)}, live={live_count}, drift={drift})"
-        )
+        if internally_complete and live_count == eligible and skipped:
+            warnings.append(
+                f"Lexical index covers {manifest_refs}/{eligible} eligible references; "
+                f"skippedByReason={json.dumps(skipped, sort_keys=True)} "
+                f"(live={live_count}, drift={drift} explained by attrition)"
+            )
+        else:
+            warnings.append(
+                f"Lexical index reference count diverges from live accepted listing "
+                f"(manifest={manifest_refs or len(refs)}, live={live_count}, drift={drift})"
+            )
+            if eligible and manifest_refs + skipped_total != eligible:
+                warnings.append(
+                    f"Lexical manifest is internally incomplete: "
+                    f"referenceCount({manifest_refs})+skippedTotal({skipped_total}) != eligibleCount({eligible})"
+                )
     return {
         "present": True,
         "docs": actual_chunks,
@@ -739,5 +776,6 @@ def audit_lexical_artifact(
         "manifest": manifest,
         "liveAcceptedReferenceCount": live_count,
         "manifestDrift": drift,
+        "internallyComplete": internally_complete,
         "warnings": warnings,
     }
