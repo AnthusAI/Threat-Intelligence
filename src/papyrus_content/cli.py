@@ -140,6 +140,11 @@ from .references_commands import (
     references_list_predictions,
     references_review_classification,
     references_review_curation,
+    references_triage_auto_reject,
+    references_triage_auto_rejects,
+    references_triage_plan,
+    references_triage_reverse_auto_reject,
+    references_triage_review,
     references_unlabel,
 )
 from .catalog import (
@@ -228,6 +233,11 @@ PORTED_COMMANDS = frozenset(
         "references:process-create-accession-assignments",
         "references:process-accession-now",
         "references:review-curation",
+        "references:triage-plan",
+        "references:triage-review",
+        "references:triage-auto-reject",
+        "references:triage-auto-rejects",
+        "references:triage-reverse-auto-reject",
         "references:list-predictions",
         "references:review-classification",
         "references:label",
@@ -427,6 +437,16 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_accession_now(flags)
     elif route == "references:review-curation":
         references_review_curation(flags)
+    elif route == "references:triage-plan":
+        references_triage_plan(flags)
+    elif route == "references:triage-review":
+        references_triage_review(flags)
+    elif route == "references:triage-auto-reject":
+        references_triage_auto_reject(flags)
+    elif route == "references:triage-auto-rejects":
+        references_triage_auto_rejects(flags)
+    elif route == "references:triage-reverse-auto-reject":
+        references_triage_reverse_auto_reject(flags)
     elif route == "references:list-predictions":
         references_list_predictions(flags)
     elif route == "references:review-classification":

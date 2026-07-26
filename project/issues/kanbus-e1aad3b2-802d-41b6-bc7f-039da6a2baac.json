@@ -1,0 +1,20 @@
+{
+  "id": "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac",
+  "title": "load_dotenv silently overrides GraphQL endpoint from .env",
+  "description": "## Problem\n`papyrus_content.env.load_dotenv()` used to force-overwrite `PAPYRUS_GRAPHQL_ENDPOINT` (and JWT) from `.env` even when the process already exported a different endpoint. That silently rewrote TI reader production (`ur2anu…`) back to ryan-sandbox (`nkqutx…`).\n\nFailure mode is silent: measure/mutate against the wrong AppSync with a JWT that may 401 or, worse, succeed against the wrong environment.\n\nSurfaced during assisted curation triage (`kanbus-1f97c7`) when full-queue plan runs had to force TI production after dotenv.\n\n## Partial fix already landed (epic branch)\nOn `epic/assisted-curation-triage`, `PAPYRUS_GRAPHQL_ENDPOINT` was removed from `_DOTENV_OVERRIDE_KEYS` so an explicit process export wins. JWT/TTL still override (refresh-into-.env workflow). Unit test covers endpoint non-override.\n\n## Remaining work\n- Audit other callers / docs that assume dotenv always wins for endpoint\n- Consider printing active endpoint + host nickname (sandbox vs TI prod vs Papyrus main) at CLI start for mutating commands\n- Decide whether `.env.local` should be the only override path for endpoint switches",
+  "type": "bug",
+  "status": "open",
+  "priority": 1,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
+  "labels": [
+    "tooling"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-25T21:36:08.556316Z",
+  "updated_at": "2026-07-25T21:36:12.990467Z",
+  "closed_at": null,
+  "custom": {}
+}

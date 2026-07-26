@@ -21,16 +21,21 @@ def resolve_papyrus_root() -> Path:
 
 PAPYRUS_ROOT = resolve_papyrus_root()
 BIBLICUS_ROOT = Path(os.environ.get("BIBLICUS_WORKDIR", str(PAPYRUS_ROOT.parent / "Biblicus")))
-# Auth settings that must all come from the same place. A JWT is minted against
-# one endpoint's authorizer using one signing secret; mixing sources yields a
-# token that is valid but sent to the wrong environment, which fails as a 401
-# that looks like a broken setup rather than a misconfiguration. `load_dotenv`
-# therefore treats these as a single group: if the endpoint is explicitly
-# exported, `.env` supplies none of them; otherwise `.env` supplies all of them
-# (which is what makes `auth refresh-jwt --write-env .env` work).
+# Auth settings that must all resolve from the same place. A JWT is minted
+# against one endpoint's authorizer using one signing secret, so a mixed source
+# yields a valid token sent to the wrong environment -- a 401 that reads as a
+# broken setup rather than a misconfiguration, or worse, a silent success
+# against the wrong data.
+#
+# PAPYRUS_GRAPHQL_ENDPOINT is deliberately NOT a member: an explicit export must
+# always win, and `skip_auth_override` below already keys off it. Membership
+# here means ".env may override a shell value", which is what makes
+# `auth refresh-jwt --write-env .env` work for the token and its inputs.
+#
+# Net effect: export the endpoint and .env supplies none of these; export
+# nothing and .env supplies all of them.
 _DOTENV_OVERRIDE_KEYS = frozenset({
     "PAPYRUS_GRAPHQL_JWT",
-    "PAPYRUS_GRAPHQL_ENDPOINT",
     "PAPYRUS_JWT_TTL_SECONDS",
     "PAPYRUS_JWT_SECRET_SSM_PARAM",
     "PAPYRUS_JWT_SECRET",

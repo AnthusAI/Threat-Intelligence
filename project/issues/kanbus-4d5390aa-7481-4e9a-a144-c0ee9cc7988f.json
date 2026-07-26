@@ -1,0 +1,18 @@
+{
+  "id": "kanbus-4d5390aa-7481-4e9a-a144-c0ee9cc7988f",
+  "title": "Newsroom UI for assisted curation triage review",
+  "description": "## Context\nEpic kanbus-1f97c7 shipped a CLI-first assisted triage loop (`references triage-plan|triage-review|triage-auto-reject|triage-auto-rejects|triage-reverse-auto-reject`).\n\n## Goal\nAdd a Newsroom desk surface for the same three-lane queue: rationale-first cards, cluster siblings, keyboard accept/reject/skip, lane filters, and session metrics. Must reuse the same plan/guarantees (no auto-accept; mechanical auto-rejects only via the logged path).\n\n## Acceptance\n- Operator can complete a review session without leaving Newsroom\n- Accept still requires explicit human action\n- Shows the same lane/rationale/cluster contract as the CLI plan JSON",
+  "type": "story",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
+  "labels": [],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-25T18:05:17.012443Z",
+  "updated_at": "2026-07-25T18:05:17.012443Z",
+  "closed_at": null,
+  "custom": {}
+}

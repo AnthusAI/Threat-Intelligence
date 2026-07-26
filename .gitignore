@@ -20,6 +20,8 @@ corpora/*
 !corpora/papyrus-required-procedures.json
 .papyrus-runs/
 .papyrus/
+# Symlink or file form of local Papyrus config (worktrees often symlink to the main clone).
+.papyrus
 videoml-work/
 .videoml/
 public/videoml/
