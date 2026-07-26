@@ -1,0 +1,21 @@
+{
+  "id": "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e",
+  "title": "55 accepted references have no extracted text and cannot be retrieved",
+  "description": "The hybrid-lexical build surfaced 55 accepted references in `knowledge-corpus-ai-ml-research` with no `extracted_text` attachment — 4% of that corpus.\n\nThey were correctly skipped by the lexical builder, and the same extractability gate applies to vector passages. So these references are **accepted, evidence-eligible in principle, and unfindable by either retriever in practice.** A human decided they belonged in the corpus and the system cannot surface them.\n\n## Why this matters more than it looks\n\nThis is not a lexical-index defect — the builder did the right thing and now records it in the manifest. It is a corpus-health gap that was invisible until an index build counted it.\n\nThe curation gate is the editorial guarantee: accepted means a person chose this source. A reference that passes that gate but can never be retrieved quietly breaks the guarantee, because the publication cannot cite what it cannot find. It also means every retrieval metric in this initiative was computed over a denominator 4% smaller than the accepted corpus, without anyone knowing.\n\n## What to determine\n\n1. **Why they lack extracted text.** Likely a mix: accession failures, unsupported media types, sources that were already dead by the time extraction ran, PDFs GROBID could not parse. Classify them — the counts will point at the fix.\n2. **Whether they are recoverable.** For any with a live `sourceUri` or an archived `role=\"source\"` attachment, re-running extraction may be enough. Those are cheap wins.\n3. **Whether the number is growing.** A one-time historical residue is very different from an ongoing leak in the accession path. Check when these references were accepted.\n4. **Whether accession should fail loudly.** If extraction fails, the reference currently proceeds to accepted with no retrievable text and nothing signals it. Recording an explicit state — or surfacing a \"accepted but not retrievable\" count in a routine report — would stop the next 55 accumulating silently.\n\n## Related\n\n- `kanbus-ea1686` covers 3 references blocked at canonical-source resolution — a different failure, same family.\n- The end-to-end ingestion exercise (`TI-c46828`) will run accession on fresh sources and may reproduce the cause directly, which would be the fastest route to a diagnosis.\n\nNot urgent. But worth doing before the corpus grows, since the same gap at ten times the volume is 550 references nobody can retrieve.",
+  "type": "bug",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "ingestion",
+    "corpus-health"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-26T19:44:38.117012Z",
+  "updated_at": "2026-07-26T19:44:38.117012Z",
+  "closed_at": null,
+  "custom": {}
+}

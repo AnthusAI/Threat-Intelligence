@@ -19,10 +19,16 @@
       "author": "ryan",
       "text": "During the retrieval evaluation harness implementation, we discovered that evaluating against realistic data requires a populated vector index and corresponding corpus data. Because the sandbox lacked this data, we ended up performing ad-hoc bulk copies of production corpus data and forcing vector index rebuilds. This gap needs to be addressed so future evaluations don't rely on moving production data. We should establish a documented, repeatable way to point the harness at a known environment (e.g. a seeded sandbox, a documented read-only production procedure, or a small fixture corpus in the repo).",
       "created_at": "2026-07-25T22:45:51.450983Z"
+    },
+    {
+      "id": "5841e272-04b0-419c-a2d1-ded4f25ef050",
+      "author": "ryan",
+      "text": "Golden-set defect found during the age-decay epic (kanbus-bb12d3): the `freshness` category does not test what its name implies.\n\nFour of its five queries return the expected reference at rank 1, so there is no ordering for a recency signal to influence. The fifth (`q-fresh-4`) is `rank=-1` — not retrieved at all — so it is a recall failure a tie-breaker cannot reach.\n\nA category meant to test stale-vs-fresh preference needs cases where **both** a stale and a fresh reference are retrievable and relevant, and only their relative order is in question. As built, the category cannot validate any ranking-order change.\n\nThis is the second acceptance criterion in this initiative set against an instrument that could not observe the change (the first: passage scoring measured against a golden set that scores reference rank). When this epic is picked up, the general fix is worth stating: **a golden query is only useful for validating a change if the change can, in principle, alter its result.** Categories should be designed against the mechanism they test, not named after the intuition.",
+      "created_at": "2026-07-26T20:52:57.196142Z"
     }
   ],
   "created_at": "2026-07-25T22:45:45.158486Z",
-  "updated_at": "2026-07-26T00:34:05.791850Z",
+  "updated_at": "2026-07-26T20:52:57.196142Z",
   "closed_at": null,
   "custom": {
     "project_label": "TI",

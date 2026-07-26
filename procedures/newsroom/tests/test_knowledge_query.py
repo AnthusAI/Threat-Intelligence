@@ -23,8 +23,12 @@ from papyrus_knowledge_query.engine import (
 from papyrus_knowledge_query.lambda_handler import handler as lambda_handler
 from papyrus_knowledge_query.ranking import (
     allocate_token_budgets,
+    epoch_day_from_value,
+    normalize_ranking_config,
     quality_score_from_rating,
     quality_signal_from_relations,
+    recency_score,
+    score_record,
     select_records_by_diversity,
 )
 from papyrus_knowledge_query.services import KnowledgeQueryServices, S3VectorsProvider, diversify_vector_matches, relation_allowed_for_scope
@@ -2002,6 +2006,114 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertIn("d41d8cd98f00b204e9800998ecf8427e", tokens)
         self.assertIn("example.com", tokens)
         self.assertIn("192.0.2.1", tokens)
+
+    def test_recency_decay_math_and_missing_date_neutral(self):
+        self.assertAlmostEqual(recency_score(0, 180), 1.0)
+        self.assertAlmostEqual(recency_score(180, 180), 0.5)
+        self.assertAlmostEqual(recency_score(360, 180), 0.25)
+        self.assertEqual(recency_score(None, 180), 0.5)
+        self.assertEqual(recency_score(-10, 180), 1.0)  # future clamped to age 0
+        day = epoch_day_from_value("2024-01-15T00:00:00Z")
+        self.assertEqual(day, epoch_day_from_value("2024-01-15T00:00:00"))
+        self.assertIsNotNone(day)
+
+    def test_recency_weights_renormalize_with_half_life_override(self):
+        from papyrus_knowledge_query.ranking import DEFAULT_WEIGHTS
+
+        warnings: list[str] = []
+        config = normalize_ranking_config(
+            {"ranking": {"weights": {"recency": 0.10}, "recencyHalfLifeDays": 90}},
+            warnings,
+        )
+        self.assertAlmostEqual(sum(config["weights"].values()), 1.0, places=6)
+        self.assertLessEqual(config["weights"]["recency"], 0.10 + 1e-9)
+        self.assertEqual(config["recencyHalfLifeDays"], 90.0)
+        self.assertLessEqual(DEFAULT_WEIGHTS["recency"], 0.10 + 1e-9)
+        self.assertIn("recency", DEFAULT_WEIGHTS)
+
+    def test_newer_reference_wins_when_relevance_and_quality_tie(self):
+        ranking_config = normalize_ranking_config({}, [])
+        older = score_record(
+            {
+                "lineageId": "reference-old",
+                "score": 0.8,
+                "sourcePublishedAtDay": epoch_day_from_value("2020-01-01T00:00:00Z"),
+            },
+            ranking_config=ranking_config,
+            relevance_score=0.8,
+        )
+        newer = score_record(
+            {
+                "lineageId": "reference-new",
+                "score": 0.8,
+                "sourcePublishedAtDay": epoch_day_from_value("2024-06-01T00:00:00Z"),
+            },
+            ranking_config=ranking_config,
+            relevance_score=0.8,
+        )
+        self.assertEqual(older["relevanceScore"], newer["relevanceScore"])
+        self.assertEqual(older["qualityScore"], newer["qualityScore"])
+        self.assertGreater(newer["recencyScore"], older["recencyScore"])
+        self.assertGreater(newer["finalScore"], older["finalScore"])
+        missing = score_record(
+            {"lineageId": "reference-undated", "score": 0.8},
+            ranking_config=ranking_config,
+            relevance_score=0.8,
+        )
+        self.assertFalse(missing["recencyKnown"])
+        self.assertEqual(missing["recencyScore"], 0.5)
+
+    def test_vector_date_metadata_survives_normalization_allowlist(self):
+        """Guard: date keys must be allowlisted in _normalize_semantic_matches."""
+        from datetime import datetime, timedelta, timezone
+
+        # Recent enough that decay stays above the missing-date neutral 0.5.
+        published_day = epoch_day_from_value(
+            (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+
+        class DatedVectorProvider:
+            name = "fake-dated-vector"
+
+            def search(self, query, scope, limit):
+                return [
+                    {
+                        "rank": 1,
+                        "score": 12.0,
+                        "kind": "reference",
+                        "id": "reference-dated-v1",
+                        "lineageId": "reference-dated",
+                        "title": "Dated Paper",
+                        "metadata": {
+                            "kind": "reference",
+                            "id": "reference-dated-v1",
+                            "lineageId": "reference-dated",
+                            "referenceLineageId": "reference-dated",
+                            "title": "Dated Paper",
+                            "sourcePublishedAtDay": published_day,
+                            "sourceUpdatedAtDay": published_day,
+                            "text": "body " * 40,
+                            "storagePath": "corpora/x/extracted.txt",
+                            "chunkIndex": 0,
+                            "startChar": 0,
+                            "endChar": 100,
+                            "vectorKind": "reference_passage",
+                        },
+                    }
+                ][:limit]
+
+        result = run_knowledge_query(
+            {
+                "semanticQuery": "dated paper",
+                "scope": {"topK": 3, "relatedRecordLimit": 3, "semanticSearch": True},
+                "output": {"format": "structured"},
+            },
+            KnowledgeQueryServices(semantic=DatedVectorProvider(), graph=None, corpus_text=None),
+        )
+        match = result["structured"]["semanticMatches"][0]
+        self.assertEqual(match.get("sourcePublishedAtDay"), published_day)
+        self.assertTrue(match["ranking"]["recencyKnown"])
+        self.assertGreater(match["ranking"]["recencyScore"], 0.5)
 
 
 if __name__ == "__main__":
