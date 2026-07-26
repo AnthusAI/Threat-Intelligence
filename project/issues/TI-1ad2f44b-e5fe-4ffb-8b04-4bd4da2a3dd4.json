@@ -1,0 +1,18 @@
+{
+  "id": "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4",
+  "title": "process-research-now reports curationAssignmentCount=0 after registering prospects",
+  "description": "## Observed\n\n`process-research-now --json` returned `registeredReferenceCount: 18` and `curationAssignmentCount: 0`.\n\nSkill contract (`skills/newsroom-research-workflow/SKILL.md`) says the handoff creates curation assignments for pending prospects.\n\n## Expected\n\nNon-zero curation assignment count, or an explicit documented reason when skipped.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
+  "type": "bug",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+  "labels": [],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-26T20:02:23.043262Z",
+  "updated_at": "2026-07-26T20:02:23.043262Z",
+  "closed_at": null,
+  "custom": {}
+}

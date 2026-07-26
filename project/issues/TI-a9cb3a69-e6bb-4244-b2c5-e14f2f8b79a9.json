@@ -1,0 +1,18 @@
+{
+  "id": "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9",
+  "title": "process-research-now drops registration_note; Reference.metadata stays null",
+  "description": "## Observed (TI-c46828 E2E)\n\n`assignments process-research-now` registered 18 pending references from a research packet catalog.\n\nCatalog items include `metadata.registration_note` (ingestion rationale text). Live `Reference` rows for those ids have `metadata: null` and no other rationale field.\n\n## Expected\n\nIngestion rationale from proposedReferences / catalog metadata is preserved on the pending Reference so triage and operators can see why it was proposed without opening the research packet.\n\n## Evidence\n\n- Assignment: `assignment-research-e2e-ingestion-exercise-ai-agent-tool-use-security-advisories-and-html-primary-so-20260726T193857938451Z`\n- Catalog under `.papyrus-runs/research-proposals-*/research-proposals-catalog.json`\n- Sample ref: `reference-knowledge-corpus-threat-intelligence-research-proposal-5e968ae0d3bbadbf-v1`",
+  "type": "bug",
+  "status": "open",
+  "priority": 1,
+  "assignee": null,
+  "creator": null,
+  "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+  "labels": [],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-26T20:02:23.028830Z",
+  "updated_at": "2026-07-26T20:02:23.028830Z",
+  "closed_at": null,
+  "custom": {}
+}
