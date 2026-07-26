@@ -7,59 +7,26 @@ from typing import Any
 
 QUALITY_RELATION_KEYS = {"quality_rating_is"}
 QUALITY_NODE_RE = re.compile(r"quality\.rating\.(\d)_star$")
-VALID_RANKING_PROFILES = {"balanced", "relevance_first", "quality_forward"}
-VALID_DIVERSITY_PROFILES = {"focused", "balanced", "broad"}
 
-PROFILE_WEIGHTS = {
-    "balanced": {"relevance": 0.70, "quality": 0.25, "graphContext": 0.05},
-    "relevance_first": {"relevance": 0.85, "quality": 0.10, "graphContext": 0.05},
-    "quality_forward": {"relevance": 0.55, "quality": 0.40, "graphContext": 0.05},
+# Former balanced profile weights with graphContext removed, then renormalized.
+DEFAULT_WEIGHTS = {
+    "relevance": 0.70 / 0.95,
+    "quality": 0.25 / 0.95,
 }
 
-DIVERSITY_PROFILES = {
-    "focused": {
-        "description": "Prioritize depth from the top-ranked sources.",
-        "sourceFloorRatio": 0.30,
-        "maxSourceMultiplier": 8.0,
-        "passageRepeatCap": 4,
-        "seeAlsoMinTokens": 45,
-        "seeAlsoMaxTokens": 180,
-        "uniqueFirst": False,
-    },
-    "balanced": {
-        "description": "Balance top-source depth with source spread.",
-        "sourceFloorRatio": 0.50,
-        "maxSourceMultiplier": 3.0,
-        "passageRepeatCap": 3,
-        "seeAlsoMinTokens": 40,
-        "seeAlsoMaxTokens": 120,
-        "uniqueFirst": True,
-    },
-    "broad": {
-        "description": "Favor smaller slices from more unique sources.",
-        "sourceFloorRatio": 0.72,
-        "maxSourceMultiplier": 1.6,
-        "passageRepeatCap": 1,
-        "seeAlsoMinTokens": 30,
-        "seeAlsoMaxTokens": 80,
-        "uniqueFirst": True,
-    },
-}
+# Former balanced diversity constants (focused/broad profiles deleted).
+SOURCE_FLOOR_RATIO = 0.50
+MAX_SOURCE_MULTIPLIER = 3.0
+PASSAGE_REPEAT_CAP = 3
+SEE_ALSO_MIN_TOKENS = 40
+SEE_ALSO_MAX_TOKENS = 120
 
 
 def normalize_ranking_config(input: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
     raw = input.get("ranking") if isinstance(input.get("ranking"), dict) else {}
-    profile = str(raw.get("profile") or "balanced").strip()
-    if profile not in VALID_RANKING_PROFILES:
-        warnings.append(f"Unknown ranking.profile '{profile}', using balanced")
-        profile = "balanced"
-    diversity = str(raw.get("diversity") or "balanced").strip()
-    if diversity not in VALID_DIVERSITY_PROFILES:
-        warnings.append(f"Unknown ranking.diversity '{diversity}', using balanced")
-        diversity = "balanced"
-    weights = dict(PROFILE_WEIGHTS[profile])
+    weights = dict(DEFAULT_WEIGHTS)
     raw_weights = raw.get("weights") if isinstance(raw.get("weights"), dict) else {}
-    for key in ("relevance", "quality", "graphContext"):
+    for key in ("relevance", "quality"):
         if key not in raw_weights:
             continue
         try:
@@ -68,8 +35,8 @@ def normalize_ranking_config(input: dict[str, Any], warnings: list[str]) -> dict
             warnings.append(f"ranking.weights.{key} must be numeric; using default")
     total = sum(weights.values())
     if total <= 0:
-        warnings.append("ranking.weights must not all be zero; using balanced defaults")
-        weights = dict(PROFILE_WEIGHTS["balanced"])
+        warnings.append("ranking.weights must not all be zero; using defaults")
+        weights = dict(DEFAULT_WEIGHTS)
         total = sum(weights.values())
     weights = {key: value / total for key, value in weights.items()}
     try:
@@ -78,9 +45,6 @@ def normalize_ranking_config(input: dict[str, Any], warnings: list[str]) -> dict
         warnings.append("ranking.missingQuality must be numeric; using 0.5")
         missing_quality = 0.5
     return {
-        "profile": profile,
-        "diversity": diversity,
-        "diversityConfig": dict(DIVERSITY_PROFILES[diversity]),
         "weights": weights,
         "missingQuality": clamp01(missing_quality),
         "relevanceGate": 0.18,
@@ -238,21 +202,16 @@ def score_record(
     *,
     ranking_config: dict[str, Any],
     semantic_query: str = "",
-    graph_context_score: float = 0.0,
     relevance_score: float | None = None,
 ) -> dict[str, Any]:
-    weights = ranking_config.get("weights") or PROFILE_WEIGHTS["balanced"]
+    weights = ranking_config.get("weights") or DEFAULT_WEIGHTS
     quality = quality_signal_from_object(record, float(ranking_config.get("missingQuality", 0.5)))
     relevance = relevance_score if relevance_score is not None else relevance_score_from_record(record, semantic_query)
-    graph_context = clamp01(graph_context_score)
     final_score = (
-        float(weights.get("relevance", 0.7)) * clamp01(relevance)
-        + float(weights.get("quality", 0.25)) * clamp01(quality["qualityScore"])
-        + float(weights.get("graphContext", 0.05)) * graph_context
+        float(weights.get("relevance", DEFAULT_WEIGHTS["relevance"])) * clamp01(relevance)
+        + float(weights.get("quality", DEFAULT_WEIGHTS["quality"])) * clamp01(quality["qualityScore"])
     )
     return {
-        "profile": ranking_config.get("profile", "balanced"),
-        "diversity": ranking_config.get("diversity", "balanced"),
         "relevanceScore": round(clamp01(relevance), 4),
         "qualityScore": round(clamp01(quality["qualityScore"]), 4),
         "qualityRating": quality.get("qualityRating"),
@@ -260,7 +219,6 @@ def score_record(
         "qualitySource": quality.get("qualitySource"),
         "qualityRelationId": quality.get("qualityRelationId"),
         "qualityObjectLineageId": quality.get("qualityObjectLineageId"),
-        "graphContextScore": round(graph_context, 4),
         "finalScore": round(clamp01(final_score), 4),
         "weights": weights,
     }
@@ -287,7 +245,6 @@ def allocate_token_budgets(
     *,
     min_tokens: int,
     max_tokens: int,
-    diversity: str = "balanced",
 ) -> dict[str, int]:
     if not records or total_budget <= 0:
         return {}
@@ -295,16 +252,15 @@ def allocate_token_budgets(
     key_values = [(key, value) for key, value in key_values if key]
     if not key_values:
         return {}
-    diversity_config = DIVERSITY_PROFILES.get(diversity, DIVERSITY_PROFILES["balanced"])
     source_count = len(key_values)
     floor_tokens = _diversity_floor_tokens(
         total_budget,
         source_count,
         min_tokens,
         max_tokens,
-        float(diversity_config["sourceFloorRatio"]),
+        SOURCE_FLOOR_RATIO,
     )
-    max_tokens = _diversity_max_tokens(floor_tokens, max_tokens, float(diversity_config["maxSourceMultiplier"]))
+    max_tokens = _diversity_max_tokens(floor_tokens, max_tokens, MAX_SOURCE_MULTIPLIER)
     if total_budget <= floor_tokens * source_count:
         floor = max(1, total_budget // source_count)
         return {key: floor for key, _ in key_values}
@@ -326,12 +282,11 @@ def allocate_token_budgets(
     return budgets
 
 
-def select_records_by_diversity(records: list[dict[str, Any]], limit: int, diversity: str = "balanced") -> list[dict[str, Any]]:
+def select_records_by_diversity(records: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Select up to ``limit`` records, unique sources first (former balanced behavior)."""
     if limit <= 0:
         return []
     ordered = sorted(records, key=ranking_sort_key)
-    if diversity == "focused":
-        return ordered[:limit]
     selected: list[dict[str, Any]] = []
     selected_indexes: set[int] = set()
     seen_sources: set[str] = set()

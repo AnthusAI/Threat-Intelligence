@@ -894,22 +894,20 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual([match["lineageId"] for match in diversified], ["ref-a", "ref-b", "ref-c"])
         self.assertEqual([match["rank"] for match in diversified], [1, 2, 3])
 
-    def test_broad_s3_vector_search_queries_new_and_legacy_insight_vector_kinds(self):
+    def test_s3_vector_search_uses_single_unfiltered_query(self):
         provider = S3VectorsProvider(vector_index_arn="arn:test:index")
         queried_kinds = []
 
         def fake_query(_vector, _scope, _query_limit, vector_kind=None):
             queried_kinds.append(vector_kind)
-            return []
+            return [{"lineageId": "ref-a", "metadata": {"referenceLineageId": "ref-a"}, "providerRank": 1}]
 
         with mock.patch.object(provider, "_embed", return_value=[0.1, 0.2, 0.3]), \
              mock.patch.object(provider, "_query_vectors", side_effect=fake_query):
-            provider.search("evaluation", {"rankingDiversity": "broad"}, 5)
+            matches = provider.search("evaluation", {}, 5)
 
-        self.assertIn("reference_summary", queried_kinds)
-        self.assertIn("insight_source", queried_kinds)
-        self.assertIn("insight_summary", queried_kinds)
-        self.assertIn("insight_passage", queried_kinds)
+        self.assertEqual(queried_kinds, [None])
+        self.assertEqual(len(matches), 1)
 
     def test_s3_vector_filter_can_target_explicit_chat_detail(self):
         provider = S3VectorsProvider(vector_index_arn="arn:test:index")
@@ -1039,8 +1037,9 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(result["context"]["tokenizer"]["encoding"], "o200k_base")
         self.assertEqual(result["debug"]["tokenizerProvider"], "tiktoken")
         self.assertEqual(result["debug"]["tokenizerEncoding"], "o200k_base")
-        self.assertEqual(result["structured"]["request"]["ranking"]["diversity"], "balanced")
-        self.assertEqual(result["debug"]["diversityProfile"], "balanced")
+        self.assertIn("weights", result["structured"]["request"]["ranking"])
+        self.assertNotIn("diversity", result["structured"]["request"]["ranking"])
+        self.assertNotIn("diversityProfile", result["debug"])
         self.assertEqual(result["debug"]["vectorDiversification"], "source_round_robin")
         self.assertTrue(any(stage["name"] == "semantic_search" for stage in result["debug"]["stageTimings"]))
         self.assertIn("semanticUniqueSourceCount", result["debug"])
@@ -1076,34 +1075,6 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertEqual(by_uri["structured"]["anchors"][0]["kind"], explicit["structured"]["anchors"][0]["kind"])
         self.assertEqual(by_uri["structured"]["anchors"][0]["lineageId"], explicit["structured"]["anchors"][0]["lineageId"])
         self.assertEqual(by_uri["structured"]["anchors"][0]["objectUri"], "papyrus://category/category-scaling")
-
-    def test_unknown_diversity_warns_and_falls_back_to_balanced(self):
-        result = run_knowledge_query(
-            {
-                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
-                "ranking": {"diversity": "wide"},
-                "output": {"format": "structured"},
-            },
-            fake_services(),
-        )
-
-        self.assertEqual(result["structured"]["request"]["ranking"]["diversity"], "balanced")
-        self.assertTrue(any("Unknown ranking.diversity" in warning for warning in result["warnings"]))
-
-    def test_broad_diversity_warns_when_semantic_source_spread_is_not_satisfied(self):
-        result = run_knowledge_query(
-            {
-                "semanticQuery": "evaluation",
-                "ranking": {"diversity": "broad"},
-                "scope": {"topK": 5, "relatedRecordLimit": 8, "semanticSeedLimit": 0},
-                "output": {"format": "structured"},
-            },
-            KnowledgeQueryServices(graph=None, semantic=FakeVectorSemanticProvider(), corpus_text=None),
-        )
-
-        self.assertEqual(result["debug"]["semanticUniqueSourceCount"], 2)
-        self.assertEqual(result["debug"]["semanticSourceTarget"], 5)
-        self.assertTrue(any("Broad diversity requested" in warning for warning in result["warnings"]))
 
     def test_output_tokenizer_model_override_is_reported(self):
         result = run_knowledge_query(
@@ -1636,30 +1607,6 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertNotIn("reference-irrelevant", {record["lineageId"] for record in related})
         self.assertNotIn("quality_rating_is", result["context"]["text"])
 
-    def test_ranking_profiles_change_related_record_order(self):
-        services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
-        relevance_first = run_knowledge_query(
-            {
-                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
-                "semanticQuery": "production reliability evaluation for agents",
-                "ranking": {"profile": "relevance_first"},
-                "scope": {"topK": 2, "relatedRecordLimit": 2},
-            },
-            services,
-        )
-        quality_forward = run_knowledge_query(
-            {
-                "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
-                "semanticQuery": "production reliability evaluation for agents",
-                "ranking": {"profile": "quality_forward"},
-                "scope": {"topK": 2, "relatedRecordLimit": 2},
-            },
-            services,
-        )
-
-        self.assertEqual(relevance_first["structured"]["relatedRecords"][0]["lineageId"], "reference-low")
-        self.assertEqual(quality_forward["structured"]["relatedRecords"][0]["lineageId"], "reference-high")
-
     def test_see_also_token_budgets_follow_ranking(self):
         services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
         result = run_knowledge_query(
@@ -1676,80 +1623,46 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertGreaterEqual(related[0]["ranking"]["tokenBudget"], related[1]["ranking"]["tokenBudget"])
         self.assertLessEqual(result["context"]["totalTokens"], 500)
 
-    def test_diversity_profile_changes_source_token_budgets(self):
+    def test_allocate_token_budgets_prefers_higher_ranked_sources(self):
         records = [
             {"lineageId": "reference-a", "ranking": {"finalScore": 0.95}},
             {"lineageId": "reference-b", "ranking": {"finalScore": 0.55}},
             {"lineageId": "reference-c", "ranking": {"finalScore": 0.35}},
         ]
 
-        focused = allocate_token_budgets(records, 360, min_tokens=60, max_tokens=320, diversity="focused")
-        broad = allocate_token_budgets(records, 360, min_tokens=90, max_tokens=180, diversity="broad")
+        budgets = allocate_token_budgets(records, 360, min_tokens=60, max_tokens=320)
 
-        self.assertGreater(focused["reference-a"], broad["reference-a"])
-        self.assertLess(max(broad.values()) - min(broad.values()), max(focused.values()) - min(focused.values()))
+        self.assertGreaterEqual(budgets["reference-a"], budgets["reference-b"])
+        self.assertGreaterEqual(budgets["reference-b"], budgets["reference-c"])
+        self.assertEqual(sum(budgets.values()), 360)
 
-    def test_broad_diversity_selects_unique_sources_before_repeats(self):
+    def test_select_records_prefers_unique_sources_before_repeats(self):
         records = [
             {"id": "a-1", "lineageId": "reference-a", "ranking": {"finalScore": 0.99, "relevanceScore": 0.99, "qualityScore": 0.5}},
             {"id": "a-2", "lineageId": "reference-a", "ranking": {"finalScore": 0.98, "relevanceScore": 0.98, "qualityScore": 0.5}},
             {"id": "b-1", "lineageId": "reference-b", "ranking": {"finalScore": 0.82, "relevanceScore": 0.82, "qualityScore": 0.5}},
         ]
 
-        focused = select_records_by_diversity(records, 2, "focused")
-        broad = select_records_by_diversity(records, 2, "broad")
+        selected = select_records_by_diversity(records, 2)
 
-        self.assertEqual([record["id"] for record in focused], ["a-1", "a-2"])
-        self.assertEqual([record["id"] for record in broad], ["a-1", "b-1"])
+        self.assertEqual([record["id"] for record in selected], ["a-1", "b-1"])
 
-    def test_see_also_diversity_changes_summary_budget(self):
-        services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=QualityTieSemanticProvider())
-        base_payload = {
-            "anchors": [{"kind": "category", "id": "category-scaling-v1", "lineageId": "category-scaling"}],
-            "semanticQuery": "production reliability evaluation for agents",
-            "scope": {"topK": 2, "relatedRecordLimit": 2},
-            "output": {"format": "markdown", "maxTokens": 500, "seeAlsoMaxTokens": 180},
-        }
-        focused = run_knowledge_query({**base_payload, "ranking": {"diversity": "focused"}}, services)
-        broad = run_knowledge_query({**base_payload, "ranking": {"diversity": "broad"}}, services)
-
-        focused_budget = focused["structured"]["relatedRecords"][0]["ranking"]["tokenBudget"]
-        broad_budget = broad["structured"]["relatedRecords"][0]["ranking"]["tokenBudget"]
-        self.assertGreater(focused_budget, broad_budget)
-        self.assertEqual(focused["structured"]["relatedRecords"][0]["ranking"]["diversity"], "focused")
-        self.assertEqual(broad["structured"]["relatedRecords"][0]["ranking"]["diversity"], "broad")
-
-    def test_broad_diversity_caps_repeated_semantic_passages_per_source(self):
+    def test_passage_repeat_cap_limits_evidence_per_source(self):
         services = KnowledgeQueryServices(graph=None, semantic=RepeatedChunkSemanticProvider(), corpus_text=None)
-        focused = run_knowledge_query(
+        result = run_knowledge_query(
             {
                 "semanticQuery": "model evaluation",
-                "ranking": {"diversity": "focused"},
-                "scope": {"topK": 5},
-                "output": {"format": "both", "maxTokens": 800, "maxPassages": 5, "maxPassageTokens": 120},
-            },
-            services,
-        )
-        broad = run_knowledge_query(
-            {
-                "semanticQuery": "model evaluation",
-                "ranking": {"diversity": "broad"},
                 "scope": {"topK": 5},
                 "output": {"format": "both", "maxTokens": 800, "maxPassages": 5, "maxPassageTokens": 120},
             },
             services,
         )
 
-        focused_a = [
-            passage for passage in focused["structured"]["evidencePassages"]
+        passages_a = [
+            passage for passage in result["structured"]["evidencePassages"]
             if passage.get("referenceLineageId") == "reference-a"
         ]
-        broad_a = [
-            passage for passage in broad["structured"]["evidencePassages"]
-            if passage.get("referenceLineageId") == "reference-a"
-        ]
-        self.assertGreater(len(focused_a), len(broad_a))
-        self.assertEqual(len(broad_a), 1)
+        self.assertLessEqual(len(passages_a), 3)
 
     def test_core_renders_appsync_awsjson_metadata_strings(self):
         services = KnowledgeQueryServices(graph=FakeGraphProvider(), semantic=FakeSemanticProvider())
