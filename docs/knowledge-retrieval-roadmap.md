@@ -179,17 +179,20 @@ body text. A query for an exact identifier — a CVE ID, a file hash, a domain �
 is served purely by embedding similarity, which is exactly the case Cerebras
 found embeddings blur.
 
-**Passage scoring still carries boosts from a prior corpus.**
-`_passage_score` (`src/papyrus_knowledge_query/engine.py:2994`) and
-`PASSAGE_HEADING_BOOSTS` (`engine.py:43`) were tuned for an AI/ML-research
-corpus: boosts for tokens like "reliability", "evaluation", "agents",
-"practitioners" (`engine.py:3011`), penalties for "uc berkeley" and
-"ibm research" (`engine.py:2999`), heading boosts for "abstract" and
-"introduction". Threat-intel report structure — "Executive Summary",
-"Key Judgments", "IOCs", "Attribution", "Detections", "MITRE ATT&CK
-Mapping" — gets no boost. The keyword regex `[A-Za-z][A-Za-z0-9_-]{2,}`
-(`engine.py:3016`, `ranking.py` `keyword_set`) drops digit-leading hashes and
-splits dotted domains and IP addresses.
+**Passage scoring carried boosts from a prior corpus.** ✅ *Fixed* —
+`kanbus-5c7cde`. `PASSAGE_HEADING_BOOSTS` now extends the academic headings
+(retained, since this instance still ingests that corpus) with threat-intel
+report structure: executive summary, key judgments, IOCs, attribution,
+detections, MITRE mapping. The corpus-specific token boosts and
+named-organisation penalties are gone, and the keyword regex no longer drops
+digit-leading hashes or splits dotted domains, IPs, CVE IDs, and ATT&CK
+technique IDs.
+
+Worth recording how this was *not* verified: the golden set scores which
+**reference** ranks, not which **passage** within it is selected, so the eval
+could not observe the change. Identical metrics were neither confirmation nor
+refutation. Justification rests on code review and the noise-floor measurement
+instead — and passage-level evaluation is now a gap tracked on `TI-5ed2f2`.
 
 **Chunking has no contextual prefix and almost no gating.** `_prepare_chunks`
 (`vector_index.py:720`) embeds the raw cleaned chunk text; title, subtitle,
@@ -546,8 +549,9 @@ gates growing the corpus.
    orderings). The `reporting` consumer profile was kept: `reporter.tac` uses
    it, contrary to the original brief.
 
-1. **Passage-scoring cleanup** — retire the prior corpus's boosts, extend
-   heading boosts for threat-intel report structure, fix the token regex.
+1. **Passage-scoring cleanup** ✅ *Done* — `kanbus-5c7cde`. See the caveat
+   above: the golden set cannot observe passage-level changes, so this landed on
+   code review rather than measurement.
 2. **Hybrid lexical + RRF** — fixes the worst domain gap (exact-identifier
    lookup is embedding-only today), three other items stack on it, and it is the
    lossless safety net under every lossy transformation that follows.

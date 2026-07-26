@@ -17,9 +17,16 @@
       "type": "blocked-by"
     }
   ],
-  "comments": [],
+  "comments": [
+    {
+      "id": "6dac8665-27ec-4fa2-9690-608c1b750a4f",
+      "author": "ryan",
+      "text": "Verified and accepted, and the most valuable thing in this report is the part where you said the eval couldn't see your change.\n\n**Confirmed independently:**\n- Heading boosts *extended*, not replaced — academic headings retained with a comment saying why. That was the trap in the brief and you avoided it.\n- Corpus-specific token boosts and named-organisation penalties gone.\n- Tokeniser verified on real inputs: `d41d8cd9…` (digit-leading hash), `example.com`, `192.0.2.1`, `CVE-2024-3400`, `T1059.003` all survive as single tokens. Previously the first would have been dropped entirely and the rest split.\n- 54 tests passing, up from 51. Pre-existing 13 failures unchanged.\n\n**The provenance fix proved itself immediately.** Your two runs share `git_sha eb33abe` but carry different `git_diff_sha256` values — `dfdfed07…` versus `1f2a6fa6…`. Last epic those two reports were indistinguishable. Now the working-tree state is identifiable, which is exactly what the field was for.\n\n**On \"the golden set scores reference rank, not passage choice.\"**\n\nThis is the right call and worth stating more strongly than you did: **identical metrics here are neither confirmation nor refutation.** The instrument does not measure the dimension you changed. Passage scoring decides which excerpt within a reference gets surfaced; the golden set only asks which reference ranks. So \"no movement\" is not evidence of safety, it is evidence of blindness.\n\nThat means the acceptance criterion I gave you was wrong for this epic, and neither of us caught it before you started. Yours is the better analysis. What actually justifies this change is code review — the removed boosts were demonstrably overfit to a corpus we no longer exclusively serve, and the tokeniser was dropping identifiers this publication is built on — plus your noise-floor measurement showing the swaps you saw sit inside normal variance.\n\nI have recorded that in `docs/knowledge-retrieval-roadmap.md` rather than letting the epic close looking measured when it wasn't, and flagged passage-level evaluation as a gap on `TI-5ed2f2`.\n\n**The noise floor is genuinely useful.** Three runs, MRR and Hit@5 locked at 0.653/0.76, variance confined to positions 6–8 on two queries. So the harness resolves rank-1-through-5 reliably and mid-list ordering not at all. Every future epic should read that before interpreting a small diff — which is why it belongs on `TI-5ed2f2` where you put it, not buried in this epic.\n\nMerged to `develop` as `90b63f7`. Roadmap updated, including *how this was not verified*.\n\nNext is `kanbus-a61c12` — hybrid lexical retrieval with RRF fusion. It is the anchor investment of the whole initiative and substantially larger than the last two: a new BM25 index artifact built during vector sync, stored in S3, loaded in a stdlib-only Lambda, fused with the vector arm. Unlike this epic, the eval *can* see it: the identifier category is 0/5 today and moving it is the entire point. Read the brief before starting — the design decisions there about artifact placement and the S3 read grant exist to avoid infrastructure changes.",
+      "created_at": "2026-07-26T17:15:40.022682Z"
+    }
+  ],
   "created_at": "2026-07-19T19:00:14.322268Z",
-  "updated_at": "2026-07-19T19:00:14.322268Z",
+  "updated_at": "2026-07-26T17:15:40.022682Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",
