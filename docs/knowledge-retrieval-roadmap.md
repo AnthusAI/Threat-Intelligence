@@ -153,13 +153,17 @@ feature-flagged.
 Facts below were verified against source at the time of writing; line numbers
 drift, symbol names are stable.
 
-**Ranking is a weighted linear blend, not rank fusion.** `PROFILE_WEIGHTS`
-(`src/papyrus_knowledge_query/ranking.py:13`) defines relevance/quality/
-graphContext weights (0.70/0.25/0.05 balanced); `score_record`
-(`ranking.py:236`) computes `finalScore` as a weighted sum and
-`ranking_sort_key` (`ranking.py:269`) sorts on it. Candidate sources
-(semantic matches, anchors, graph-expanded objects) are scored independently
-and deduped — never fused by rank position. Nothing RRF-like exists.
+**Ranking is a weighted linear blend, not rank fusion.** `DEFAULT_WEIGHTS` in
+`src/papyrus_knowledge_query/ranking.py` blends relevance and quality
+(≈0.737/0.263); `score_record` computes `finalScore` as a weighted sum and
+`ranking_sort_key` sorts on it. Candidate sources (semantic matches, anchors,
+graph-expanded objects) are scored independently and deduped — never fused by
+rank position. Nothing RRF-like exists.
+
+*(Updated: the three ranking profiles, three diversity profiles, and the
+`graphContext` signal described in earlier drafts have since been deleted —
+nothing ever set them. The weights above are the former balanced profile
+renormalized.)*
 
 **No recency signal.** `sourcePublishedAt`/`sourceUpdatedAt` appear only in
 display text. They are not written into vector metadata —
@@ -272,8 +276,7 @@ served by embeddings alone.
   embedding HTTP call dominates latency). Record per-source ranks on each
   match (`fusion: {semanticRank, lexicalRank, rrfScore}`) for debuggability
   and for a later rerank stage. Map the normalized RRF score into the
-  existing `relevance` component so quality/graphContext weighting is
-  preserved. Queries matching an identifier regex can up-weight the lexical
+  existing `relevance` component so quality weighting is preserved. Queries matching an identifier regex can up-weight the lexical
   arm.
 - Same-PR cleanup: replace the AI/ML-era `_passage_score` boosts and
   `PASSAGE_HEADING_BOOSTS` with threat-intel equivalents, and fix the
@@ -536,12 +539,12 @@ gates growing the corpus.
 
 **Phase 1 — subtract, then add cheaply.**
 
-0.5. **Delete dead ranking configuration.** Nothing in the codebase ever sets
-   `ranking.profile` or `ranking.diversity` — three ranking profiles, three
-   diversity profiles, roughly 27 constants, and exactly one path has ever
-   executed. Deleting them (plus the 0.05-weight `graphContext` signal and its
-   four hand-tuned constants, which AD-1 supersedes) is a net negative diff that
-   simplifies the very code the next two items modify. Do it first.
+0.5. **Delete dead ranking configuration.** ✅ *Done* — `kanbus-ca0de0`. Three
+   ranking profiles, three diversity profiles, and the 0.05-weight
+   `graphContext` signal removed; net −232 lines, verified behaviour-neutral
+   against the committed baseline (identical MRR, Hit@5, and per-query
+   orderings). The `reporting` consumer profile was kept: `reporter.tac` uses
+   it, contrary to the original brief.
 
 1. **Passage-scoring cleanup** — retire the prior corpus's boosts, extend
    heading boosts for threat-intel report structure, fix the token regex.

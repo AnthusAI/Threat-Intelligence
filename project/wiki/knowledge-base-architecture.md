@@ -185,19 +185,27 @@ passages, rank again, and finally build and render context blocks.
 
 ## Ranking
 
-Each candidate is scored as a weighted blend of relevance, quality, and graph
-context, selectable by profile:
+Each candidate is scored as a weighted blend of two signals:
 
-| Ranking profile | Relevance | Quality | Graph context |
-|---|---|---|---|
-| `balanced` | 0.70 | 0.25 | 0.05 |
-| `relevance_first` | 0.85 | 0.10 | 0.05 |
-| `quality_forward` | 0.55 | 0.40 | 0.05 |
+| Signal | Weight | Source |
+|---|---|---|
+| Relevance | 0.70 / 0.95 ≈ 0.737 | vector distance, or lexical overlap as fallback |
+| Quality | 0.25 / 0.95 ≈ 0.263 | current `quality_rating_is` relations |
 
-Quality comes from current `quality_rating_is` relations; unrated sources score
-a neutral 0.5. A separate **diversity** profile (`focused`, `balanced`, `broad`)
-controls how much the result set favors depth from top sources versus spread
-across many.
+Unrated sources score a neutral 0.5 on quality. The weights are written as
+fractions in `ranking.py` on purpose: they are the former balanced profile
+renormalized after a third signal was removed, and recording the derivation is
+cheaper than rediscovering it.
+
+This used to be more elaborate. Three ranking profiles, three diversity
+profiles, and a `graphContext` signal all existed — roughly 27 constants — and
+**nothing in the codebase ever set any of them**; every query that has ever run
+used `balanced`/`balanced`. They were deleted once a committed retrieval
+baseline existed to prove the removal was behaviour-neutral (identical MRR,
+Hit@5, and per-query orderings). `graphContext` carried a 0.05 weight, meaning it
+could move a final score by at most 0.05 — noise rather than signal — and
+[AD-1](#) supersedes it: graph traversal will contribute a ranked list to be
+fused, not a scalar nudge.
 
 There is deliberately **no recency signal today** — a gap the roadmap addresses.
 
