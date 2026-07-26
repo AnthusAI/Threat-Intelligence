@@ -17,9 +17,16 @@
       "type": "blocked-by"
     }
   ],
-  "comments": [],
+  "comments": [
+    {
+      "id": "1df92ec3-1377-4941-b18f-7501d93cb399",
+      "author": "ryan",
+      "text": "## Amendment — the description above predates two merges\n\nRead this before the description. `ca0de0` and `a61c12` both landed since it was written, and it is stale in ways that will send you to symbols that no longer exist.\n\n**Corrections:**\n\n- `PROFILE_WEIGHTS` is now **`DEFAULT_WEIGHTS`** (`ranking.py:12`). The three ranking profiles were deleted; there is one weight set. It is written as arithmetic (`0.70 / 0.95`) to document its derivation — follow that style when you renormalise.\n- `score_record` is at `ranking.py:311`, `normalize_ranking_config` at `:25`. Both moved.\n- `_normalize_semantic_matches` is at `engine.py:1220`.\n- **`graphContext` no longer exists.** The blend is relevance + quality only, so you are adding a third component to a pair, not a fourth to a triple.\n- **`fuse_ranked_lists` now exists** (`ranking.py:189`). The description assumes a single semantic arm; retrieval is now hybrid.\n\n**Where recency applies, given fusion.** After it. RRF produces a rank-consensus score that feeds the existing `relevance` component; recency then joins relevance and quality in the weighted sum inside `score_record`. Do not apply decay inside either retriever arm — that double-counts and makes the tie-breaker behave like a filter.\n\nTarget blend: roughly relevance 0.68 / quality 0.25 / recency 0.07, taken proportionally from the existing weights before renormalising. **Do not exceed 0.10 on recency.** An authoritative two-year-old reference must still beat a thin fresh one.\n\n## This epic is measurable, and that is why it is next\n\nThe golden set has a `freshness` category sitting at **hit@5 4/5, MRR 0.8** — one query short. That category exists to test exactly this: two references answering the same question, the newer one preferred. Unlike the passage-scoring epic, where the golden set was structurally blind to the change, here the instrument can see the target.\n\nSo: **if freshness moves 4/5 → 5/5, that is the win.** If nothing moves, say so plainly rather than claiming success — and check first whether the metadata actually landed, because without dates in vector metadata recency scores neutral everywhere and the feature is invisible rather than ineffective. Those are very different findings.\n\nCheck any small movement against the measured noise floor: ranks 1–5 reliable, positions 6–8 noise.\n\n## The trap that will silently no-op this\n\n`_normalize_semantic_matches` (`engine.py:1220`) copies an **allowlist** of metadata keys onto normalised records. New keys are dropped unless added there, and the same applies to `_assign_passage_ranking`. If you skip this, the dates reach the index and never reach the scorer, and everything looks fine.\n\nPlease add a test that a synthetic vector match carrying a date field produces a non-neutral recency score. That test is the guard.\n\n## Rebuild coordination\n\nDates in vector metadata need a re-put to take effect. **Do not trigger a rebuild for this alone.** The change is backward-compatible — missing dates score neutral — and the ingestion exercise (`TI-c46828`) is adding references right now and will need a sync anyway. One sync serves both.\n\nRecord on `kanbus-4b0aa6` that this metadata addition should ride along with that sync, and note in your PR that the feature is inert until it runs.",
+      "created_at": "2026-07-26T20:36:46.342795Z"
+    }
+  ],
   "created_at": "2026-07-19T19:00:14.343964Z",
-  "updated_at": "2026-07-19T19:00:14.343964Z",
+  "updated_at": "2026-07-26T20:36:46.342795Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",
