@@ -13,7 +13,13 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from papyrus_knowledge_query.engine import ContextBlock, _render_markdown_context, run_knowledge_query
+from papyrus_knowledge_query.engine import (
+    ContextBlock,
+    _keywords,
+    _passage_score,
+    _render_markdown_context,
+    run_knowledge_query,
+)
 from papyrus_knowledge_query.lambda_handler import handler as lambda_handler
 from papyrus_knowledge_query.ranking import (
     allocate_token_budgets,
@@ -1974,6 +1980,28 @@ class KnowledgeQueryTests(unittest.TestCase):
         self.assertTrue(sanitized["ready"])
         self.assertEqual(sanitized["tags"], ["agent", "loop"])
         self.assertEqual(sanitized["nested"], "{'corpusId': 'knowledge-corpus-ai-ml-research'}")
+
+    def test_executive_summary_heading_outscores_unheaded_passage(self):
+        body = "Adversary used spearphishing to deliver a malware implant against the finance desk."
+        keywords = _keywords("spearphishing malware implant finance")
+        headed = _passage_score(body, "Executive Summary", keywords)
+        plain = _passage_score(body, "", keywords)
+        self.assertGreater(headed, plain)
+
+    def test_abstract_heading_still_boosts_passage_score(self):
+        body = "We present a method for evaluating production agent reliability."
+        keywords = _keywords("evaluating production agent reliability")
+        headed = _passage_score(body, "Abstract", keywords)
+        plain = _passage_score(body, "", keywords)
+        self.assertGreater(headed, plain)
+
+    def test_keywords_keeps_hashes_domains_and_ips(self):
+        tokens = _keywords(
+            "hash d41d8cd98f00b204e9800998ecf8427e seen at example.com and 192.0.2.1"
+        )
+        self.assertIn("d41d8cd98f00b204e9800998ecf8427e", tokens)
+        self.assertIn("example.com", tokens)
+        self.assertIn("192.0.2.1", tokens)
 
 
 if __name__ == "__main__":
