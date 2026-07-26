@@ -1,0 +1,625 @@
+{
+  "timestamp": "2026-07-26T18:08:15.526066Z",
+  "provenance": {
+    "graphql_endpoint": "https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql",
+    "vector_index_arn": "arn:aws:s3vectors:us-east-1:335163751677:bucket/amplify-dbsyytcm9drqa-mai-papyrusknowledgevectorbu-62gho8vanqsa/index/papyrus-knowledge",
+    "corpus_id": "knowledge-corpus-ai-ml-research",
+    "git_sha": "efe87aed30952b410ee77c89922f3e45b51c4a3c",
+    "git_dirty": true,
+    "git_diff_sha256": "3a2f704e20bc9fc8307a12245cab6b759eb23658ce7906affc447ae1682a449a",
+    "note": "Threat-intel exact-token retrieval (CVE / hash / ATT&CK) is still unmeasured. This baseline evaluates ai-ml-research only."
+  },
+  "metrics": {
+    "total": 25,
+    "hit_at_5": 24,
+    "hit_at_10": 24,
+    "mrr_sum": 21.333333333333332,
+    "by_category": {
+      "identifier": {
+        "total": 5,
+        "hit_at_5": 5,
+        "hit_at_10": 5,
+        "mrr_sum": 5.0,
+        "mrr": 1.0,
+        "hit_at_5_rate": 1.0,
+        "hit_at_10_rate": 1.0
+      },
+      "paraphrase": {
+        "total": 5,
+        "hit_at_5": 5,
+        "hit_at_10": 5,
+        "mrr_sum": 4.333333333333333,
+        "mrr": 0.8666666666666666,
+        "hit_at_5_rate": 1.0,
+        "hit_at_10_rate": 1.0
+      },
+      "freshness": {
+        "total": 5,
+        "hit_at_5": 4,
+        "hit_at_10": 4,
+        "mrr_sum": 4.0,
+        "mrr": 0.8,
+        "hit_at_5_rate": 0.8,
+        "hit_at_10_rate": 0.8
+      },
+      "quality_tie": {
+        "total": 5,
+        "hit_at_5": 5,
+        "hit_at_10": 5,
+        "mrr_sum": 4.333333333333333,
+        "mrr": 0.8666666666666666,
+        "hit_at_5_rate": 1.0,
+        "hit_at_10_rate": 1.0
+      },
+      "multi_hop": {
+        "total": 5,
+        "hit_at_5": 5,
+        "hit_at_10": 5,
+        "mrr_sum": 3.666666666666667,
+        "mrr": 0.7333333333333334,
+        "hit_at_5_rate": 1.0,
+        "hit_at_10_rate": 1.0
+      }
+    },
+    "mrr": 0.8533333333333333,
+    "hit_at_5_rate": 0.96,
+    "hit_at_10_rate": 0.96
+  },
+  "results": [
+    {
+      "id": "q-ident-1",
+      "query": "1707.03141",
+      "category": "identifier",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f",
+        "reference-knowledge-corpus-ai-ml-research-3663cd61-c023-4190-8937-3f95ea49ff61",
+        "reference-knowledge-corpus-ai-ml-research-d8e2f047-12a2-452e-bc79-e6265aae16e6",
+        "reference-knowledge-corpus-ai-ml-research-119fab02-4663-4302-849b-ceb01f4e57e2",
+        "reference-knowledge-corpus-ai-ml-research-0d40955a-f2de-49ac-af52-a4555435a5f5",
+        "reference-knowledge-corpus-ai-ml-research-1364e34f-e2f0-4d32-9d1a-1da1171ec101",
+        "reference-knowledge-corpus-ai-ml-research-e9ab1156-1911-4c81-9c21-200f809c4183",
+        "reference-knowledge-corpus-ai-ml-research-35b10b06-6a9d-566e-b4cd-4c77cda4f770",
+        "reference-knowledge-corpus-ai-ml-research-25ecd0b9-435a-4987-a53d-49ba943964b0",
+        "reference-knowledge-corpus-ai-ml-research-47561cea-2458-4c6e-97e4-109ec92f578f"
+      ],
+      "rank": 1,
+      "duration_sec": 4.94
+    },
+    {
+      "id": "q-ident-2",
+      "query": "1703.06870",
+      "category": "identifier",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581",
+        "reference-knowledge-corpus-ai-ml-research-d8e2f047-12a2-452e-bc79-e6265aae16e6",
+        "reference-knowledge-corpus-ai-ml-research-3663cd61-c023-4190-8937-3f95ea49ff61",
+        "reference-knowledge-corpus-ai-ml-research-119fab02-4663-4302-849b-ceb01f4e57e2",
+        "reference-knowledge-corpus-ai-ml-research-1364e34f-e2f0-4d32-9d1a-1da1171ec101",
+        "reference-knowledge-corpus-ai-ml-research-728ce0e8-796a-401a-aca6-70e4550038d6",
+        "reference-knowledge-corpus-ai-ml-research-014ca772-c7f4-5bb0-9edb-6f75a439c697",
+        "reference-knowledge-corpus-ai-ml-research-999e9a62-7717-425a-b479-5572f21fd4dc",
+        "reference-knowledge-corpus-ai-ml-research-47561cea-2458-4c6e-97e4-109ec92f578f",
+        "reference-knowledge-corpus-ai-ml-research-31f4603e-c133-40f3-9136-f99d823c32fc"
+      ],
+      "rank": 1,
+      "duration_sec": 4.18
+    },
+    {
+      "id": "q-ident-3",
+      "query": "2407.10671",
+      "category": "identifier",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7",
+        "reference-knowledge-corpus-ai-ml-research-3663cd61-c023-4190-8937-3f95ea49ff61",
+        "reference-knowledge-corpus-ai-ml-research-a9858a0d-a3d0-4fd1-9a85-4d5b6ae4488c",
+        "reference-knowledge-corpus-ai-ml-research-4c73369d-afaf-4643-bc33-8ae6d1f383a8",
+        "reference-knowledge-corpus-ai-ml-research-82721c35-ad64-4859-9043-9855852ee650",
+        "reference-knowledge-corpus-ai-ml-research-7e69d168-5cd9-4e40-af26-7c9166b3e231",
+        "reference-knowledge-corpus-ai-ml-research-119fab02-4663-4302-849b-ceb01f4e57e2",
+        "reference-knowledge-corpus-ai-ml-research-3b476d7d-e57e-4a57-9414-314f3f83a497",
+        "reference-knowledge-corpus-ai-ml-research-75fe6077-02fb-4b2b-b6d8-2af7dd4facfe",
+        "reference-knowledge-corpus-ai-ml-research-b11c82f6-1d38-4f04-98f7-6dddbaffe05b"
+      ],
+      "rank": 1,
+      "duration_sec": 4.42
+    },
+    {
+      "id": "q-ident-4",
+      "query": "2401.04088",
+      "category": "identifier",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e",
+        "reference-knowledge-corpus-ai-ml-research-119fab02-4663-4302-849b-ceb01f4e57e2",
+        "reference-knowledge-corpus-ai-ml-research-7e69d168-5cd9-4e40-af26-7c9166b3e231",
+        "reference-knowledge-corpus-ai-ml-research-31f4603e-c133-40f3-9136-f99d823c32fc",
+        "reference-knowledge-corpus-ai-ml-research-1364e34f-e2f0-4d32-9d1a-1da1171ec101",
+        "reference-knowledge-corpus-ai-ml-research-e9ab1156-1911-4c81-9c21-200f809c4183",
+        "reference-knowledge-corpus-ai-ml-research-0d776a2d-dda9-492a-bc94-60a40bfe816b",
+        "reference-knowledge-corpus-ai-ml-research-42578a82-dfd3-4302-b935-038c7ac83ee3",
+        "reference-knowledge-corpus-ai-ml-research-75fe6077-02fb-4b2b-b6d8-2af7dd4facfe",
+        "reference-knowledge-corpus-ai-ml-research-d17050c1-38a5-475b-91ca-af3e9087eb54"
+      ],
+      "rank": 1,
+      "duration_sec": 4.36
+    },
+    {
+      "id": "q-ident-5",
+      "query": "c399862d3b9d6b76c8436e924a68c45b",
+      "category": "identifier",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06",
+        "reference-knowledge-corpus-ai-ml-research-ab801981-eb9d-4bb4-9dcb-53ad1dcafe92",
+        "reference-knowledge-corpus-ai-ml-research-ca61285c-6585-48d1-b07c-d9e94c866c81",
+        "reference-knowledge-corpus-ai-ml-research-dda09f05-8da8-4038-a877-4364afaa948d",
+        "reference-knowledge-corpus-ai-ml-research-7503f542-4819-4531-aef3-1e84a2cb0786",
+        "reference-knowledge-corpus-ai-ml-research-42578a82-dfd3-4302-b935-038c7ac83ee3",
+        "reference-knowledge-corpus-ai-ml-research-3663cd61-c023-4190-8937-3f95ea49ff61",
+        "reference-knowledge-corpus-ai-ml-research-7209ba6f-5622-41b5-9f67-c5472a7eabf9",
+        "reference-knowledge-corpus-ai-ml-research-cdd755e0-f880-4e23-812e-15b89b388f56",
+        "reference-knowledge-corpus-ai-ml-research-ad6a9ce0-dd37-4bab-b225-b39fb40db68f"
+      ],
+      "rank": 1,
+      "duration_sec": 4.08
+    },
+    {
+      "id": "q-para-1",
+      "query": "Paper proposing a meta-learning method with attention mechanisms",
+      "category": "paraphrase",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-15dcf938-9c03-4dc9-b7a9-87661170d90f",
+        "reference-knowledge-corpus-ai-ml-research-04dc7028-1c87-4229-b0aa-b31646eab633",
+        "reference-knowledge-corpus-ai-ml-research-521b1f08-5106-40e9-a78e-fddeee70aee1",
+        "reference-knowledge-corpus-ai-ml-research-6b90757f-58d3-43c0-97e7-3e0c7cba6896",
+        "reference-knowledge-corpus-ai-ml-research-a3cf87f2-51ea-499b-aee9-27b32f8522a0",
+        "reference-knowledge-corpus-ai-ml-research-f2aac34a-9992-4c10-93f1-a1cffe3b3c0b",
+        "reference-knowledge-corpus-ai-ml-research-16862a24-a62a-4b4f-b33e-50ac50d8db55",
+        "reference-knowledge-corpus-ai-ml-research-95733ba2-3f0a-4a64-b8b7-494b82e1252f",
+        "reference-knowledge-corpus-ai-ml-research-6db1f61c-b5b7-465c-a78e-6b96db5fa270",
+        "reference-knowledge-corpus-ai-ml-research-73bab49a-4b07-4836-8021-f6c45ca10376"
+      ],
+      "rank": 1,
+      "duration_sec": 4.49
+    },
+    {
+      "id": "q-para-2",
+      "query": "Technique for visual recognition using bounding boxes and segmentation masks",
+      "category": "paraphrase",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581",
+        "reference-knowledge-corpus-ai-ml-research-507efccc-edbe-4562-9c1e-4c09378cd19f",
+        "reference-knowledge-corpus-ai-ml-research-fde2e3eb-1f7d-43c3-920b-33bffdb4778d",
+        "reference-knowledge-corpus-ai-ml-research-0d27f384-f0da-4560-9b9b-fcec50911040",
+        "reference-knowledge-corpus-ai-ml-research-e88136de-7019-4fbf-a9a3-296433aa5802",
+        "reference-knowledge-corpus-ai-ml-research-04ab6c3f-de84-4f89-9cfb-ce8476119eeb",
+        "reference-knowledge-corpus-ai-ml-research-43273450-5af2-4459-bc09-f604b751fecf",
+        "reference-knowledge-corpus-ai-ml-research-7e4c3588-6f4f-4d35-ae2c-f47c49ca1bf2",
+        "reference-knowledge-corpus-ai-ml-research-d5662789-979d-42fd-8979-37da2c245d60",
+        "reference-knowledge-corpus-ai-ml-research-95806a25-4a3a-4645-82ab-a1b6ef28480d"
+      ],
+      "rank": 1,
+      "duration_sec": 4.34
+    },
+    {
+      "id": "q-para-3",
+      "query": "Model replacing self-attention with multi-layer perceptrons in vision tasks",
+      "category": "paraphrase",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-629d54ae-ce05-5c7a-8c9d-ef35ae43b319"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-629d54ae-ce05-5c7a-8c9d-ef35ae43b319",
+        "reference-knowledge-corpus-ai-ml-research-16862a24-a62a-4b4f-b33e-50ac50d8db55",
+        "reference-knowledge-corpus-ai-ml-research-26ad2eae-9d67-42cf-902f-58956874de57",
+        "reference-knowledge-corpus-ai-ml-research-bafaeee7-2c92-4be3-adaa-aa7dd4845366",
+        "reference-knowledge-corpus-ai-ml-research-49fcf798-b97d-4303-97f6-482c851136a8",
+        "reference-knowledge-corpus-ai-ml-research-04ab6c3f-de84-4f89-9cfb-ce8476119eeb",
+        "reference-knowledge-corpus-ai-ml-research-998af9e2-9572-51da-8a2b-57ccc9629ac9",
+        "reference-knowledge-corpus-ai-ml-research-94068b3e-df17-5de6-a9c8-e0d254b71e58",
+        "reference-knowledge-corpus-ai-ml-research-fde2e3eb-1f7d-43c3-920b-33bffdb4778d",
+        "reference-knowledge-corpus-ai-ml-research-a3eb51c4-a17c-44a7-997b-759a6f126967"
+      ],
+      "rank": 1,
+      "duration_sec": 4.31
+    },
+    {
+      "id": "q-para-4",
+      "query": "Sparse mixture of experts language model technical documentation",
+      "category": "paraphrase",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e",
+        "reference-knowledge-corpus-ai-ml-research-f6f3869c-ff23-49ec-a7ef-64b37d1748d3",
+        "reference-knowledge-corpus-ai-ml-research-8377f100-1779-4a01-affa-cfdca2a5be35",
+        "reference-knowledge-corpus-ai-ml-research-a088d6be-7155-492d-8fd6-66c32a306dd6",
+        "reference-knowledge-corpus-ai-ml-research-e8707f5f-c117-4adb-a079-37ebb31a3141",
+        "reference-knowledge-corpus-ai-ml-research-8cad0ffa-5610-4d10-80b5-a6d0a879dc5a",
+        "reference-knowledge-corpus-ai-ml-research-83cc86db-cdca-434a-a158-60867eccda45",
+        "reference-knowledge-corpus-ai-ml-research-56b74c5c-5fd0-4066-bea9-7b042527d027",
+        "reference-knowledge-corpus-ai-ml-research-16f2e628-8920-4bf5-bbcd-37879b465086",
+        "reference-knowledge-corpus-ai-ml-research-9501de72-2a73-424f-92fe-a5bab8f4b956"
+      ],
+      "rank": 1,
+      "duration_sec": 4.47
+    },
+    {
+      "id": "q-para-5",
+      "query": "Early breakthrough in using large convolutional networks for image classification tasks",
+      "category": "paraphrase",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-27712997-a52e-44da-b094-fad5bd705d8c",
+        "reference-knowledge-corpus-ai-ml-research-89d39ac8-5730-4162-bae6-b50f972a304e",
+        "reference-knowledge-corpus-ai-ml-research-d199967f-ed23-4314-946e-8c5efb727f06",
+        "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de",
+        "reference-knowledge-corpus-ai-ml-research-06df9a6e-a8d3-4f26-b249-98ad3641924e",
+        "reference-knowledge-corpus-ai-ml-research-0e144aee-3dd0-48e6-98fc-20e52419cc8f",
+        "reference-knowledge-corpus-ai-ml-research-7ca3e952-6801-48f1-93a5-4052730b2129",
+        "reference-knowledge-corpus-ai-ml-research-507efccc-edbe-4562-9c1e-4c09378cd19f",
+        "reference-knowledge-corpus-ai-ml-research-1c60a711-f129-444a-8a45-de5b63e12cb1",
+        "reference-knowledge-corpus-ai-ml-research-26ad2eae-9d67-42cf-902f-58956874de57"
+      ],
+      "rank": 3,
+      "duration_sec": 4.19
+    },
+    {
+      "id": "q-fresh-1",
+      "query": "Recent reinforcement learning approaches for self-evolving agent memory",
+      "category": "freshness",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72",
+        "reference-knowledge-corpus-ai-ml-research-f0e49068-f054-41f9-b552-f71f90bccd8f",
+        "reference-knowledge-corpus-ai-ml-research-6e55e770-7c12-4c40-a3b8-c430512f2d0a",
+        "reference-knowledge-corpus-ai-ml-research-e7d21739-464f-41eb-9ac6-fbea3b3d18ef",
+        "reference-knowledge-corpus-ai-ml-research-118f1aa2-b070-4f92-ae0a-7fdb2399d718",
+        "reference-knowledge-corpus-ai-ml-research-341edaff-0218-491e-92af-645d56101711",
+        "reference-knowledge-corpus-ai-ml-research-500967b1-f25f-426e-92ff-6b8643809fd2",
+        "reference-knowledge-corpus-ai-ml-research-8a282b9d-924b-4997-a523-eafb47224574",
+        "reference-knowledge-corpus-ai-ml-research-1aea8110-78e8-402c-a344-f14814bd1197",
+        "reference-knowledge-corpus-ai-ml-research-2afd0da8-2faa-4e99-b816-ed2dfeca31f6"
+      ],
+      "rank": 1,
+      "duration_sec": 3.97
+    },
+    {
+      "id": "q-fresh-2",
+      "query": "Latest toolkits for ontology processing and alignment",
+      "category": "freshness",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1",
+        "reference-knowledge-corpus-ai-ml-research-e2a077a6-0553-48fe-8f3b-30208c39529a",
+        "reference-knowledge-corpus-ai-ml-research-d3f4d3eb-8cbc-497b-8437-21b59278868c",
+        "reference-knowledge-corpus-ai-ml-research-2d172b35-843b-4ef2-a653-ac44017a9be9",
+        "reference-knowledge-corpus-ai-ml-research-5a007427-953d-4333-be4d-6834721f7eda",
+        "reference-knowledge-corpus-ai-ml-research-472fa66b-793b-4f61-acb0-52ccf714f50b",
+        "reference-knowledge-corpus-ai-ml-research-5b84b931-eed5-45c6-b931-d0e354d38249",
+        "reference-knowledge-corpus-ai-ml-research-6ac1b89d-6197-42c9-b05e-489ad6696e79",
+        "reference-knowledge-corpus-ai-ml-research-0068ea75-b0f7-401a-9f94-127166f380fa",
+        "reference-knowledge-corpus-ai-ml-research-e1af6b3b-11a2-4a1f-ac43-c63c8addbca5"
+      ],
+      "rank": 1,
+      "duration_sec": 4.37
+    },
+    {
+      "id": "q-fresh-3",
+      "query": "Newest game-theoretic approaches for safe agentic systems",
+      "category": "freshness",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031",
+        "reference-knowledge-corpus-ai-ml-research-19ee563d-aeb8-49f4-9ece-bc9b8a2bcc3d",
+        "reference-knowledge-corpus-ai-ml-research-3bf1fe13-5a42-4931-87d9-fd56bda330b6",
+        "reference-knowledge-corpus-ai-ml-research-e92c89a3-9c9a-4640-9d0e-6886056070bc",
+        "reference-knowledge-corpus-ai-ml-research-0f353ef4-8543-44a2-9e43-a7e807d815c2",
+        "reference-knowledge-corpus-ai-ml-research-08adf26a-a5b0-4814-957f-6f5c87eb929d",
+        "reference-knowledge-corpus-ai-ml-research-16d7c3f2-2a39-4143-b4ee-b7dfe76c1eaa",
+        "reference-knowledge-corpus-ai-ml-research-efe685f9-2b0e-48eb-b36e-2feec2d8d252",
+        "reference-knowledge-corpus-ai-ml-research-0007bab1-c114-44a3-9ee3-fc3ee14d90e3",
+        "reference-knowledge-corpus-ai-ml-research-21c169c1-a342-4f93-a53c-6923351430ec"
+      ],
+      "rank": 1,
+      "duration_sec": 3.97
+    },
+    {
+      "id": "q-fresh-4",
+      "query": "Recent multi-agent evolutionary computation frameworks",
+      "category": "freshness",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-5c4bb901-1d59-4533-a242-907ddfb49cd8",
+        "reference-knowledge-corpus-ai-ml-research-0399c419-3a66-4a1c-b3e2-d78e1c7136a5",
+        "reference-knowledge-corpus-ai-ml-research-341edaff-0218-491e-92af-645d56101711",
+        "reference-knowledge-corpus-ai-ml-research-c94a5d1f-7d8b-4e75-b3f8-ff42b9b7a496",
+        "reference-knowledge-corpus-ai-ml-research-553a26ae-e14b-4920-a0ea-ec3b9601b16c",
+        "reference-knowledge-corpus-ai-ml-research-e7d21739-464f-41eb-9ac6-fbea3b3d18ef",
+        "reference-knowledge-corpus-ai-ml-research-6e55e770-7c12-4c40-a3b8-c430512f2d0a",
+        "reference-knowledge-corpus-ai-ml-research-ecd0585c-9903-487c-8390-20813a1b0a73",
+        "reference-knowledge-corpus-ai-ml-research-e395c5f9-e8cf-4786-bb46-d6b1946eb80b",
+        "reference-knowledge-corpus-ai-ml-research-500967b1-f25f-426e-92ff-6b8643809fd2"
+      ],
+      "rank": -1,
+      "duration_sec": 4.05
+    },
+    {
+      "id": "q-fresh-5",
+      "query": "State of the art in automated meta-analysis using multi-agent systems",
+      "category": "freshness",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-ad36c997-4a03-4b40-ab47-3d619e52ecac"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-ad36c997-4a03-4b40-ab47-3d619e52ecac",
+        "reference-knowledge-corpus-ai-ml-research-526e9f7f-a2ab-4c86-a37b-c2c44104c2d9",
+        "reference-knowledge-corpus-ai-ml-research-08adf26a-a5b0-4814-957f-6f5c87eb929d",
+        "reference-knowledge-corpus-ai-ml-research-e395c5f9-e8cf-4786-bb46-d6b1946eb80b",
+        "reference-knowledge-corpus-ai-ml-research-3bf1fe13-5a42-4931-87d9-fd56bda330b6",
+        "reference-knowledge-corpus-ai-ml-research-7e69d168-5cd9-4e40-af26-7c9166b3e231",
+        "reference-knowledge-corpus-ai-ml-research-0399c419-3a66-4a1c-b3e2-d78e1c7136a5",
+        "reference-knowledge-corpus-ai-ml-research-e256a27d-74bb-5e60-9a3b-3b4f9f500365",
+        "reference-knowledge-corpus-ai-ml-research-146b3122-b0b8-44e6-a78f-0ae3d6ae1e9f",
+        "reference-knowledge-corpus-ai-ml-research-82ffddb8-79a5-43e8-a51a-eaf680135e22"
+      ],
+      "rank": 1,
+      "duration_sec": 4.23
+    },
+    {
+      "id": "q-qual-1",
+      "query": "Survey on evolutionary computation combined with large language models",
+      "category": "quality_tie",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b",
+        "reference-knowledge-corpus-ai-ml-research-b95e77b7-7cdf-4940-9251-3ab54b788f96",
+        "reference-knowledge-corpus-ai-ml-research-2916341d-9c2e-4c6c-a613-a6ce9234976a",
+        "reference-knowledge-corpus-ai-ml-research-553a26ae-e14b-4920-a0ea-ec3b9601b16c",
+        "reference-knowledge-corpus-ai-ml-research-4f1fd67a-0df9-43bd-a97c-1f34db38d3fd",
+        "reference-knowledge-corpus-ai-ml-research-118f1aa2-b070-4f92-ae0a-7fdb2399d718",
+        "reference-knowledge-corpus-ai-ml-research-7d295757-dff9-4741-93d9-af24a75408e5",
+        "reference-knowledge-corpus-ai-ml-research-def18cb4-f2fb-4e3e-a7ac-1030f47b4eba",
+        "reference-knowledge-corpus-ai-ml-research-a36f33e5-ff8b-43b2-a240-14fbad8cfeba",
+        "reference-knowledge-corpus-ai-ml-research-4fae170f-1e83-4858-bfa0-fb2176a2634d"
+      ],
+      "rank": 1,
+      "duration_sec": 4.52
+    },
+    {
+      "id": "q-qual-2",
+      "query": "Review of ontology embedding methods and resources",
+      "category": "quality_tie",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-356b6461-2314-49db-bdff-3bc7e2ba8f2d"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-356b6461-2314-49db-bdff-3bc7e2ba8f2d",
+        "reference-knowledge-corpus-ai-ml-research-3f820ace-06f9-4183-80db-1d27bd6a1f41",
+        "reference-knowledge-corpus-ai-ml-research-94a64af6-e955-440a-a954-de12546c281e",
+        "reference-knowledge-corpus-ai-ml-research-5b84b931-eed5-45c6-b931-d0e354d38249",
+        "reference-knowledge-corpus-ai-ml-research-46dcbbb7-02f6-49b2-9cd6-e3824d78f481",
+        "reference-knowledge-corpus-ai-ml-research-4787b1bf-fb8f-4681-978a-f669255f14ae",
+        "reference-knowledge-corpus-ai-ml-research-3bc1ca82-356d-4640-b1e5-ba031fe77d49",
+        "reference-knowledge-corpus-ai-ml-research-4a322f1a-03c9-417c-9bd5-064358cb3336",
+        "reference-knowledge-corpus-ai-ml-research-ece36a64-dc49-4835-8aef-3c1261fa9c83",
+        "reference-knowledge-corpus-ai-ml-research-149afd97-7568-4b8c-b32e-8ae59b0f0353"
+      ],
+      "rank": 1,
+      "duration_sec": 4.57
+    },
+    {
+      "id": "q-qual-3",
+      "query": "Foundational paper on residual connections in inception networks",
+      "category": "quality_tie",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de",
+        "reference-knowledge-corpus-ai-ml-research-ed533038-7c96-4168-9f0d-53c960b9b513",
+        "reference-knowledge-corpus-ai-ml-research-7a8fca2a-9363-44d2-9b06-25524e89508b",
+        "reference-knowledge-corpus-ai-ml-research-ab1052a1-d18c-45c6-8755-4ba7a5ce33da",
+        "reference-knowledge-corpus-ai-ml-research-b5665614-4229-465f-a7b0-2427237602e5",
+        "reference-knowledge-corpus-ai-ml-research-7a79ebde-83fa-4004-923b-084dd5497c55",
+        "reference-knowledge-corpus-ai-ml-research-41094eba-0430-484b-a145-074f3ff04b66",
+        "reference-knowledge-corpus-ai-ml-research-bc06fdf5-8835-42d9-9d32-9b595fbe806a",
+        "reference-knowledge-corpus-ai-ml-research-8ee65fe8-1151-4203-96c7-466ccb5d8dd6",
+        "reference-knowledge-corpus-ai-ml-research-c21db1d7-ba93-4244-b97d-730181feaf5e"
+      ],
+      "rank": 1,
+      "duration_sec": 4.75
+    },
+    {
+      "id": "q-qual-4",
+      "query": "Comprehensive technical report for the Qwen2 model architecture",
+      "category": "quality_tie",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7",
+        "reference-knowledge-corpus-ai-ml-research-295b0528-f839-53b7-8bf9-625e2ed4bc0b",
+        "reference-knowledge-corpus-ai-ml-research-38f19c5e-621e-54d3-9cb6-856cbbd4b536",
+        "reference-knowledge-corpus-ai-ml-research-6590929c-9f31-50a4-ad61-49fe3ff8e18b",
+        "reference-knowledge-corpus-ai-ml-research-9bcf89ce-9b96-527e-995c-9d64d16ca416",
+        "reference-knowledge-corpus-ai-ml-research-68a2e4fd-be92-5f91-9c00-1a1461e3a8e7",
+        "reference-knowledge-corpus-ai-ml-research-4cb9d988-ff2c-5060-b89b-3dcac76d785a",
+        "reference-knowledge-corpus-ai-ml-research-e90eec55-911f-568c-b17e-bd8480a54502",
+        "reference-knowledge-corpus-ai-ml-research-1b29dbf5-dd4e-40bd-93d8-b1fa73ce9006",
+        "reference-knowledge-corpus-ai-ml-research-6b91518a-2773-491c-b784-76ff373d77b6"
+      ],
+      "rank": 1,
+      "duration_sec": 4.21
+    },
+    {
+      "id": "q-qual-5",
+      "query": "Analysis of cognitive biases in LLMs and mitigation strategies",
+      "category": "quality_tie",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-76a744ab-d4a5-4470-8277-535b5fc81702"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-0d4d85d5-0b3d-4064-aa75-db65b0e33e68",
+        "reference-knowledge-corpus-ai-ml-research-9f2427c5-daec-47e0-b4cb-8ad6dde6d035",
+        "reference-knowledge-corpus-ai-ml-research-76a744ab-d4a5-4470-8277-535b5fc81702",
+        "reference-knowledge-corpus-ai-ml-research-43aad1a0-b5c0-4778-9b8a-3c98491ae279",
+        "reference-knowledge-corpus-ai-ml-research-cf87bb3b-2f59-47ad-b80a-053edcee15e7",
+        "reference-knowledge-corpus-ai-ml-research-1cd2a551-4666-46a5-9220-31fd2916e0f8",
+        "reference-knowledge-corpus-ai-ml-research-f9ed5c15-aee3-42ee-a483-220cb2821284",
+        "reference-knowledge-corpus-ai-ml-research-7d295757-dff9-4741-93d9-af24a75408e5",
+        "reference-knowledge-corpus-ai-ml-research-77eed2c6-2af5-47ff-8c0d-69fed0610ebe",
+        "reference-knowledge-corpus-ai-ml-research-5acb8a5a-7946-485c-9e8e-4856f745a59d"
+      ],
+      "rank": 3,
+      "duration_sec": 4.53
+    },
+    {
+      "id": "q-multi-1",
+      "query": "Comparing Mixtral of Experts architecture with Qwen2 performance",
+      "category": "multi_hop",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e",
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-335e7437-5456-456b-926d-1c880daf3f4e",
+        "reference-knowledge-corpus-ai-ml-research-e90eec55-911f-568c-b17e-bd8480a54502",
+        "reference-knowledge-corpus-ai-ml-research-6590929c-9f31-50a4-ad61-49fe3ff8e18b",
+        "reference-knowledge-corpus-ai-ml-research-9bcf89ce-9b96-527e-995c-9d64d16ca416",
+        "reference-knowledge-corpus-ai-ml-research-4cb9d988-ff2c-5060-b89b-3dcac76d785a",
+        "reference-knowledge-corpus-ai-ml-research-956ae568-bef8-5e2b-88a2-812e048b69b7",
+        "reference-knowledge-corpus-ai-ml-research-295b0528-f839-53b7-8bf9-625e2ed4bc0b",
+        "reference-knowledge-corpus-ai-ml-research-f0812531-3a42-413c-997c-f87790a2e592",
+        "reference-knowledge-corpus-ai-ml-research-fe786137-ec8a-4502-b352-f395b9ff30da",
+        "reference-knowledge-corpus-ai-ml-research-09d717cd-3311-4ba9-ae24-769cd2efb5ab"
+      ],
+      "rank": 1,
+      "duration_sec": 4.78
+    },
+    {
+      "id": "q-multi-2",
+      "query": "Using Mask R-CNN and Inception-ResNet for image tasks",
+      "category": "multi_hop",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de",
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-4c03f0e9-df1f-418a-b2ed-926b96dd9581",
+        "reference-knowledge-corpus-ai-ml-research-c83ad871-f8e0-4f17-8a33-dbaaa4b8d0de",
+        "reference-knowledge-corpus-ai-ml-research-95806a25-4a3a-4645-82ab-a1b6ef28480d",
+        "reference-knowledge-corpus-ai-ml-research-ed533038-7c96-4168-9f0d-53c960b9b513",
+        "reference-knowledge-corpus-ai-ml-research-27712997-a52e-44da-b094-fad5bd705d8c",
+        "reference-knowledge-corpus-ai-ml-research-ab1052a1-d18c-45c6-8755-4ba7a5ce33da",
+        "reference-knowledge-corpus-ai-ml-research-2c86b351-1a54-404d-9ede-e476f5ea9096",
+        "reference-knowledge-corpus-ai-ml-research-fde2e3eb-1f7d-43c3-920b-33bffdb4778d",
+        "reference-knowledge-corpus-ai-ml-research-8ee65fe8-1151-4203-96c7-466ccb5d8dd6",
+        "reference-knowledge-corpus-ai-ml-research-7a79ebde-83fa-4004-923b-084dd5497c55"
+      ],
+      "rank": 1,
+      "duration_sec": 4.4
+    },
+    {
+      "id": "q-multi-3",
+      "query": "Integration of ontology alignment toolkits with large language models",
+      "category": "multi_hop",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-76a744ab-d4a5-4470-8277-535b5fc81702",
+        "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-472fa66b-793b-4f61-acb0-52ccf714f50b",
+        "reference-knowledge-corpus-ai-ml-research-72860d86-7141-4709-a644-2d275b3f56d7",
+        "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1",
+        "reference-knowledge-corpus-ai-ml-research-6ac1b89d-6197-42c9-b05e-489ad6696e79",
+        "reference-knowledge-corpus-ai-ml-research-0af2e912-78ba-494c-9dcc-99987ac8b7f1",
+        "reference-knowledge-corpus-ai-ml-research-fdf469a0-dd04-4c92-8484-19edec6f923c",
+        "reference-knowledge-corpus-ai-ml-research-c3f9b991-b50f-4620-8384-36094c75ed30",
+        "reference-knowledge-corpus-ai-ml-research-3bc1ca82-356d-4640-b1e5-ba031fe77d49",
+        "reference-knowledge-corpus-ai-ml-research-aa4d09ae-d2cd-4723-99b2-49b26ffa55a4",
+        "reference-knowledge-corpus-ai-ml-research-29040544-b70a-4eff-8818-961f2fb2732e"
+      ],
+      "rank": 3,
+      "duration_sec": 4.15
+    },
+    {
+      "id": "q-multi-4",
+      "query": "Evaluating game-theoretic safe agents in production environments",
+      "category": "multi_hop",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031",
+        "reference-knowledge-corpus-ai-ml-research-e0225603-b00a-4d2f-9b29-c807f48e1bc7"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031",
+        "reference-knowledge-corpus-ai-ml-research-19ee563d-aeb8-49f4-9ece-bc9b8a2bcc3d",
+        "reference-knowledge-corpus-ai-ml-research-e0225603-b00a-4d2f-9b29-c807f48e1bc7",
+        "reference-knowledge-corpus-ai-ml-research-08adf26a-a5b0-4814-957f-6f5c87eb929d",
+        "reference-knowledge-corpus-ai-ml-research-558846cd-b72f-4bdb-bf3b-32eaae86e9e5",
+        "reference-knowledge-corpus-ai-ml-research-743fae58-c7a8-4f71-a046-642d99c0e5b5",
+        "reference-knowledge-corpus-ai-ml-research-0007bab1-c114-44a3-9ee3-fc3ee14d90e3",
+        "reference-knowledge-corpus-ai-ml-research-3040e321-2370-46a6-ba21-29e3d106b6b2",
+        "reference-knowledge-corpus-ai-ml-research-b1d91763-6d58-59d6-b675-df4dff182b3a",
+        "reference-knowledge-corpus-ai-ml-research-90854131-0057-4963-838c-3570639a681c"
+      ],
+      "rank": 1,
+      "duration_sec": 4.39
+    },
+    {
+      "id": "q-multi-5",
+      "query": "Reinforcement learning techniques for self-evolving agent memory versus traditional apprenticeship learning",
+      "category": "multi_hop",
+      "expected": [
+        "reference-knowledge-corpus-ai-ml-research-273a68e9-7523-49bf-bc60-9fa4a5c29ba0",
+        "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72"
+      ],
+      "retrieved_top_10": [
+        "reference-knowledge-corpus-ai-ml-research-f0e49068-f054-41f9-b552-f71f90bccd8f",
+        "reference-knowledge-corpus-ai-ml-research-118f1aa2-b070-4f92-ae0a-7fdb2399d718",
+        "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72",
+        "reference-knowledge-corpus-ai-ml-research-6e55e770-7c12-4c40-a3b8-c430512f2d0a",
+        "reference-knowledge-corpus-ai-ml-research-341edaff-0218-491e-92af-645d56101711",
+        "reference-knowledge-corpus-ai-ml-research-e7d21739-464f-41eb-9ac6-fbea3b3d18ef",
+        "reference-knowledge-corpus-ai-ml-research-392161f7-a7af-4b4c-bfbb-dbaa39e4f2eb",
+        "reference-knowledge-corpus-ai-ml-research-2afd0da8-2faa-4e99-b816-ed2dfeca31f6",
+        "reference-knowledge-corpus-ai-ml-research-8a282b9d-924b-4997-a523-eafb47224574",
+        "reference-knowledge-corpus-ai-ml-research-154a80ca-1b3c-45b1-a3f6-af39035ad3db"
+      ],
+      "rank": 3,
+      "duration_sec": 4.22
+    }
+  ]
+}

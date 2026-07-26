@@ -186,6 +186,117 @@ def relevance_score_from_record(record: dict[str, Any], semantic_query: str = ""
     return 0.5
 
 
+def fuse_ranked_lists(
+    lists: list[list[dict[str, Any]]],
+    *,
+    weights: list[float] | None = None,
+    k: int = 60,
+    list_names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Reciprocal rank fusion across N ranked lists.
+
+    ``score(d) = Σ weight_l / (k + rank_l(d))``, normalized to 0..1 by dividing
+    by the theoretical max ``Σ weight_l / (k + 1)``. Joins on record key
+    (passage key when present, else lineage id). Best (lowest) rank wins per list.
+    """
+    if not lists:
+        return []
+    active = [(index, ranked) for index, ranked in enumerate(lists) if ranked]
+    if not active:
+        return []
+    if weights is None:
+        weights = [1.0] * len(lists)
+    if len(weights) != len(lists):
+        raise ValueError("weights must match the number of ranked lists")
+    names = list_names or [f"list{index}" for index in range(len(lists))]
+
+    rank_maps: list[dict[str, int]] = []
+    record_maps: list[dict[str, dict[str, Any]]] = []
+    for ranked in lists:
+        ranks: dict[str, int] = {}
+        records: dict[str, dict[str, Any]] = {}
+        for index, record in enumerate(ranked):
+            key = _fusion_join_key(record)
+            if not key:
+                continue
+            rank = int(record.get("rank") or record.get("providerRank") or (index + 1))
+            if key not in ranks or rank < ranks[key]:
+                ranks[key] = rank
+                records[key] = record
+        rank_maps.append(ranks)
+        record_maps.append(records)
+
+    all_keys = set()
+    for ranks in rank_maps:
+        all_keys.update(ranks)
+    if not all_keys:
+        return []
+
+    max_score = sum(float(weight) / float(k + 1) for weight in weights if weight)
+    if max_score <= 0:
+        max_score = 1.0
+
+    fused: list[dict[str, Any]] = []
+    for key in all_keys:
+        rrf = 0.0
+        fusion_meta: dict[str, Any] = {}
+        preferred: dict[str, Any] | None = None
+        fallback: dict[str, Any] | None = None
+        for list_index, weight in enumerate(weights):
+            rank = rank_maps[list_index].get(key)
+            name = names[list_index] if list_index < len(names) else f"list{list_index}"
+            if rank is None:
+                fusion_meta[f"{name}Rank"] = None
+                continue
+            rrf += float(weight) / float(k + rank)
+            fusion_meta[f"{name}Rank"] = rank
+            record = dict(record_maps[list_index][key])
+            if name == "semantic":
+                preferred = record
+            elif fallback is None:
+                fallback = record
+        base = preferred or fallback
+        if base is None:
+            continue
+        normalized = clamp01(rrf / max_score)
+        fusion_meta["rrfScore"] = round(normalized, 6)
+        fusion_meta["rrfRaw"] = round(rrf, 6)
+        base["score"] = normalized
+        base["fusion"] = fusion_meta
+        base.pop("distance", None)
+        fused.append(base)
+
+    fused.sort(
+        key=lambda record: (
+            -float((record.get("fusion") or {}).get("rrfScore") or 0.0),
+            int((record.get("fusion") or {}).get("semanticRank") or 10**9),
+            int((record.get("fusion") or {}).get("lexicalRank") or 10**9),
+        )
+    )
+    return [{**record, "rank": index + 1, "providerRank": index + 1} for index, record in enumerate(fused)]
+
+
+def _fusion_join_key(record: dict[str, Any]) -> str:
+    """Join hybrid lists at reference lineage when present.
+
+    Semantic search diversifies to one hit per reference and often omits passage
+    keys; lexical hits are passage-keyed. Prefer lineage so the arms fuse.
+    Fall back to passage key when lineage is absent.
+    """
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    for container in (record, metadata):
+        for field in ("referenceLineageId", "lineageId"):
+            value = container.get(field)
+            if value not in {None, ""}:
+                return str(value)
+    for container in (record, metadata):
+        for field in ("key", "passageKey", "id"):
+            value = container.get(field)
+            if value not in {None, ""}:
+                return str(value)
+    return ""
+
+
 def lexical_relevance(record: dict[str, Any], semantic_query: str) -> float:
     query_terms = keyword_set(semantic_query)
     if not query_terms:

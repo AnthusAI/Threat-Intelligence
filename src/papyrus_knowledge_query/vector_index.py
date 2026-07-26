@@ -12,7 +12,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from .engine import _chunk_text, _clean_text, object_title
-from .services import GraphQLKnowledgeGraphProvider, KnowledgeQueryServices
+from .lexical_index import (
+    audit_lexical_artifact,
+    build_lexical_index,
+    clear_lexical_index_cache,
+    load_lexical_artifact,
+    passage_candidate_to_lexical_doc,
+    write_lexical_artifact_to_s3,
+    write_lexical_index,
+)
+from .services import GraphQLKnowledgeGraphProvider, KnowledgeQueryServices, S3CorpusTextProvider
 
 SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
 
@@ -153,7 +162,15 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         "failures": [],
         "warnings": [],
         "referenceResults": [],
+        "_lexicalDocs": [],
+        "_lexicalSkipReasons": {},
+        "_lexicalEligibleIds": {
+            str(reference.get("lineageId") or reference.get("id") or "")
+            for reference in references
+            if reference.get("lineageId") or reference.get("id")
+        },
     }
+    stats["_lexicalEligibleIds"].discard("")
     insight_messages = _list_insight_messages(services.graph)
     prepared_insights = _prepare_insight_messages(services, insight_messages)
     eligible_insights = [entry for entry in prepared_insights if entry.get("relation") and _insight_body_text(entry)]
@@ -176,6 +193,8 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         missing_insight = sorted(selected_insight_keys - existing_insight_keys)
         stats["missingIndexedInsightMessages"] = len(missing_insight)
         stats["missingIndexedInsightMessageSample"] = missing_insight[:20]
+        # Audit against the same scoped accepted set the builder would index.
+        stats["lexicalIndex"] = _audit_lexical_index(services, references)
         return stats
 
     if options.action == "rebuild" and existing_keys and not options.dry_run:
@@ -240,6 +259,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
     stats["missingIndexedReferencesBeforeRun"] = len(selected_keys - existing_reference_keys)
     selected_insight_keys = _insight_message_key_set(eligible_insights)
     stats["missingIndexedInsightMessagesBeforeRun"] = len(selected_insight_keys - existing_insight_keys)
+    stats["lexicalIndex"] = _finalize_lexical_index(stats, services, options)
     stats["elapsedSeconds"] = round(time.perf_counter() - started, 3)
     stats["completedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return stats
@@ -332,6 +352,7 @@ def _consume_prepared_reference(
         stats["referencesPrepared"] += 1
     reference_result["candidateCount"] = len(candidates)
     wrote_any = False
+    lexical_docs_before = len(stats.get("_lexicalDocs") or [])
     for candidate in candidates:
         stats["vectorsPrepared"] += 1
         if candidate["metadata"].get("vectorKind") in {"reference_card", "reference_summary"}:
@@ -340,6 +361,9 @@ def _consume_prepared_reference(
         elif candidate["metadata"].get("vectorKind") == "reference_passage":
             stats["passageVectorsPrepared"] += 1
             reference_result["passageVectorCount"] += 1
+            lexical_doc = passage_candidate_to_lexical_doc(candidate)
+            if lexical_doc:
+                stats["_lexicalDocs"].append(lexical_doc)
         if not options.force and candidate["key"] in existing_keys:
             stats["vectorsSkippedExisting"] += 1
             reference_result["skippedExisting"] += 1
@@ -361,6 +385,13 @@ def _consume_prepared_reference(
             reference_result["status"] = "skipped_existing"
         elif options.dry_run:
             reference_result["status"] = "prepared"
+    # Attrition accounting for the lexical completeness manifest.
+    if len(stats.get("_lexicalDocs") or []) == lexical_docs_before:
+        skip_reason = str(result.get("status") or "unknown")
+        if skip_reason == "prepared":
+            skip_reason = "no_passage_chunks"
+        reasons = stats.setdefault("_lexicalSkipReasons", {})
+        reasons[skip_reason] = int(reasons.get(skip_reason) or 0) + 1
     stats["referenceResults"].append(reference_result)
     return pending_vectors
 
@@ -1350,3 +1381,124 @@ def _vector_index_from_outputs() -> str:
     knowledge_query = custom.get("knowledgeQuery") if isinstance(custom, dict) else None
     index_arn = knowledge_query.get("s3VectorIndexArn") if isinstance(knowledge_query, dict) else None
     return index_arn if isinstance(index_arn, str) else ""
+
+
+def _audit_lexical_index(services: KnowledgeQueryServices, accepted_references: list[dict[str, Any]]) -> dict[str, Any]:
+    accepted_ids = {
+        str(reference.get("lineageId") or reference.get("id") or "")
+        for reference in accepted_references
+        if reference.get("lineageId") or reference.get("id")
+    }
+    accepted_ids.discard("")
+    try:
+        artifact = _load_lexical_artifact_for_services(services)
+    except Exception as exc:  # noqa: BLE001 - audit must not fail the vector audit
+        return {"present": False, "error": str(exc), "missingReferences": len(accepted_ids)}
+    return audit_lexical_artifact(artifact, accepted_ids)
+
+
+def _finalize_lexical_index(
+    stats: dict[str, Any],
+    services: KnowledgeQueryServices,
+    options: VectorIndexOptions,
+) -> dict[str, Any]:
+    docs = list(stats.pop("_lexicalDocs", []) or [])
+    skip_reasons = dict(stats.pop("_lexicalSkipReasons", {}) or {})
+    eligible_ids = set(stats.pop("_lexicalEligibleIds", set()) or set())
+    eligible_count = int(stats.get("referencesScanned") or len(eligible_ids) or 0)
+    report: dict[str, Any] = {
+        "docsCollected": len(docs),
+        "uniqueKeys": len({doc.get("key") for doc in docs if doc.get("key")}),
+        "eligibleCount": eligible_count,
+        "skipped": skip_reasons,
+    }
+    if not docs:
+        report["status"] = "skipped_empty"
+        return report
+    artifact = build_lexical_index(
+        docs,
+        eligible_count=eligible_count,
+        skipped=skip_reasons,
+        corpus_id=options.corpus_id or None,
+    )
+    inflated = int(artifact.get("inflatedBytes") or 0)
+    report["inflatedBytes"] = inflated
+    report["builtAt"] = artifact.get("builtAt")
+    report["docs"] = len(artifact.get("docs") or [])
+    report["manifest"] = artifact.get("manifest")
+    _progress(
+        "lexical index built: "
+        f"docs={report['docs']} refs={artifact['manifest'].get('referenceCount')}/"
+        f"{artifact['manifest'].get('eligibleCount')} "
+        f"skipped={artifact['manifest'].get('skippedTotal')} "
+        f"inflatedBytes={inflated}"
+    )
+    if skip_reasons:
+        _progress(f"lexical index skippedByReason: {json.dumps(skip_reasons, sort_keys=True)}")
+    if inflated > 50_000_000:
+        stats["warnings"].append(
+            f"Lexical index inflated size {inflated} exceeds 50MB; revisit storage format if growth continues"
+        )
+    local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    # Local lexical writes do not need embeddings; allow them during vector dry-runs.
+    try:
+        if local_path:
+            written = write_lexical_index(local_path, artifact)
+            clear_lexical_index_cache()
+            report["status"] = "written_local"
+            report["path"] = local_path
+            report["bytes"] = written
+        elif options.dry_run:
+            report["status"] = "prepared"
+        else:
+            bucket = _storage_bucket_for_services(services)
+            if not bucket:
+                report["status"] = "skipped_no_bucket"
+                stats["warnings"].append("Lexical index built but not written (no storage bucket or local path)")
+                return report
+            written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket)
+            report["status"] = "written_s3"
+            report.update(written)
+    except Exception as exc:  # noqa: BLE001
+        report["status"] = "write_failed"
+        report["error"] = str(exc)
+        stats["warnings"].append(f"Lexical index write failed: {exc}")
+        return report
+
+    # Completeness check is part of the build output — do not leave it as a
+    # separate step someone can forget to run against the artifact just written.
+    audit_ids = eligible_ids or {
+        str(doc.get("referenceLineageId") or "")
+        for doc in artifact.get("docs") or []
+        if doc.get("referenceLineageId")
+    }
+    audit_ids.discard("")
+    audit = audit_lexical_artifact(artifact, audit_ids)
+    report["audit"] = audit
+    for warning in audit.get("warnings") or []:
+        _progress(f"lexical audit warning: {warning}")
+        stats["warnings"].append(str(warning))
+    _progress(
+        "lexical audit: "
+        f"indexed={audit.get('uniqueReferences')} eligibleLive={audit.get('liveAcceptedReferenceCount')} "
+        f"drift={audit.get('manifestDrift')} missing={audit.get('missingReferences')}"
+    )
+    return report
+
+
+def _load_lexical_artifact_for_services(services: KnowledgeQueryServices) -> dict[str, Any]:
+    local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    if local_path:
+        return load_lexical_artifact(local_path=local_path)
+    bucket = _storage_bucket_for_services(services)
+    return load_lexical_artifact(bucket_name=bucket)
+
+
+def _storage_bucket_for_services(services: KnowledgeQueryServices) -> str:
+    if isinstance(services.corpus_text, S3CorpusTextProvider):
+        return services.corpus_text.bucket_name
+    return (
+        os.environ.get("PAPYRUS_STORAGE_BUCKET_NAME")
+        or os.environ.get("papyrusMedia_BUCKET_NAME")
+        or ""
+    ).strip()
