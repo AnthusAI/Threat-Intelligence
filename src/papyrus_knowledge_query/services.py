@@ -228,6 +228,7 @@ class CorpusTextProvider(Protocol):
 class KnowledgeQueryServices:
     graph: KnowledgeGraphProvider | None = None
     semantic: SemanticSearchProvider | None = None
+    lexical: SemanticSearchProvider | None = None
     corpus_text: CorpusTextProvider | None = None
     token_counter: TokenCounter = field(default_factory=TokenCounter)
 
@@ -780,7 +781,8 @@ def build_environment_services(event: dict[str, Any] | None = None) -> Knowledge
     graph = _graph_from_environment(event)
     semantic = _semantic_from_environment()
     corpus_text = _corpus_text_from_environment()
-    return KnowledgeQueryServices(graph=graph, semantic=semantic, corpus_text=corpus_text)
+    lexical = _lexical_from_environment(corpus_text)
+    return KnowledgeQueryServices(graph=graph, semantic=semantic, lexical=lexical, corpus_text=corpus_text)
 
 
 def normalize_anchor(anchor: dict[str, Any]) -> dict[str, Any]:
@@ -993,6 +995,29 @@ def _corpus_text_from_environment() -> CorpusTextProvider | None:
     if bucket:
         return S3CorpusTextProvider(bucket_name=bucket, region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
     return None
+
+
+def _lexical_from_environment(corpus_text: CorpusTextProvider | None) -> SemanticSearchProvider | None:
+    from .lexical_index import BM25LexicalProvider
+
+    local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    if local_path:
+        return BM25LexicalProvider(local_path=local_path, region_name=os.environ.get("AWS_REGION"))
+    bucket = ""
+    if isinstance(corpus_text, S3CorpusTextProvider):
+        bucket = corpus_text.bucket_name
+    if not bucket:
+        bucket = (
+            os.environ.get("PAPYRUS_STORAGE_BUCKET_NAME")
+            or os.environ.get("papyrusMedia_BUCKET_NAME")
+            or _bucket_from_amplify_outputs()
+        )
+    if not bucket:
+        return None
+    return BM25LexicalProvider(
+        bucket_name=bucket,
+        region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
+    )
 
 
 def _bucket_from_amplify_outputs() -> str:

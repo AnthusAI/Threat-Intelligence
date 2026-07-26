@@ -12,7 +12,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from .engine import _chunk_text, _clean_text, object_title
-from .services import GraphQLKnowledgeGraphProvider, KnowledgeQueryServices
+from .lexical_index import (
+    audit_lexical_artifact,
+    build_lexical_index,
+    clear_lexical_index_cache,
+    load_lexical_artifact,
+    passage_candidate_to_lexical_doc,
+    write_lexical_artifact_to_s3,
+    write_lexical_index,
+)
+from .services import GraphQLKnowledgeGraphProvider, KnowledgeQueryServices, S3CorpusTextProvider
 
 SUMMARY_RELATION_RE = re.compile(r"^reference_summary_(\d+)_tokens$")
 
@@ -153,6 +162,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         "failures": [],
         "warnings": [],
         "referenceResults": [],
+        "_lexicalDocs": [],
     }
     insight_messages = _list_insight_messages(services.graph)
     prepared_insights = _prepare_insight_messages(services, insight_messages)
@@ -176,6 +186,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
         missing_insight = sorted(selected_insight_keys - existing_insight_keys)
         stats["missingIndexedInsightMessages"] = len(missing_insight)
         stats["missingIndexedInsightMessageSample"] = missing_insight[:20]
+        stats["lexicalIndex"] = _audit_lexical_index(services, accepted_references)
         return stats
 
     if options.action == "rebuild" and existing_keys and not options.dry_run:
@@ -240,6 +251,7 @@ def index_reference_passages(services: KnowledgeQueryServices, options: VectorIn
     stats["missingIndexedReferencesBeforeRun"] = len(selected_keys - existing_reference_keys)
     selected_insight_keys = _insight_message_key_set(eligible_insights)
     stats["missingIndexedInsightMessagesBeforeRun"] = len(selected_insight_keys - existing_insight_keys)
+    stats["lexicalIndex"] = _finalize_lexical_index(stats, services, options)
     stats["elapsedSeconds"] = round(time.perf_counter() - started, 3)
     stats["completedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return stats
@@ -340,6 +352,9 @@ def _consume_prepared_reference(
         elif candidate["metadata"].get("vectorKind") == "reference_passage":
             stats["passageVectorsPrepared"] += 1
             reference_result["passageVectorCount"] += 1
+            lexical_doc = passage_candidate_to_lexical_doc(candidate)
+            if lexical_doc:
+                stats["_lexicalDocs"].append(lexical_doc)
         if not options.force and candidate["key"] in existing_keys:
             stats["vectorsSkippedExisting"] += 1
             reference_result["skippedExisting"] += 1
@@ -1350,3 +1365,87 @@ def _vector_index_from_outputs() -> str:
     knowledge_query = custom.get("knowledgeQuery") if isinstance(custom, dict) else None
     index_arn = knowledge_query.get("s3VectorIndexArn") if isinstance(knowledge_query, dict) else None
     return index_arn if isinstance(index_arn, str) else ""
+
+
+def _audit_lexical_index(services: KnowledgeQueryServices, accepted_references: list[dict[str, Any]]) -> dict[str, Any]:
+    accepted_ids = {
+        str(reference.get("lineageId") or reference.get("id") or "")
+        for reference in accepted_references
+        if reference.get("lineageId") or reference.get("id")
+    }
+    accepted_ids.discard("")
+    try:
+        artifact = _load_lexical_artifact_for_services(services)
+    except Exception as exc:  # noqa: BLE001 - audit must not fail the vector audit
+        return {"present": False, "error": str(exc), "missingReferences": len(accepted_ids)}
+    return audit_lexical_artifact(artifact, accepted_ids)
+
+
+def _finalize_lexical_index(
+    stats: dict[str, Any],
+    services: KnowledgeQueryServices,
+    options: VectorIndexOptions,
+) -> dict[str, Any]:
+    docs = list(stats.pop("_lexicalDocs", []) or [])
+    report: dict[str, Any] = {
+        "docsCollected": len(docs),
+        "uniqueKeys": len({doc.get("key") for doc in docs if doc.get("key")}),
+    }
+    if not docs:
+        report["status"] = "skipped_empty"
+        return report
+    artifact = build_lexical_index(docs)
+    inflated = int(artifact.get("inflatedBytes") or 0)
+    report["inflatedBytes"] = inflated
+    report["builtAt"] = artifact.get("builtAt")
+    report["docs"] = len(artifact.get("docs") or [])
+    _progress(f"lexical index built: docs={report['docs']} inflatedBytes={inflated}")
+    if inflated > 50_000_000:
+        stats["warnings"].append(
+            f"Lexical index inflated size {inflated} exceeds 50MB; revisit storage format if growth continues"
+        )
+    local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    # Local lexical writes do not need embeddings; allow them during vector dry-runs.
+    try:
+        if local_path:
+            written = write_lexical_index(local_path, artifact)
+            clear_lexical_index_cache()
+            report["status"] = "written_local"
+            report["path"] = local_path
+            report["bytes"] = written
+            return report
+        if options.dry_run:
+            report["status"] = "prepared"
+            return report
+        bucket = _storage_bucket_for_services(services)
+        if not bucket:
+            report["status"] = "skipped_no_bucket"
+            stats["warnings"].append("Lexical index built but not written (no storage bucket or local path)")
+            return report
+        written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket)
+        report["status"] = "written_s3"
+        report.update(written)
+        return report
+    except Exception as exc:  # noqa: BLE001
+        report["status"] = "write_failed"
+        report["error"] = str(exc)
+        stats["warnings"].append(f"Lexical index write failed: {exc}")
+        return report
+
+
+def _load_lexical_artifact_for_services(services: KnowledgeQueryServices) -> dict[str, Any]:
+    local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    if local_path:
+        return load_lexical_artifact(local_path=local_path)
+    bucket = _storage_bucket_for_services(services)
+    return load_lexical_artifact(bucket_name=bucket)
+
+
+def _storage_bucket_for_services(services: KnowledgeQueryServices) -> str:
+    if isinstance(services.corpus_text, S3CorpusTextProvider):
+        return services.corpus_text.bucket_name
+    return (
+        os.environ.get("PAPYRUS_STORAGE_BUCKET_NAME")
+        or os.environ.get("papyrusMedia_BUCKET_NAME")
+        or ""
+    ).strip()

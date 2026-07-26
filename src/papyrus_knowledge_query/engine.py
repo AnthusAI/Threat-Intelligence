@@ -15,6 +15,7 @@ from .ranking import (
     SEE_ALSO_MAX_TOKENS,
     SEE_ALSO_MIN_TOKENS,
     allocate_token_budgets,
+    fuse_ranked_lists,
     normalize_ranking_config,
     quality_signal_from_relations,
     ranking_sort_key,
@@ -22,6 +23,7 @@ from .ranking import (
     score_record,
     select_records_by_diversity,
 )
+from .lexical_index import query_has_identifier
 
 
 VALID_OUTPUT_FORMATS = {"structured", "markdown", "both"}
@@ -134,6 +136,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
     if tokenizer_metadata.get("provider") == "regex" and services.token_counter.use_tiktoken:
         warnings.append("Tiktoken tokenizer unavailable; using regex token budget fallback")
     semantic_provider = services.semantic or NoopSemanticSearchProvider()
+    lexical_provider = services.lexical
     graph_provider = services.graph
     structured = {
         "request": {
@@ -169,6 +172,7 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
         "profile": request["profile"],
         "graphProvider": getattr(graph_provider, "name", "none"),
         "semanticProvider": getattr(semantic_provider, "name", "none"),
+        "lexicalProvider": getattr(lexical_provider, "name", "none") if lexical_provider else "none",
         "corpusTextProvider": getattr(services.corpus_text, "name", "none"),
     }
     mark_stage("normalize_request")
@@ -207,15 +211,17 @@ def run_knowledge_query(input: dict[str, Any], services: KnowledgeQueryServices 
     mark_stage("derive_semantic_query")
 
     if semantic_search_enabled and request["semanticQuery"]:
-        try:
-            structured["semanticMatches"] = semantic_provider.search(
-                request["semanticQuery"],
-                request["scope"],
-                int(request["scope"]["topK"]),
-            )
-        except Exception as exc:
-            warnings.append(f"Semantic search failed: {exc}")
-    mark_stage("semantic_search", semanticMatchCount=len(structured["semanticMatches"]))
+        structured["semanticMatches"] = _hybrid_semantic_search(
+            request=request,
+            semantic_provider=semantic_provider,
+            lexical_provider=lexical_provider,
+            warnings=warnings,
+        )
+    mark_stage(
+        "semantic_search",
+        semanticMatchCount=len(structured["semanticMatches"]),
+        lexicalProvider=getattr(lexical_provider, "name", None) if lexical_provider else None,
+    )
 
     _normalize_semantic_matches(structured, request, services)
     mark_stage("normalize_semantic_matches", semanticPassageCount=len(structured["semanticPassages"]))
@@ -1146,6 +1152,69 @@ def _unique_semantic_match_source_count(structured: dict[str, Any]) -> int:
         if key:
             keys.add(str(key))
     return len(keys)
+
+
+def _hybrid_semantic_search(
+    *,
+    request: dict[str, Any],
+    semantic_provider: Any,
+    lexical_provider: Any,
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Run semantic and lexical retrieval in parallel, fuse with RRF when both succeed."""
+    query = request["semanticQuery"]
+    scope = request["scope"]
+    limit = int(scope["topK"])
+    semantic_matches: list[dict[str, Any]] = []
+    lexical_matches: list[dict[str, Any]] = []
+
+    def _run_semantic() -> list[dict[str, Any]]:
+        return semantic_provider.search(query, scope, limit)
+
+    def _run_lexical() -> list[dict[str, Any]]:
+        if lexical_provider is None:
+            raise FileNotFoundError("lexical provider not configured")
+        # Overfetch so RRF has room after reference-level collapse.
+        return lexical_provider.search(query, scope, max(limit, min(100, limit * 6)))
+
+    futures = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures[executor.submit(_run_semantic)] = "semantic"
+        if lexical_provider is not None:
+            futures[executor.submit(_run_lexical)] = "lexical"
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                if label == "semantic":
+                    warnings.append(f"Semantic search failed: {exc}")
+                else:
+                    warnings.append(f"Lexical search unavailable: {exc}")
+                continue
+            if label == "semantic":
+                semantic_matches = result or []
+            else:
+                lexical_matches = result or []
+
+    if not lexical_matches:
+        return semantic_matches
+    if not semantic_matches:
+        return lexical_matches
+
+    # Gate fusion to identifier-shaped queries. Always-on equal-weight RRF let
+    # mid-ranked dual-list hits outrank a pure semantic #1 and collapsed
+    # paraphrase Hit@5 (5/5 → 1/5) on the ai-ml golden set. BM25 still runs for
+    # identifier lookups (weight 1.5) and remains available when semantic fails.
+    if not query_has_identifier(query):
+        return semantic_matches
+
+    return fuse_ranked_lists(
+        [semantic_matches, lexical_matches],
+        weights=[1.0, 1.5],
+        k=60,
+        list_names=["semantic", "lexical"],
+    )
 
 
 def _normalize_semantic_matches(
