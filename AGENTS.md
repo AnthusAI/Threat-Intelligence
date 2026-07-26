@@ -278,6 +278,66 @@ rendering contracts.
   Do not assume Biblicus consumes that export until the Biblicus agent confirms
   the command contract.
 
+## Working rules for coding agents
+
+Every rule below exists because it was violated and cost real cleanup. They are
+listed with the reason, because a rule whose purpose you understand survives
+contact with a situation its author did not anticipate.
+
+### Live environments
+
+- **Never create records in a live environment as a test fixture.** An agent
+  once minted a fake `accepted` Reference in production to exercise a code path;
+  it became evidence-eligible and had to be hunted down and deleted. Use the
+  sandbox, use data that already exists, or stop and ask.
+- **Never read, echo, export, or pass a signing secret.** Do not use
+  `--secret`, and do not run `ssm get-parameter --with-decryption` against a
+  `PAPYRUS_JWT_SECRET`. The CLI reads it itself. A secret printed to a terminal
+  is in shell history and in the agent transcript, and stays valid until someone
+  rotates it — which has now happened once. If you believe you need the raw
+  secret, the tooling is broken: say so and stop.
+- **Never move data between environments.** One installation is one
+  publication. Copying a corpus from one `amplify-*` bucket to another put 2,777
+  objects of another publication's data into this instance. If you are reaching
+  for `aws s3 cp` between two app buckets, you are solving the wrong problem.
+- **Index rebuilds are planned, not ad hoc.** A forced re-embed costs real money
+  and destroys the prior state irrecoverably. Route through the rebuild chore.
+- See `AGENTS.local.md` for the AWS profile, environments, and auth specifics.
+
+### Verification and reporting
+
+- **Measure the question, not a proxy.** An agent measured "references lacking a
+  marker" (1422) and concluded ingestion was broken, then removed a production
+  guard. The real measure — references actually blocked — was 3. Before acting
+  on a number, state what it measures and confirm that is the thing you care
+  about.
+- **Never change production behaviour to make a test pass.** If a test fails,
+  determine whether the test is stale or the code regressed, and say which. Do
+  not relax assertions in bulk and do not delete a guard the test is exercising.
+- **Report a red baseline before you start.** If the suite you are about to
+  modify is already failing, say so up front. A red baseline hides new defects —
+  a real bug shipped inside a closed issue precisely because the tests that
+  would have caught it were already failing and being ignored.
+- **Failures must be visible.** No bare `except: pass`. An archival path silently
+  did nothing for every reference because its exception handler swallowed an
+  `UnboundLocalError`. Degrade to a recorded warning, never to silence.
+- **Verify claims before reporting them.** "Confirmed working" must mean you
+  observed it. A run that skipped all 30 items is not a measurement of decision
+  time.
+
+### Repository hygiene
+
+- **Board changes go through the Kanbus CLI** (`kbs`), never by editing
+  `project/**.json`. Hand-written JSON broke the board twice and once left the
+  CLI unable to parse its own data. Markdown under `project/wiki/` is the
+  documented exception.
+- **Commit freely; push only when asked.** Push is the one action here that is
+  not cheaply reversible.
+- **No scratch files in the repository root.** Put throwaway scripts somewhere
+  ignored and delete them when done.
+- **Preserve unrelated uncommitted work.** This tree is often dirty. Stage
+  deliberately; never `git add -A` when someone else's work is in flight.
+
 ## Schema and API alignment (no compatibility shims)
 
 Local application code and the deployed GraphQL API must describe the same contract.
