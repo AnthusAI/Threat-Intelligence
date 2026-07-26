@@ -30,7 +30,8 @@ Papyrus already has capabilities the Cerebras system lacks:
 The gaps are specific retrieval techniques, not the overall architecture.
 Cerebras's core lesson — no single scorer is trusted on its own; fuse several
 retrieval views of the same corpus — is the one Papyrus has not yet absorbed:
-retrieval today is embedding-only.
+retrieval was embedding-only until the hybrid lexical arm landed (see the
+roadmap status below).
 
 ## Second source: graph engineering
 
@@ -553,7 +554,7 @@ gates growing the corpus.
    above: the golden set cannot observe passage-level changes, so this landed on
    code review rather than measurement.
 2. **Hybrid lexical + RRF** — fixes the worst domain gap (exact-identifier
-   lookup is embedding-only today), three other items stack on it, and it is the
+   lookup was embedding-only), three other items stack on it, and it is the
    lossless safety net under every lossy transformation that follows.
 3. **Age decay** — small change, high domain value; the metadata addition is
    backward-compatible and rides along with any rebuild.
