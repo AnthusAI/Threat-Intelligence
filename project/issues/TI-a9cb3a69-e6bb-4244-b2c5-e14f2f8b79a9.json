@@ -10,9 +10,16 @@
   "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
   "labels": [],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "cb554c8b-730b-447d-a2e9-dcb974743bba",
+      "author": "ryan",
+      "text": "## Before you change anything: the observation is right, the diagnosis is probably wrong\n\n`Reference.metadata` being null is **by design**, not a bug. `model_attachments.py:327` does:\n\n```python\nelif record[\"modelName\"] == \"Reference\" and \"metadata\" in expected:\n    metadata = parse_jsonish(expected.pop(\"metadata\"))\n```\n\nIt **pops** the field off the record and writes it to a `ModelAttachment` with `role=\"metadata\"`, because DynamoDB items have a size limit and large payloads are offloaded to S3. Every accepted reference in this corpus works that way. So \"Reference.metadata stays null\" is the system behaving correctly.\n\n**The real question is whether `registration_note` reaches that attachment.** Check that first, because it decides which layer is broken:\n\n- **If the note is in the `role=\"metadata\"` attachment**: the write path is fine and the bug is in whatever read `Reference.metadata` directly and found nothing — likely the queue builder. Fix the reader. Do not touch the intake path.\n- **If the note is absent from the attachment too**: the bug is upstream in `catalog.py`. `item_registration_note` is computed at `:286-289` and feeds `curation_note`, but confirm it actually lands in `normalized_metadata` (`:299`) rather than only being used for the curation note.\n\nConcretely: pick one of the 18 new prospects, fetch its `ModelAttachment` rows, find `role=\"metadata\"`, and read the content. That single check tells you which fix to make.\n\n## Why this matters beyond the bug\n\nThe rationale is what makes a review queue reviewable. Without it a prospect is a URL and a title, and the operator has to reconstruct context the machine already had. It is also the input to `kanbus-ec5555` (grounding triage rationales) — the 30-item session found 0/30 rationales sufficient to decide from without opening the source, and missing provenance is part of why.\n\nTogether with `TI-1ad2f4`, this is why the ingestion exercise had to write an `operator-queue.json` sidecar: the schema currently cannot answer \"what is in my review queue and why is each item here.\" That sidecar is a symptom. Fix these two and the queue derives from the data model.",
+      "created_at": "2026-07-26T23:43:33.371325Z"
+    }
+  ],
   "created_at": "2026-07-26T20:02:23.028830Z",
-  "updated_at": "2026-07-26T20:02:23.028830Z",
+  "updated_at": "2026-07-26T23:43:33.371325Z",
   "closed_at": null,
   "custom": {}
 }

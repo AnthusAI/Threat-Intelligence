@@ -10,9 +10,16 @@
   "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
   "labels": [],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "3ea1a761-cd5a-4577-95f0-63570b3ab0f0",
+      "author": "ryan",
+      "text": "## Diagnosis: the machinery exists, the caller does not enable it\n\n`catalog.py:335`:\n\n```python\nif context.get(\"createCurationAssignment\"):\n    records.extend(reference_curation_assignment_records(item, reference[\"expected\"], context))\n```\n\n`reference_curation_assignment_records` is defined at `:514` and looks complete. The records are simply never requested, because the research-intake path does not set `createCurationAssignment` in its context. Note the sibling flag `createIngestionRationaleMessage` immediately above behaves the same way — worth checking whether that one is set either, since it is the other half of the same provenance story.\n\nSo this is likely a one-flag fix in the intake caller rather than new code. Trace back from `build_reference_catalog_registration_records` (`catalog.py:133`) to `intake_research_packet_proposals` (`assignments_workflow.py:1131`) and see what context is being built.\n\n**Before flipping it, check what already exists.** There are 12 Assignments total and 0 curation ones, but 996 pending references — so this has been off for a long time, not just for the new 18. Confirm that turning it on does not try to create ~996 assignments retroactively on the next intake run, and decide deliberately whether existing pending references should get assignments backfilled or only new ones.\n\n## Why it matters\n\nA curation Assignment is the workflow record that a prospect needs review. Without one, \"what is in my queue\" cannot be answered from the data model — which is why the ingestion exercise wrote a JSON sidecar instead. It is also the natural home for review state that `references triage-plan` currently has to recompute from scratch each run by listing every Reference, Attachment, Message and Relation unfiltered (`references_commands.py:139-143`), which is fine at 5 accepted references and will not stay fine.\n\nPair this with `TI-a9cb3a` — together they are the difference between a review queue that lives in the schema and one that lives in a file.",
+      "created_at": "2026-07-26T23:43:33.394162Z"
+    }
+  ],
   "created_at": "2026-07-26T20:02:23.043262Z",
-  "updated_at": "2026-07-26T20:02:23.043262Z",
+  "updated_at": "2026-07-26T23:43:33.394162Z",
   "closed_at": null,
   "custom": {}
 }
