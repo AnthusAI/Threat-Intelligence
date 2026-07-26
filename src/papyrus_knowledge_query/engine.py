@@ -1240,6 +1240,11 @@ def _normalize_semantic_matches(
             ("curationStatusKey", "curationStatusKey"),
             ("referenceId", "referenceId"),
             ("referenceLineageId", "referenceLineageId"),
+            # Recency epoch-day scalars — must be allowlisted or score_record
+            # never sees them on normalized vector matches (silent no-op).
+            ("sourcePublishedAtDay", "sourcePublishedAtDay"),
+            ("sourceUpdatedAtDay", "sourceUpdatedAtDay"),
+            ("retrievedAtDay", "retrievedAtDay"),
         ):
             if normalized.get(key) in {None, ""} and metadata.get(metadata_key) not in {None, ""}:
                 normalized[key] = metadata.get(metadata_key)
@@ -2253,10 +2258,12 @@ def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any],
     else:
         passage_relevance = min(1.0, passage_relevance / 12.0)
     quality_score = float(parent_ranking.get("qualityScore", request["ranking"].get("missingQuality", 0.5)))
+    recency_score_value = float(parent_ranking.get("recencyScore", 0.5))
     weights = request["ranking"].get("weights") or {}
     final_score = (
-        float(weights.get("relevance", 0.70 / 0.95)) * max(0.0, min(1.0, passage_relevance))
-        + float(weights.get("quality", 0.25 / 0.95)) * max(0.0, min(1.0, quality_score))
+        float(weights.get("relevance", (0.70 / 0.95) * 0.93)) * max(0.0, min(1.0, passage_relevance))
+        + float(weights.get("quality", (0.25 / 0.95) * 0.93)) * max(0.0, min(1.0, quality_score))
+        + float(weights.get("recency", 0.07)) * max(0.0, min(1.0, recency_score_value))
     )
     passage["ranking"] = {
         "relevanceScore": round(max(0.0, min(1.0, passage_relevance)), 4),
@@ -2264,6 +2271,8 @@ def _assign_passage_ranking(passage: dict[str, Any], structured: dict[str, Any],
         "qualityRating": parent_ranking.get("qualityRating"),
         "qualityKnown": bool(parent_ranking.get("qualityKnown")),
         "qualityRelationId": parent_ranking.get("qualityRelationId"),
+        "recencyScore": round(max(0.0, min(1.0, recency_score_value)), 4),
+        "recencyKnown": bool(parent_ranking.get("recencyKnown")),
         "finalScore": round(max(0.0, min(1.0, final_score)), 4),
         "tokenBudget": parent_ranking.get("tokenBudget"),
         "parentReferenceLineageId": reference_key,

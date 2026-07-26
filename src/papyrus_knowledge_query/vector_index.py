@@ -793,11 +793,18 @@ def _base_reference_metadata(
     reference_metadata_payload: dict[str, Any] | None = None,
     reference_summary_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from .ranking import epoch_day_from_value
+
     title = _reference_title(reference, reference_metadata_payload)
     subtitle = _reference_subtitle(reference, reference_metadata_payload)
     summary_payload = reference_summary_payload or {}
     reference_summary = str(summary_payload.get("summary") or "")
-    return {
+    published_day = epoch_day_from_value(reference.get("sourcePublishedAt"))
+    updated_day = epoch_day_from_value(reference.get("sourceUpdatedAt"))
+    retrieved_day = epoch_day_from_value(
+        reference.get("retrievedAt") or reference.get("importedAt") or reference.get("updatedAt")
+    )
+    metadata = {
         "kind": "reference",
         "id": reference.get("id"),
         "lineageId": reference.get("lineageId"),
@@ -817,6 +824,15 @@ def _base_reference_metadata(
         "curationStatus": reference.get("curationStatus"),
         "curationStatusKey": reference.get("curationStatusKey"),
     }
+    # Epoch-day integers — S3 Vectors filterable scalars. Omitted when unknown so
+    # older vectors without these keys remain valid (recency scores neutral).
+    if published_day is not None:
+        metadata["sourcePublishedAtDay"] = published_day
+    if updated_day is not None:
+        metadata["sourceUpdatedAtDay"] = updated_day
+    if retrieved_day is not None:
+        metadata["retrievedAtDay"] = retrieved_day
+    return metadata
 
 
 def _truncate_filterable_metadata(value: str, limit: int) -> str:
