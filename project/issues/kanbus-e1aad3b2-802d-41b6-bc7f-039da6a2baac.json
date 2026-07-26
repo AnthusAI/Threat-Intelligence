@@ -3,7 +3,7 @@
   "title": "load_dotenv silently overrides GraphQL endpoint from .env",
   "description": "## Problem\n`papyrus_content.env.load_dotenv()` used to force-overwrite `PAPYRUS_GRAPHQL_ENDPOINT` (and JWT) from `.env` even when the process already exported a different endpoint. That silently rewrote TI reader production (`ur2anu…`) back to ryan-sandbox (`nkqutx…`).\n\nFailure mode is silent: measure/mutate against the wrong AppSync with a JWT that may 401 or, worse, succeed against the wrong environment.\n\nSurfaced during assisted curation triage (`kanbus-1f97c7`) when full-queue plan runs had to force TI production after dotenv.\n\n## Partial fix already landed (epic branch)\nOn `epic/assisted-curation-triage`, `PAPYRUS_GRAPHQL_ENDPOINT` was removed from `_DOTENV_OVERRIDE_KEYS` so an explicit process export wins. JWT/TTL still override (refresh-into-.env workflow). Unit test covers endpoint non-override.\n\n## Remaining work\n- Audit other callers / docs that assume dotenv always wins for endpoint\n- Consider printing active endpoint + host nickname (sandbox vs TI prod vs Papyrus main) at CLI start for mutating commands\n- Decide whether `.env.local` should be the only override path for endpoint switches",
   "type": "bug",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "assignee": null,
   "creator": null,
@@ -12,9 +12,16 @@
     "tooling"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "1892e282-cb7b-4f5f-a5f1-92cea7b4316a",
+      "author": "ryan",
+      "text": "Resolved. The auth group now covers endpoint, JWT, TTL, signing secret, and SSM parameter, with the endpoint deliberately outside the override set so an explicit export always wins (3960dc5, reconciled in the epic merge 4f3076c). Verified both directions: exporting the endpoint suppresses .env for the whole group; exporting nothing lets .env supply all of it, so auth refresh-jwt --write-env .env still works. Cursor's unit test covering endpoint non-override came across in the merge.",
+      "created_at": "2026-07-26T19:27:54.985230Z"
+    }
+  ],
   "created_at": "2026-07-25T21:36:08.556316Z",
-  "updated_at": "2026-07-25T21:36:12.990467Z",
-  "closed_at": null,
+  "updated_at": "2026-07-26T19:27:55.004392Z",
+  "closed_at": "2026-07-26T19:27:55.004392Z",
   "custom": {}
 }

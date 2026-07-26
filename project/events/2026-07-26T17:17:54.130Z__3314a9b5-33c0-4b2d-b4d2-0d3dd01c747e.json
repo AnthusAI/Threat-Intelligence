@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "3314a9b5-33c0-4b2d-b4d2-0d3dd01c747e",
+  "issue_id": "TI-95ddf12f-ab9b-4857-a2dd-2ecdb5e6d8a6",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-26T17:17:54.130Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "`PASSAGE_HEADING_BOOSTS` in `src/papyrus_knowledge_query/engine.py` now hardcodes two publications' document structures — academic paper sections (abstract, introduction, evaluation, results) and threat-intel report sections (executive summary, IOCs, attribution, detections). Both sets live in shared engine code that every Papyrus instance runs.\n\n## Why this is wrong\n\n`kanbus-5c7cde` existed because passage scoring was overfit to one corpus. We fixed it by adding a second corpus's overfit alongside the first. That is better than before — this instance genuinely ingests both — but it does not scale and it inverts the architecture: a legal, medical, or financial publication makes it three domains in a file none of them should have to care about.\n\nPapyrus is a general CMS. One installation is one publication, and what counts as a high-value section is a property of *that publication's source material*, not of the retrieval engine. The engine should know that headings can be weighted; it should not know what \"MITRE ATT&CK Mapping\" is.\n\nNote the identifier layer already gets this right: `_normalize_doi`, `_normalize_arxiv_id`, `_normalize_isbn`, `_normalize_pmid` are per-type normalizers composing into a general capability, with no publication assuming primacy. Heading profiles should follow that shape.\n\n## Proposed direction\n\nMove heading weights into per-corpus configuration. `corpora/papyrus-steering.yml` already declares corpora with `key`, `role`, and `localClassifiers`, so a `passageHeadings` block per corpus is a natural extension and keeps publication-specific knowledge in publication-specific config:\n\n```yaml\ncorpora:\n  - key: \"threat-intelligence\"\n    passageHeadings:\n      \"executive summary\": 8\n      \"iocs\": 6\n```\n\nDesign points worth settling during implementation, not now:\n\n- **Fallback when a corpus declares nothing.** A small structural default (a first-section bias) is probably better than zero weighting, but it must not be either domain's vocabulary.\n- **Multi-corpus instances.** This installation has one corpus declared but the AI/ML instance may have several; resolution should key off the reference's `corpusId`, which the passage path already has.\n- **Keep the engine's default empty.** If `PASSAGE_HEADING_BOOSTS` survives as a constant it will drift back into a dumping ground. Better that the engine ships no domain vocabulary at all.\n\n## Not urgent\n\nThe current state is functional and correct for this instance. This is architectural hygiene to do before a third publication exists, not a bug to fix now. Sequence it after the hybrid-lexical epic, since that work touches the same scoring path and will make the seams clearer.",
+    "issue_type": "epic",
+    "labels": [
+      "retrieval",
+      "generality"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 3,
+    "status": "open",
+    "title": "Move passage heading weights out of engine code into per-corpus config"
+  }
+}

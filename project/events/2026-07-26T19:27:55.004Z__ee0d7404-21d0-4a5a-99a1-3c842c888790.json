@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "ee0d7404-21d0-4a5a-99a1-3c842c888790",
+  "issue_id": "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac",
+  "event_type": "state_transition",
+  "occurred_at": "2026-07-26T19:27:55.004Z",
+  "actor_id": "ryan",
+  "payload": {
+    "from_status": "open",
+    "to_status": "closed"
+  }
+}

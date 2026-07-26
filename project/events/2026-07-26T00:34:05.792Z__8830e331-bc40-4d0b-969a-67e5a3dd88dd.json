@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "8830e331-bc40-4d0b-969a-67e5a3dd88dd",
+  "issue_id": "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e",
+  "event_type": "field_updated",
+  "occurred_at": "2026-07-26T00:34:05.792Z",
+  "actor_id": "ryan",
+  "payload": {
+    "changes": {
+      "labels": {
+        "from": [],
+        "to": [
+          "eval",
+          "tooling"
+        ]
+      },
+      "parent": {
+        "from": null,
+        "to": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d"
+      }
+    }
+  }
+}
