@@ -28,10 +28,16 @@
       "author": "ryan",
       "text": "## Concurrency ceiling — vector/lexical sync (from kanbus-a61c12)\n\nObserved while building the hybrid lexical index over Papyrus-main `knowledge-corpus-ai-ml-research` (~1376 accepted refs):\n\n| workers | result |\n|---|---|\n| **1** | Completed full dry-run sync (~22 min). Lexical artifact built: 5658 chunks. |\n| **4** | Failed around **1325/1376** (~96%) with AppSync/`urllib` `Connection refused` / `URLError`. No canonical lexical object was written that run (died before finalize). |\n\nInterpretation: looks like connection exhaustion or AppSync-side throttling under parallel GraphQL+S3 prepare, not a one-off blip. Prefer `--workers 1` (or low single-digit with caution) for full-corpus syncs until the listing path has retry/backoff.\n\n**Retry/backoff:** `index_reference_passages` uses `ThreadPoolExecutor` over `_prepare_reference_for_indexing` with **no retry/backoff** around GraphQL listing/attachment reads (`vector_index.py`). A failed future fails the batch. Not fixed here — note for whoever runs the next rebuild.\n\nSource: `kanbus-a61c12` hybrid lexical epic (2026-07-26).\n",
       "created_at": "2026-07-26T18:25:02.102721Z"
+    },
+    {
+      "id": "bcf4b187-603a-4fb2-bb44-1371059a796a",
+      "author": "ryan",
+      "text": "## Ride-along: recency epoch-day metadata (`kanbus-bb12d3`)\n\n`_base_reference_metadata` now writes `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay` (UTC epoch-day ints) when the reference has dates. **Do not run a solo rebuild for this** — missing dates score neutral (backward-compatible).\n\nWhen the ingestion exercise (`TI-c46828`) triggers a sync, that one sync should pick up these fields. Until then the recency ranking signal is inert on existing vectors (verified: 0/200 sampled vectors have the keys; live `recencyKnown=false`).\n",
+      "created_at": "2026-07-26T20:50:38.579835Z"
     }
   ],
   "created_at": "2026-07-25T13:31:10.569418Z",
-  "updated_at": "2026-07-26T18:25:02.102721Z",
+  "updated_at": "2026-07-26T20:50:38.579835Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",
