@@ -4,7 +4,7 @@
   "description": "",
   "type": "epic",
   "status": "open",
-  "priority": 2,
+  "priority": 1,
   "assignee": null,
   "creator": null,
   "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
@@ -28,7 +28,7 @@
     }
   ],
   "created_at": "2026-07-25T22:45:45.158486Z",
-  "updated_at": "2026-07-26T20:52:57.196142Z",
+  "updated_at": "2026-07-27T22:55:55.574382Z",
   "closed_at": null,
   "custom": {
     "project_label": "TI",

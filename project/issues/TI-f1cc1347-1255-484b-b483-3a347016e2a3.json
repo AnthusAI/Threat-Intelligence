@@ -12,9 +12,16 @@
     "retrieval"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "eb798955-9023-4260-8c5e-d95fdf8eaffd",
+      "author": "ryan",
+      "text": "Done pending merge. Branch `fix/recency-prefer-publication-date`: `bfc2f33` (fix + regression test) and `5571596` (golden-set run + coverage measurement). Reviewed and correct — the neutral-0.5 / recencyKnown=false choice for unknown dates is right, and retrievedAtDay is correctly retained as provenance only.\n\nTwo findings came out of the verification run, both filed separately:\n- Identifier retrieval is 0/5 on develop, unrelated to this fix — TI-b9f6da (P0). The MRR delta in the post-pubdate report is entirely that regression, not this change.\n- Publication-date coverage is 23% / 7.7%, so the recency signal is honest but inert — TI-06361a (P1).\n\nThis branch is safe to merge. Its measured effect on the four categories the instrument can attribute to ranking is bit-identical.",
+      "created_at": "2026-07-27T22:57:13.857952Z"
+    }
+  ],
   "created_at": "2026-07-27T02:18:46.468715Z",
-  "updated_at": "2026-07-27T02:18:46.468715Z",
+  "updated_at": "2026-07-27T22:57:13.857952Z",
   "closed_at": null,
   "custom": {}
 }

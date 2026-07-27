@@ -1,8 +1,8 @@
 {
-  "built_at": "2026-07-27T00:21:28Z",
+  "built_at": "2026-07-27T22:53:37Z",
   "file_mtimes": {
     "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4.json": 1785111688.501623,
-    "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d.json": 1785109339.964645,
+    "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d.json": 1785118694.395033,
     "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e.json": 1785095078.117206,
     "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e.json": 1785099199.099136,
     "TI-71ce66be-6c57-46e0-9344-357599a8006a.json": 1785111688.389802,
@@ -11,9 +11,11 @@
     "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9.json": 1785111688.487995,
     "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393.json": 1785111688.418031,
     "TI-b55c369e-3bb5-4470-9379-46da7faffa67.json": 1785111688.474523,
+    "TI-c21d2816-dcb5-4d63-981a-7f191c87fe97.json": 1785175892.067641,
     "TI-c46828bd-f792-452f-9c49-9f22d06ea730.json": 1785111645.131827,
     "TI-db8f79f0-0a20-4ade-89bd-ffc5d8d4ddbc.json": 1785111688.404406,
     "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1.json": 1785111688.432006,
+    "TI-f1cc1347-1255-484b-b483-3a347016e2a3.json": 1785118726.469585,
     "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a.json": 1785080351.573473,
     "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d.json": 1785094102.896077,
     "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d.json": 1785080524.607249,
@@ -35,7 +37,7 @@
     "kanbus-d72d6773-2c48-49f4-9af1-5f63cffc0b29.json": 1784996244.994504,
     "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac.json": 1785094075.004522,
     "kanbus-ea1686cc-ef82-4864-97ec-31cfc87da971.json": 1784998334.997491,
-    "kanbus-ec55555e-f1ef-456f-b2b6-8c5e3519e431.json": 1785080351.574524,
+    "kanbus-ec55555e-f1ef-456f-b2b6-8c5e3519e431.json": 1785118694.395584,
     "kanbus-ef313421-ceec-4372-9855-5080dc15b733.json": 1784991272.477976,
     "kanbus-ef3b35aa-00cc-4876-ac2c-df23816fadbe.json": 1784989594.923294
   },
@@ -80,7 +82,20 @@
     {
       "assignee": null,
       "closed_at": null,
-      "comments": [],
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:29:48.410496Z",
+          "id": "c4246e9a-d48e-4bf3-9781-bbc8e6975e8b",
+          "text": "## Fix on epic/e2e-ingestion\n\nRoot cause: process-fetch-url-text required a find-stage marker (or source attachment) before using `Reference.sourceUri`. Fresh research HTML prospects have a fetchable URL but no find marker → `skippedNeedsFind` → eligible=0. Tavily intake also forced `--url-text false`, hiding the bug.\n\n### Changes\n1. `_resolve_process_source_uri` allows non-DOI `sourceUri` without find marker (DOI resolver hosts still need find).\n2. Research intake reloads `ReferenceAttachment` after url-text so metadata generation sees extracted text.\n3. Tavily no longer defaults url-text/metadata-from-text to false.\n\nUnit tests cover HTML eligible + DOI still gated."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T01:58:45.125938Z",
+          "id": "588d689f-6096-4cef-8383-200223ebf9c7",
+          "text": "## Verification\n\nAfter fix: 46/46 new batch HTML prospects resolve as process-eligible without find-stage marker or source attachments. Smoke `run_reference_url_text_extraction` on 3 refs: eligible=3 planned=3 skippedNeedsFind=0 failures=0.\n\nAlso accept `PAPYRUS_STORAGE_BUCKET_NAME` in bucket resolution (production TI env uses that name), and add a 120s Biblicus url-text subprocess timeout so hung fetches fail per-ref instead of stalling the whole intake."
+        }
+      ],
       "created_at": "2026-07-26T20:02:23.056279Z",
       "creator": null,
       "custom": {},
@@ -90,10 +105,10 @@
       "labels": [],
       "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
       "priority": 1,
-      "status": "open",
+      "status": "in_progress",
       "title": "New pending HTML prospects get no url-text fetch; metadata generation skips all",
       "type": "bug",
-      "updated_at": "2026-07-26T20:02:23.056279Z"
+      "updated_at": "2026-07-27T01:58:45.125938Z"
     },
     {
       "assignee": null,
@@ -331,6 +346,46 @@
       "comments": [
         {
           "author": "ryan",
+          "created_at": "2026-07-27T02:46:09.342858Z",
+          "id": "7e7de11d-297d-42ea-bb39-48eb75b369a9",
+          "text": "## Correction — the gap is bigger than \"nothing reads Assignments\"\n\nMy original framing was imprecise. Inspecting `.papyrus-runs/ec5555-batch/human-queue.json` (43 items) shows three distinct layers, only two of which are persisted:\n\n| Layer | Where it lives |\n|---|---|\n| The References | GraphQL — 1024 pending |\n| \"Needs review\" | GraphQL — 46 open curation Assignments |\n| **Lane, clusterId / clusterPrimary / clusterSiblingIds, evidence, mechanicalAction, autoArchiveRule, exploratory** | **only the plan file** |\n\nSo the records are in the API. The **triage judgment layer** is not — it is recomputed on every `triage-plan` run and written to a gitignored file that expires with its run directory.\n\nThat layer is what makes the queue reviewable. Without it an operator has 1024 pending References with no way to tell which are new, which are duplicates of each other, or why any of them is worth attention.\n\n## The real design question\n\nNot \"read the Assignments\" — that alone would produce an unranked, unexplained list. The question is whether lane, cluster membership, and evidence should **persist**, and where.\n\nConsequences of the current recompute-every-run design:\n\n- A half-worked review session cannot resume; the lanes are gone unless the plan file survives.\n- A UI (`kanbus-4d5390`) must recompute the whole triage before rendering anything, over an unfiltered listing of four models.\n- Two runs over the same corpus can legitimately disagree — thresholds are constants today, but the accepted/rejected history they read is not, so lane assignment drifts as curation proceeds. Nothing records which computation an operator was looking at when they decided.\n\nOptions worth weighing rather than assuming:\n\n1. **Persist the triage result** — lane, cluster, evidence on the curation Assignment, written when `triage-plan` runs. Queue becomes queryable, sessions resumable, decisions attributable to a specific triage. Cost: another write path, and staleness when the corpus moves under it.\n2. **Persist only cluster membership** (a genuinely corpus-level fact, arguably a `SemanticRelation`) and recompute lane/evidence per session as cheap derived output.\n3. **Keep recompute, make the plan a first-class artifact** — durable location, addressable id, referenced from the Assignment. Least change; still leaves the queue invisible to anything but the CLI.\n\nI lean 2: cluster membership is a fact about the corpus and belongs in the graph, while lane and evidence are judgments relative to a moment and a threshold set, which are better recomputed than staled. But this is a design call worth making deliberately, not by picking whichever is easiest to implement.\n\nWhatever is chosen, the loop still needs closing: nothing transitions a curation Assignment when `review_reference_curation` records a decision, so the 46 `open` rows will drift from reality as soon as curation starts."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T16:13:41.530811Z",
+          "id": "599d6cb1-428f-429a-9651-31fe530d53f2",
+          "text": "## Approved design — triage state moves into GraphQL\n\nPapyrus is a multi-agent system in which the AppSync API is the coordination substrate. A run-scoped local file is invisible to other agents, to a second machine, to the Newsroom UI, and to the next run. My earlier \"recompute per session\" recommendation assumed a single-operator CLI and is **withdrawn**.\n\n**Nothing needs a new top-level model.** This decomposes onto three patterns already in the codebase.\n\n### (a) Run-level plan → a `Message`, copying `research_packet` exactly\n\nResearch already solves this problem. `apply_research_packet` (`assignments_workflow.py:865`) writes a `Message` with `messageKind=\"research_packet\"`, payload auto-offloaded to a `ModelAttachment(role=\"metadata\")` by `expand_private_payload_records`, linked to its Assignment by a `SemanticRelation` with predicate `produces`. `load_assignment_research_packet_entries` (`:1327`) reads it back through the `subjectStateKey` / `objectStateKey` GSIs with **no table scan**.\n\nCopy that shape with `messageKind=\"curation_triage_plan\"`. Use a deterministic content-addressed id the way `research_packet_hash` (`:1775`) does, so concurrent planners converge on the same row rather than conflicting — that is this codebase's concurrency style and a better fit here than locking.\n\nThe `produces` seed (`corpora/papyrus-semantic-relation-types.yml:344-354`) already permits `assignment → message`, so no relation-type change. `Message` is a `realtimeModel`, so the UI gets subscriptions free.\n\n### (b) Per-item current state → new `Assignment` fields + one composite GSI\n\nThe `curation.reference-intake` Assignment is already 1:1 with a pending Reference and idempotently keyed on `[corpusId, referenceLineageId]` (`catalog.py:517-520`). Add `triageLane`, `triageClusterId`, `triageClusterPrimary`, `triageRationale`, `triageRunId`, `triageUpdatedAt`, `triageMechanicalRule`, `triageMechanicalAction`, `triageMechanicalReasonCode`.\n\nDerive `triageQueueLaneKey = \"<queueKey>#<status>#<lane>\"` in `add_operational_index_fields` (`graphql_authoring.py:885`), exactly as `KnowledgeImportRun.corpusImportKindKey` is derived. Index it with sort keys `priority, createdAt`.\n\n**Two things that already work and should be used rather than scanned around:** `queueStatusKey` + `listAssignmentsByQueueStatusAndPriority` already answers \"open assignments in corpus X\" with no schema change, and `listReferencesByCurationStatusKeyAndUpdatedAt` (`schema.ts:1306`) exists but is not registered in `INDEX_DEFINITIONS` — registering it removes the Reference scan outright.\n\n### (c) Decisions → `AssignmentEvent` + metadata attachment\n\n`reporting_packet_review.py:97-116` is the precedent and `AGENTS.md:194-201` blesses it: non-lifecycle decisions use `AssignmentEvent.eventType` with structured metadata in an event-owned `ModelAttachment`. Use `curation_triage_*` types. Zero schema change.\n\n**Close the loop.** `review_reference_curation` (`reference_actions.py:170`) must transition the Assignment on decision. Nothing does today, so the 46 `open` rows drift from reality the moment curation starts.\n\n### Housekeeping this forces\n\n- `ASSIGNMENT_FIELDS` (`graphql_authoring.py:56-61`) must gain the new fields or reads silently return `None`.\n- `catalog.py:536-537` writes `brief` and `instructions`, which do not exist in the deployed schema and are silently stripped. Delete them.\n- **`amplify/data/schema.ts` is the deployed schema.** The large inline schema in `resource.ts` is dead — only its type is exported. Confirmed against `amplify_outputs.json`.\n\n### Deploy caution — new for this initiative\n\nThis is the first change here that alters the deployed schema. Use `ampx` against the **sandbox only**. Do not run production deploys locally; per `AGENTS.md` Core Rules those go through the pipeline from `main`. Verify against sandbox, then hand the schema change over rather than deploying it yourself.\n\n### Acceptance\n\nThe real test is not \"the queue renders.\" It is: **read the queue from a second process with no access to `.papyrus-runs/` and get the same answer.** Also confirm the read is index-only rather than scanning, that running the planner twice produces one plan Message rather than two, and that accepting a reference moves its Assignment out of `open`."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T18:11:32.067422Z",
+          "id": "654fbf4d-4b35-45a5-bd1c-80be917f6def",
+          "text": "## Sandbox deploy failed — drop the GSI. My design error.\n\n```\nA resolver can only be composed of 10 functions. (Service: AppSync, Status Code: 400)\nFailed to create: [QuerylistAssignmentsByTriageQueueLaneAndPriorityResolver]\nFailed to update:  [UpdateAssignmentResolver, DeleteAssignmentResolver]\n```\n\nStack rolled back cleanly (`UPDATE_ROLLBACK_COMPLETE`); the sandbox is back to its prior state and nothing is damaged.\n\n**Cause.** `Assignment` already has **9 GSIs** (`newsroomFeedKey`, `queueStatusKey`, `assignmentTypeKey`, `status`, `assigneeKey`, `importRunId`, `sectionStatusKey`, `sectionKey`, `sectionQueueStatusKey`). Amplify generates one pipeline function per index on the create/update/delete resolvers to keep indexes consistent, and AppSync caps a pipeline resolver at 10 functions. The tenth index blows the ceiling — which is why *Update* and *Delete* failed alongside the new query resolver.\n\nThe exploration I commissioned reported \"9 GSIs\" plainly. I wrote \"add one composite GSI\" without connecting that number to the AppSync limit. That is on me, not on the implementation.\n\n## The fix: no GSI, filter in memory\n\n`queueStatusKey = \"curation.reference-intake#<corpusId>#open\"` with `listAssignmentsByQueueStatusAndPriority` **already** returns exactly the corpus's open curation queue in one indexed query. That partition is 46 items today and bounded by pending-review depth — hundreds at worst, because it drains as humans work it.\n\nFiltering that result by `triageLane` in memory is free at this scale. The index was an optimisation for a scale we do not have, and adding it cost a deploy failure.\n\nThis is the principle I have been applying to every other epic and failed to apply to my own plan: **do not build machinery whose value scales with corpus size while the corpus is small.**\n\nConcretely:\n1. Remove `index(\"triageQueueLaneKey\")...` from `amplify/data/schema.ts`.\n2. Remove the `triageQueueLaneKey` field too — without the index it carries no meaning, and a derived key nothing reads is a maintenance trap. Drop its computation from `add_operational_index_fields`.\n3. Keep `triageLane` as a plain attribute. In `list_open_curation_queue`, query `assignmentsByQueueStatusAndPriority` and filter on `triageLane` client-side. Keep the function signature — callers should not care.\n4. Everything else in the design stands unchanged: the `curation_triage_plan` Message, the triage attributes on `Assignment`, the `AssignmentEvent` decisions, closing the loop on accept. Those are the parts that put the queue in the API; the index was never load-bearing for that.\n\n**If lane-indexed queries are ever genuinely needed**, the options are to retire one of the three `section*` GSIs, or fold lane into `queueStatusKey` rather than adding a parallel key. Neither is worth doing now — record the constraint and move on.\n\n## Two things worth capturing beyond this fix\n\n**`ampx sandbox --once` exited 0 on a failed deployment.** The CloudFormation error was printed and the process still returned success. Anything that trusts the exit code — CI, a script, an agent checking `$?` — will read a rolled-back deploy as a green one. Worth a note wherever deploy guidance lives, and worth grepping output for `[ERROR]` rather than trusting the code.\n\n**Assignment is now one index from its ceiling**, permanently. That is a real architectural constraint on a central model and nothing in the repo records it. Whoever next reaches for an Assignment GSI should find this written down rather than discovering it through a rollback. Worth a line in `AGENTS.md` alongside the other schema rules."
+        }
+      ],
+      "created_at": "2026-07-27T02:28:14.329545Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "The review queue now exists in GraphQL, and nothing reads it. That is why an operator still gets handed a JSON file.\n\n## Observed\n\nAfter `TI-1ad2f4`, the write path works: **46 open curation Assignments**, one per prospect from the research batch, sitting in the API right now alongside their `Reference` rows and the `role=metadata` ModelAttachments carrying `registrationNote`.\n\nThe read path does not exist:\n\n- `assisted_curation_triage.py` contains **zero** references to `Assignment`. It builds its queue by listing `Reference`, `ReferenceAttachment`, `Message`, `SemanticRelation`, and `Category`, computing lanes and rationales in memory, and writing them to a plan file.\n- No command lists curation Assignments as a queue.\n- The operator's queue therefore lives in `.papyrus-runs/<run>/human-queue.json` — a gitignored, machine-local artifact that expires with the run directory.\n\nSo the JSON is not standing in for the schema. It is standing in for a **reader**. We built the record and never built the thing that surfaces it.\n\n## Why this matters\n\nThe consequences are ordinary but real:\n\n- The queue is invisible to anything except the CLI session that produced it — no Newsroom UI, no second machine, no continuity across runs.\n- Review state has nowhere durable to live. An Assignment can carry claimed/in-progress/completed; a plan file cannot, so a partially worked queue is lost.\n- Every triage run recomputes lanes from an unfiltered listing of four models (`references_commands.py:142-149`). That is already the wrong shape at 1024 pending references and gets worse linearly.\n- The Assignment rows exist and go stale: nothing ever closes them when a reference is accepted, so `open` will drift from reality immediately.\n\n## What to build\n\n1. **Read the queue from Assignments.** `triage-plan` should source its candidate set from open curation Assignments rather than from a full `Reference` listing, joining the reference, its `role=metadata` attachment for `registrationNote`, and its computed lane.\n2. **Close the loop.** `review_reference_curation` should transition the corresponding Assignment when a decision lands. Without this the queue only grows.\n3. **Add a plain queue command** — something an operator can run to see open curation assignments with rationale, without producing a plan file first. The plan file should be an artifact of a triage *session*, not the only way to see what needs review.\n4. Keep the plan file for what it is good at: a reproducible snapshot of one triage run, with its lane assignments and thresholds recorded.\n\n## Related\n\n`kanbus-4d5390` (Newsroom UI for assisted curation triage) is the eventual surface, and it cannot be built against a machine-local JSON file — it needs exactly this read path. This issue is its prerequisite.\n\nNote the shape of the mistake, because it is the same one twice: `TI-a9cb3a` and `TI-1ad2f4` were both diagnosed as *write*-path gaps, and both fixes were correct as far as they went. Neither asked whether anything consumed what was now being written. A record nothing reads is not much better than a record that does not exist.",
+      "id": "TI-c21d2816-dcb5-4d63-981a-7f191c87fe97",
+      "labels": [
+        "curation",
+        "ingestion"
+      ],
+      "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+      "priority": 1,
+      "status": "open",
+      "title": "Curation queue exists in GraphQL but nothing reads it",
+      "type": "epic",
+      "updated_at": "2026-07-27T18:11:32.067422Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": null,
+      "comments": [
+        {
+          "author": "ryan",
           "created_at": "2026-07-26T19:38:38.548120Z",
           "id": "b017521a-d082-4b73-8c14-37e13adea866",
           "text": "## Red baseline (before mutations)\n\nBranch: `epic/e2e-ingestion` @ `65692ef` (develop). Worktree: `Threat-Intelligence-ingestion`.\nAuth: `papyrus-agent` → TI AppSync `ur2anu…` + SSM JWT param for `d3on1y5vlrxmam` (endpoint forced; not sandbox).\n\n### Unit\n`procedures/newsroom/tests/test_references_commands.py`: **66 passed**, 0 failed.\n\n### Live TI corpus (`knowledge-corpus-threat-intelligence`, versionState=current)\n| Status | Count |\n|---|---:|\n| pending | **978** |\n| accepted | **5** |\n| archived | **815** |\n| rejected | **0** |\n| **total** | **1798** |\n\nAccepted titles (seed set): NCSC AI guidelines, OWASP LLM Top 10, NIST AI RMF, CISA AI, Amazon Macie.\n\n### Vector index audit (no rebuild)\nIndex: `…/papyrusknowledgevectorbu-4pqqkgvxs8xk/index/papyrus-knowledge`\n\n| Metric | Value |\n|---|---:|\n| acceptedReferences | 5 |\n| existingVectors | 1 |\n| existingIndexedReferences | **0** |\n| referencesWithExtractedText | **0** |\n| missingIndexedReferences | **5** (all accepted) |\n\n**Expected:** accepted refs have extracted text and are indexed.  \n**Observed:** none of the 5 accepted refs are in the vector index; audit reports 0 extracted-text refs.  \n**Delta:** retrieval against TI cannot work as measured on Papyrus main — corpus + index are both thin/empty for evidence.\n\n### Lexical artifact\n`s3://…vq9lqoedok0k/corpora/knowledge-index/lexical/` — **empty / absent** (listing returned nothing). Matches epic note that lexical was never built for this publication.\n\nBaseline recorded; proceeding to research → intake → triage, then **stop for operator curation**.\n"
@@ -418,6 +473,26 @@
       "title": "Default extract pipeline selects metadata-text titles as extracted_text for HTML/PDF",
       "type": "bug",
       "updated_at": "2026-07-27T00:21:28.431856Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": null,
+      "comments": [],
+      "created_at": "2026-07-27T02:18:46.468715Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "Recency currently measures **when we fetched a document**, not **when it was published**. That inverts the feature's purpose, and it gets worse with every reference we ingest.\n\n## Observed\n\n`ranking.py:126-142` collects day candidates from six keys — `sourceUpdatedAtDay`, `sourcePublishedAtDay`, `retrievedAtDay`, and then the ISO forms `sourceUpdatedAt`, `sourcePublishedAt`, `retrievedAt`, `importedAt` — from both the record and its metadata, then takes `max(day_candidates)`.\n\n`importedAt` and `retrievedAt` are always today-ish for anything we just ingested. So the max is essentially always the ingestion date.\n\nConfirmed live during the recency investigation: the arXiv reference carries `sourcePublishedAtDay=20227` (2025-05-19) and still scores **1.0**, because its retrieve day wins the max.\n\n## Why this matters more than it looks\n\nA recency signal exists so a stale threat-intel report ranks below a fresh one covering the same ground. As written, a 2019 advisory ingested this morning is maximally fresh. The signal reports our crawl schedule.\n\nThe failure mode compounds with volume, which is exactly what we are about to do. 43 prospects are queued now and more batches are coming; every one of them will be stamped fresh regardless of source age. If we ever bulk-ingest an archive, the whole archive scores 1.0 and recency becomes actively misleading rather than merely useless.\n\n**This is partly my specification error.** The epic brief said \"use `max(sourceUpdatedAtDay, sourcePublishedAtDay)` as the effective date\" — I meant max across *publication* dates. Folding in retrieval and import timestamps as additional max candidates is a reasonable reading of \"fall back to something\", but the result is wrong.\n\n## What it should do\n\nPrefer source dates; never let an operational timestamp beat one.\n\n1. If `sourceUpdatedAt` or `sourcePublishedAt` exists, use `max()` of those two. That was the intent.\n2. If neither exists, **do not substitute `retrievedAt` or `importedAt`.** \"We don't know when this was published\" must not mean \"this is brand new.\" Return neutral (`recencyScore` 0.5, `recencyKnown` false), which is the convention already used for missing quality.\n3. Keep the epoch-day fields in metadata regardless — `retrievedAtDay` is useful provenance and may be worth surfacing separately. It just must not drive decay.\n\nAdd a test asserting that a record with an old `sourcePublishedAtDay` and a today `retrievedAtDay` scores **old**, not fresh. That is the case that is broken now and the one that will regress silently.\n\n## Related\n\nThis also changes the corpus-wide re-sync calculus recorded in the investigation. Stamping `retrievedAtDay` from `importedAt` across 1376 references would have made the entire Papyrus-main corpus uniformly \"fresh\" while washing out the 316 real publication dates. The recommendation to defer that sync was right; with the current date policy it would have been actively harmful, not merely expensive.",
+      "id": "TI-f1cc1347-1255-484b-b483-3a347016e2a3",
+      "labels": [
+        "retrieval"
+      ],
+      "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+      "priority": 1,
+      "status": "open",
+      "title": "Recency uses ingestion date, not publication date",
+      "type": "bug",
+      "updated_at": "2026-07-27T02:18:46.468715Z"
     },
     {
       "assignee": null,
@@ -1233,6 +1308,18 @@
           "created_at": "2026-07-25T21:36:08.584562Z",
           "id": "77247754-4cd9-493f-a3b9-5e69095fbdf7",
           "text": "## Sequence note from epic reopen\n\nHuman acceptance session for `kanbus-1f97c7` is held until this story lands. The prior agent 30-item uncertain pass was **time-to-skip** (0 accept / 0 reject / 30 skip), not time-to-decision — it proved the acceptance criterion cannot be met yet with inventory-style rationales.\n\nAfter grounding rationales in corpus connections here, run a human 25–30 uncertain session as the real acceptance test for the epic."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:29:48.445599Z",
+          "id": "5c0916ba-28e7-42ea-bec8-1c199a52ac79",
+          "text": "## Fix on epic/e2e-ingestion\n\nUncertain-lane leads now open with 1–2 checkable corpus sentences when available: named citation links (cites/cited_by accepted), summary overlap with a named accepted neighbor, shared-domain weak neighbor, or an explicit coverage-gap sentence naming accepted category clusters. `registrationNote` is appended after the corpus lead (not prefixed). Triage-plan loads Category rows for gap phrasing. Lane thresholds unchanged; still no auto-accept."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T01:58:45.138502Z",
+          "id": "12f13726-36f3-4542-bc6f-ab68db781de0",
+          "text": "## Batch report (post-fix)\n\nTwo research assignments → 53 catalog URIs → **46 pending refs** registered (dup noops absorbed).\n\n| Metric | Count |\n|---|---|\n| Mechanical auto-archive/reject (this batch) | 0 |\n| Clustered as near-duplicates | 5 (2 clusters) |\n| Reach human queue | 43 |\n| Rationales with ingestion note | 33/43 |\n| Rationales naming accepted neighbor / cite / coverage gap | 43/43 |\n| Inventory-only “Needs editorial judgment…” | 0/43 |\n\nHonest read on decidability: every uncertain lead now opens with a checkable corpus sentence, so the old 0/30 “nothing to decide from” failure mode is gone. Many leads are still *coverage-gap* or *weak neighbor* calls rather than crisp accept/reject — enough to skip junk (Google SERPs, LinkedIn, Medium) from the rationale alone, but Ryan’s 25–30 human accept/reject session is still the real acceptance test."
         }
       ],
       "created_at": "2026-07-25T18:52:03.250288Z",
@@ -1244,10 +1331,10 @@
       "labels": [],
       "parent": "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d",
       "priority": 2,
-      "status": "open",
+      "status": "in_progress",
       "title": "Ground uncertain-lane rationales in corpus connections",
       "type": "story",
-      "updated_at": "2026-07-25T21:36:08.584562Z"
+      "updated_at": "2026-07-27T01:58:45.138502Z"
     },
     {
       "assignee": null,

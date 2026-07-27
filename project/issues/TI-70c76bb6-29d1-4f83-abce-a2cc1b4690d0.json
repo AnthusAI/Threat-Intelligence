@@ -1,0 +1,25 @@
+{
+  "id": "TI-70c76bb6-29d1-4f83-abce-a2cc1b4690d0",
+  "title": "Decide: threat-intelligence corpus is 13 references and retrieval there is unmeasured",
+  "description": "A decision issue, not an implementation issue. Read it before picking up Phase 2.\n\n## The numbers that prompt this\n\n- `knowledge-corpus-threat-intelligence`: **13 accepted references.** Thirteen.\n- `knowledge-corpus-ai-ml-research`: 1376 accepted references.\n- The golden set (25 queries) evaluates **ai-ml-research only**. Every number this initiative has reported — baseline 0.653, post-hybrid 0.853, Hit@5 76% → 96% — is from the AI/ML corpus.\n- The provenance note on the latest report says it plainly: *\"Threat-intel exact-token retrieval (CVE / hash / ATT&CK) is still unmeasured.\"*\n\n## What that means\n\nThis initiative's stated purpose was retrieval that handles **this domain's** exact identifiers — CVE IDs, file hashes, actor aliases, ATT&CK IDs. That capability was built, and it was validated against a corpus of AI/ML research papers, where the \"identifier\" queries are arXiv IDs and model names. **The capability built for CVE/hash/ATT&CK has never once been tested on CVE/hash/ATT&CK.**\n\nMeanwhile the publication those identifiers serve has a thirteen-document corpus. No amount of ranking quality makes thirteen documents into a knowledge base.\n\nThe initiative already flags this as a live question: *\"the binding constraint on publication quality may now be corpus size rather than retrieval quality — which is curation throughput, not ranking. Worth re-deciding rather than proceeding by momentum.\"* The coverage data now answers it. Proceeding into Phase 2 (entity extraction → resolution → contextual chunks) would be momentum.\n\nNote that Phase 2's own sequencing note already concedes the point — entity resolution is *\"deliberately follows corpus growth: resolution's value is proportional to alias fragmentation, which barely exists yet.\"* With 13 documents there is no alias fragmentation to resolve. The precondition Phase 2 was told to wait for has not happened.\n\n## The decision to make\n\n**Option A — pivot to corpus growth.** Treat curation throughput and ingestion as the initiative's remaining work. Assisted triage (`TI-c21d28` and follow-ons) is already built and nearly landed; the 43 references awaiting curation are the immediate test of it. Phase 2 waits for a corpus worth extracting entities from.\n\n**Option B — continue Phase 2 on ai-ml-research**, accepting that it serves the P.apyr.us publication rather than Threat Intelligence, and that TI retrieval stays unmeasured.\n\n**Option C — build a TI golden set first** (~15 queries against the 13 real references plus whatever curation admits), measure identifier retrieval where it was actually meant to work, then decide with data instead of inference.\n\nC is cheap and unblocks a defensible choice between A and B. It is probably the first move regardless — but the decision is the operator's, and the point of this issue is to make it deliberately.\n\n## Prerequisite\n\nDo not build a TI golden set until `TI-b9f6da` is fixed. A new golden set measured against a broken lexical arm would bake the regression into the baseline and make it permanent.",
+  "type": "story",
+  "status": "open",
+  "priority": 1,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "retrieval"
+  ],
+  "dependencies": [
+    {
+      "target": "TI-b9f6da",
+      "type": "blocked-by"
+    }
+  ],
+  "comments": [],
+  "created_at": "2026-07-27T22:55:43.279812Z",
+  "updated_at": "2026-07-27T22:55:55.563379Z",
+  "closed_at": null,
+  "custom": {}
+}
