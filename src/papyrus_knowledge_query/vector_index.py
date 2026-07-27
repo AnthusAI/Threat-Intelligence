@@ -828,7 +828,9 @@ def _base_reference_metadata(
         "curationStatusKey": reference.get("curationStatusKey"),
     }
     # Epoch-day integers — S3 Vectors filterable scalars. Omitted when unknown so
-    # older vectors without these keys remain valid (recency scores neutral).
+    # older vectors without these keys remain valid. retrievedAtDay is provenance
+    # for operators; ranking decay uses only sourcePublished/Updated days
+    # (see ranking.recency_signal_from_record / TI-f1cc13).
     if published_day is not None:
         metadata["sourcePublishedAtDay"] = published_day
     if updated_day is not None:
