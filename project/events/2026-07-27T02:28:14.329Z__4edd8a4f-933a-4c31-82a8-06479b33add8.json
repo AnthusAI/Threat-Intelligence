@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "4edd8a4f-933a-4c31-82a8-06479b33add8",
+  "issue_id": "TI-c21d2816-dcb5-4d63-981a-7f191c87fe97",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T02:28:14.329Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "The review queue now exists in GraphQL, and nothing reads it. That is why an operator still gets handed a JSON file.\n\n## Observed\n\nAfter `TI-1ad2f4`, the write path works: **46 open curation Assignments**, one per prospect from the research batch, sitting in the API right now alongside their `Reference` rows and the `role=metadata` ModelAttachments carrying `registrationNote`.\n\nThe read path does not exist:\n\n- `assisted_curation_triage.py` contains **zero** references to `Assignment`. It builds its queue by listing `Reference`, `ReferenceAttachment`, `Message`, `SemanticRelation`, and `Category`, computing lanes and rationales in memory, and writing them to a plan file.\n- No command lists curation Assignments as a queue.\n- The operator's queue therefore lives in `.papyrus-runs/<run>/human-queue.json` — a gitignored, machine-local artifact that expires with the run directory.\n\nSo the JSON is not standing in for the schema. It is standing in for a **reader**. We built the record and never built the thing that surfaces it.\n\n## Why this matters\n\nThe consequences are ordinary but real:\n\n- The queue is invisible to anything except the CLI session that produced it — no Newsroom UI, no second machine, no continuity across runs.\n- Review state has nowhere durable to live. An Assignment can carry claimed/in-progress/completed; a plan file cannot, so a partially worked queue is lost.\n- Every triage run recomputes lanes from an unfiltered listing of four models (`references_commands.py:142-149`). That is already the wrong shape at 1024 pending references and gets worse linearly.\n- The Assignment rows exist and go stale: nothing ever closes them when a reference is accepted, so `open` will drift from reality immediately.\n\n## What to build\n\n1. **Read the queue from Assignments.** `triage-plan` should source its candidate set from open curation Assignments rather than from a full `Reference` listing, joining the reference, its `role=metadata` attachment for `registrationNote`, and its computed lane.\n2. **Close the loop.** `review_reference_curation` should transition the corresponding Assignment when a decision lands. Without this the queue only grows.\n3. **Add a plain queue command** — something an operator can run to see open curation assignments with rationale, without producing a plan file first. The plan file should be an artifact of a triage *session*, not the only way to see what needs review.\n4. Keep the plan file for what it is good at: a reproducible snapshot of one triage run, with its lane assignments and thresholds recorded.\n\n## Related\n\n`kanbus-4d5390` (Newsroom UI for assisted curation triage) is the eventual surface, and it cannot be built against a machine-local JSON file — it needs exactly this read path. This issue is its prerequisite.\n\nNote the shape of the mistake, because it is the same one twice: `TI-a9cb3a` and `TI-1ad2f4` were both diagnosed as *write*-path gaps, and both fixes were correct as far as they went. Neither asked whether anything consumed what was now being written. A record nothing reads is not much better than a record that does not exist.",
+    "issue_type": "epic",
+    "labels": [
+      "curation",
+      "ingestion"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 1,
+    "status": "open",
+    "title": "Curation queue exists in GraphQL but nothing reads it"
+  }
+}
