@@ -13,9 +13,16 @@
     "ingestion"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "7e7de11d-297d-42ea-bb39-48eb75b369a9",
+      "author": "ryan",
+      "text": "## Correction — the gap is bigger than \"nothing reads Assignments\"\n\nMy original framing was imprecise. Inspecting `.papyrus-runs/ec5555-batch/human-queue.json` (43 items) shows three distinct layers, only two of which are persisted:\n\n| Layer | Where it lives |\n|---|---|\n| The References | GraphQL — 1024 pending |\n| \"Needs review\" | GraphQL — 46 open curation Assignments |\n| **Lane, clusterId / clusterPrimary / clusterSiblingIds, evidence, mechanicalAction, autoArchiveRule, exploratory** | **only the plan file** |\n\nSo the records are in the API. The **triage judgment layer** is not — it is recomputed on every `triage-plan` run and written to a gitignored file that expires with its run directory.\n\nThat layer is what makes the queue reviewable. Without it an operator has 1024 pending References with no way to tell which are new, which are duplicates of each other, or why any of them is worth attention.\n\n## The real design question\n\nNot \"read the Assignments\" — that alone would produce an unranked, unexplained list. The question is whether lane, cluster membership, and evidence should **persist**, and where.\n\nConsequences of the current recompute-every-run design:\n\n- A half-worked review session cannot resume; the lanes are gone unless the plan file survives.\n- A UI (`kanbus-4d5390`) must recompute the whole triage before rendering anything, over an unfiltered listing of four models.\n- Two runs over the same corpus can legitimately disagree — thresholds are constants today, but the accepted/rejected history they read is not, so lane assignment drifts as curation proceeds. Nothing records which computation an operator was looking at when they decided.\n\nOptions worth weighing rather than assuming:\n\n1. **Persist the triage result** — lane, cluster, evidence on the curation Assignment, written when `triage-plan` runs. Queue becomes queryable, sessions resumable, decisions attributable to a specific triage. Cost: another write path, and staleness when the corpus moves under it.\n2. **Persist only cluster membership** (a genuinely corpus-level fact, arguably a `SemanticRelation`) and recompute lane/evidence per session as cheap derived output.\n3. **Keep recompute, make the plan a first-class artifact** — durable location, addressable id, referenced from the Assignment. Least change; still leaves the queue invisible to anything but the CLI.\n\nI lean 2: cluster membership is a fact about the corpus and belongs in the graph, while lane and evidence are judgments relative to a moment and a threshold set, which are better recomputed than staled. But this is a design call worth making deliberately, not by picking whichever is easiest to implement.\n\nWhatever is chosen, the loop still needs closing: nothing transitions a curation Assignment when `review_reference_curation` records a decision, so the 46 `open` rows will drift from reality as soon as curation starts.",
+      "created_at": "2026-07-27T02:46:09.342858Z"
+    }
+  ],
   "created_at": "2026-07-27T02:28:14.329545Z",
-  "updated_at": "2026-07-27T02:28:14.329545Z",
+  "updated_at": "2026-07-27T02:46:09.342858Z",
   "closed_at": null,
   "custom": {}
 }
