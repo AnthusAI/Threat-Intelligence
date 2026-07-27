@@ -1195,6 +1195,9 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
     steering_config = load_steering_config(options.get("config")) or require_steering_config()
     corpus_config = require_corpus_config(steering_config, corpus_key, "--corpus-key")
     catalog_payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    # Create curation Assignments (and ingestion-rationale Messages) only for the
+    # catalog items in this intake run. Do not flip a global backfill — that would
+    # try to mint Assignments for the entire pending corpus (TI-1ad2f4).
     plan_options = {
         "corpusConfig": corpus_config,
         "corpusId": knowledge_corpus_id(corpus_config),
@@ -1203,6 +1206,16 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         "reasonCode": options.get("reason-code"),
         "note": options.get("note"),
         "actor": options.get("actor") or "Papyrus content CLI",
+        "createCurationAssignment": parse_boolean_option(
+            options.get("create-curation-assignment"),
+            True,
+            "--create-curation-assignment",
+        ),
+        "createIngestionRationaleMessage": parse_boolean_option(
+            options.get("create-ingestion-rationale-message"),
+            True,
+            "--create-ingestion-rationale-message",
+        ),
     }
     plan = build_reference_catalog_registration_records(catalog_payload, plan_options)
     assert_reference_catalog_plan_safety(plan)

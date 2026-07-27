@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# Flags that may be repeated; later values append rather than replace.
+_MULTI_VALUE_OPTION_KEYS = frozenset({"stage"})
+
 
 def parse_options(flags: list[str]) -> dict[str, Any]:
     options: dict[str, Any] = {}
@@ -16,7 +19,14 @@ def parse_options(flags: list[str]) -> dict[str, Any]:
             options[key] = True
             index += 1
             continue
-        options[key] = next_value
+        if key in _MULTI_VALUE_OPTION_KEYS and key in options:
+            existing = options[key]
+            if isinstance(existing, list):
+                existing.append(next_value)
+            else:
+                options[key] = [existing, next_value]
+        else:
+            options[key] = next_value
         index += 2
     return options
 

@@ -396,21 +396,24 @@ def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str,
 
 def reference_attachment_records(item: dict[str, Any], reference: dict[str, Any], context: dict[str, Any]) -> list[dict[str, Any]]:
     records = []
-    if reference.get("storagePath") or reference.get("sourceUri"):
+    # URL-only prospects keep sourceUri on the Reference. Do not create empty
+    # role=source stubs (null storagePath/sha256) — accession materializes the archive.
+    storage_path = reference.get("storagePath")
+    if storage_path:
         records.append(
             _record(
                 "ReferenceAttachment",
                 {
-                    "id": f"reference-attachment-{hash_short(['reference#' + str(reference['id']), 'source', '001-source', reference.get('storagePath') or '', reference.get('sourceUri') or ''])}",
+                    "id": f"reference-attachment-{hash_short(['reference#' + str(reference['id']), 'source', '001-source', storage_path])}",
                     "referenceId": reference["id"],
                     "referenceLineageId": reference["lineageId"],
                     "referenceVersionNumber": reference.get("versionNumber"),
                     "referenceVersionKey": f"reference#{reference['id']}",
                     "role": "source",
                     "sortKey": "001-source",
-                    "storagePath": reference.get("storagePath"),
+                    "storagePath": storage_path,
                     "sourceUri": reference.get("sourceUri"),
-                    "filename": (reference.get("storagePath") or reference.get("sourceUri") or "").split("/")[-1],
+                    "filename": storage_path.split("/")[-1],
                     "mediaType": reference.get("mediaType"),
                     "byteSize": reference.get("byteSize"),
                     "sha256": reference.get("sha256"),

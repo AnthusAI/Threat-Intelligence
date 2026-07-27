@@ -1,0 +1,20 @@
+{
+  "id": "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48",
+  "title": "knowledge-vector-index --reference-id rebuilds lexical index for that subset only",
+  "description": "## Expected\nScoped --reference-id sync updates vectors for one reference without shrinking the corpus lexical artifact.\n\n## Observed\nsync --reference-id <one> --force rebuilt lexical to that one ref (and with --no-passage-vectors wrote skipped_empty). Full-corpus sync required to restore docs=32 refs=4.",
+  "type": "bug",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+  "labels": [
+    "retrieval"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-27T00:01:40.474213Z",
+  "updated_at": "2026-07-27T00:01:40.474213Z",
+  "closed_at": null,
+  "custom": {}
+}
