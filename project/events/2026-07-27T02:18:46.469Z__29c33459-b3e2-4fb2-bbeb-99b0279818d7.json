@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "29c33459-b3e2-4fb2-bbeb-99b0279818d7",
+  "issue_id": "TI-f1cc1347-1255-484b-b483-3a347016e2a3",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T02:18:46.469Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Recency currently measures **when we fetched a document**, not **when it was published**. That inverts the feature's purpose, and it gets worse with every reference we ingest.\n\n## Observed\n\n`ranking.py:126-142` collects day candidates from six keys — `sourceUpdatedAtDay`, `sourcePublishedAtDay`, `retrievedAtDay`, and then the ISO forms `sourceUpdatedAt`, `sourcePublishedAt`, `retrievedAt`, `importedAt` — from both the record and its metadata, then takes `max(day_candidates)`.\n\n`importedAt` and `retrievedAt` are always today-ish for anything we just ingested. So the max is essentially always the ingestion date.\n\nConfirmed live during the recency investigation: the arXiv reference carries `sourcePublishedAtDay=20227` (2025-05-19) and still scores **1.0**, because its retrieve day wins the max.\n\n## Why this matters more than it looks\n\nA recency signal exists so a stale threat-intel report ranks below a fresh one covering the same ground. As written, a 2019 advisory ingested this morning is maximally fresh. The signal reports our crawl schedule.\n\nThe failure mode compounds with volume, which is exactly what we are about to do. 43 prospects are queued now and more batches are coming; every one of them will be stamped fresh regardless of source age. If we ever bulk-ingest an archive, the whole archive scores 1.0 and recency becomes actively misleading rather than merely useless.\n\n**This is partly my specification error.** The epic brief said \"use `max(sourceUpdatedAtDay, sourcePublishedAtDay)` as the effective date\" — I meant max across *publication* dates. Folding in retrieval and import timestamps as additional max candidates is a reasonable reading of \"fall back to something\", but the result is wrong.\n\n## What it should do\n\nPrefer source dates; never let an operational timestamp beat one.\n\n1. If `sourceUpdatedAt` or `sourcePublishedAt` exists, use `max()` of those two. That was the intent.\n2. If neither exists, **do not substitute `retrievedAt` or `importedAt`.** \"We don't know when this was published\" must not mean \"this is brand new.\" Return neutral (`recencyScore` 0.5, `recencyKnown` false), which is the convention already used for missing quality.\n3. Keep the epoch-day fields in metadata regardless — `retrievedAtDay` is useful provenance and may be worth surfacing separately. It just must not drive decay.\n\nAdd a test asserting that a record with an old `sourcePublishedAtDay` and a today `retrievedAtDay` scores **old**, not fresh. That is the case that is broken now and the one that will regress silently.\n\n## Related\n\nThis also changes the corpus-wide re-sync calculus recorded in the investigation. Stamping `retrievedAtDay` from `importedAt` across 1376 references would have made the entire Papyrus-main corpus uniformly \"fresh\" while washing out the 316 real publication dates. The recommendation to defer that sync was right; with the current date policy it would have been actively harmful, not merely expensive.",
+    "issue_type": "bug",
+    "labels": [
+      "retrieval"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 1,
+    "status": "open",
+    "title": "Recency uses ingestion date, not publication date"
+  }
+}

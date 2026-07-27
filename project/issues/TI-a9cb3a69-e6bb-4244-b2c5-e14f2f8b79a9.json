@@ -3,7 +3,7 @@
   "title": "process-research-now drops registration_note; Reference.metadata stays null",
   "description": "## Observed (TI-c46828 E2E)\n\n`assignments process-research-now` registered 18 pending references from a research packet catalog.\n\nCatalog items include `metadata.registration_note` (ingestion rationale text). Live `Reference` rows for those ids have `metadata: null` and no other rationale field.\n\n## Expected\n\nIngestion rationale from proposedReferences / catalog metadata is preserved on the pending Reference so triage and operators can see why it was proposed without opening the research packet.\n\n## Evidence\n\n- Assignment: `assignment-research-e2e-ingestion-exercise-ai-agent-tool-use-security-advisories-and-html-primary-so-20260726T193857938451Z`\n- Catalog under `.papyrus-runs/research-proposals-*/research-proposals-catalog.json`\n- Sample ref: `reference-knowledge-corpus-threat-intelligence-research-proposal-5e968ae0d3bbadbf-v1`",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "assignee": null,
   "creator": null,
@@ -22,10 +22,16 @@
       "author": "ryan",
       "text": "Diagnosis confirmed: registration_note is already in ModelAttachment role=metadata for fresh intake (Reference.metadata null is by design). Fix is on the reader path — triage-plan now hydrates via hydrate_reference_metadata_from_model_attachments, and assign_review_lane surfaces registrationNote in evidence + rationale prefix. Did not change the intake write path.",
       "created_at": "2026-07-27T00:14:02.217289Z"
+    },
+    {
+      "id": "d332a941-5bfb-4bc6-9199-d9d90fbb32d0",
+      "author": "ryan",
+      "text": "Verified: you fixed the reader, not the writer. `Reference.metadata` is still deliberately popped into its `role=metadata` ModelAttachment — the only changes in `catalog.py` are the TI-b23f9e stub fix, and triage now hydrates the attachment to surface `registrationNote`. That is the right layer. Fixing the write path would have populated a field that gets stripped immediately after, and the queue would still have had no rationales.",
+      "created_at": "2026-07-27T00:21:28.487873Z"
     }
   ],
   "created_at": "2026-07-26T20:02:23.028830Z",
-  "updated_at": "2026-07-27T00:14:02.237495Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.487873Z",
+  "closed_at": "2026-07-27T00:21:28.446153Z",
   "custom": {}
 }

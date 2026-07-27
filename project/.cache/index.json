@@ -1,14 +1,24 @@
 {
-  "built_at": "2026-07-26T19:36:18Z",
+  "built_at": "2026-07-27T00:21:28Z",
   "file_mtimes": {
-    "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e.json": 1785026045.792048,
+    "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4.json": 1785111688.501623,
+    "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d.json": 1785109339.964645,
+    "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e.json": 1785095078.117206,
+    "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e.json": 1785099199.099136,
+    "TI-71ce66be-6c57-46e0-9344-357599a8006a.json": 1785111688.389802,
     "TI-95ddf12f-ab9b-4857-a2dd-2ecdb5e6d8a6.json": 1785086274.129901,
-    "TI-c46828bd-f792-452f-9c49-9f22d06ea730.json": 1785094453.14304,
+    "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48.json": 1785111688.37464,
+    "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9.json": 1785111688.487995,
+    "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393.json": 1785111688.418031,
+    "TI-b55c369e-3bb5-4470-9379-46da7faffa67.json": 1785111688.474523,
+    "TI-c46828bd-f792-452f-9c49-9f22d06ea730.json": 1785111645.131827,
+    "TI-db8f79f0-0a20-4ade-89bd-ffc5d8d4ddbc.json": 1785111688.404406,
+    "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1.json": 1785111688.432006,
     "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a.json": 1785080351.573473,
     "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d.json": 1785094102.896077,
     "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d.json": 1785080524.607249,
     "kanbus-31b5c612-7650-4e9f-9521-0f2bfc390294.json": 1784992421.378339,
-    "kanbus-4b0aa611-6ded-4427-a9e1-1241f55613ac.json": 1784986317.389118,
+    "kanbus-4b0aa611-6ded-4427-a9e1-1241f55613ac.json": 1785111645.133204,
     "kanbus-4d5390aa-7481-4e9a-a144-c0ee9cc7988f.json": 1785080351.574162,
     "kanbus-51975c24-841b-4456-bb70-5dfe2a960548.json": 1784992421.379813,
     "kanbus-5c7cde82-0e6d-4616-8e9c-7e69020e7a6c.json": 1785094074.965727,
@@ -19,8 +29,8 @@
     "kanbus-88ab2a7c-7b95-4a80-bf4a-d57731b65243.json": 1784998883.098388,
     "kanbus-8e325221-e1e7-46cc-97ab-a30acd728db5.json": 1785026291.196759,
     "kanbus-99235354-91be-46b9-933d-481618344229.json": 1784995479.705871,
-    "kanbus-a61c1227-e181-48fa-a38c-d379622950a7.json": 1785093790.351968,
-    "kanbus-bb12d39b-89a3-4c76-ad1f-a39206627911.json": 1784989594.925224,
+    "kanbus-a61c1227-e181-48fa-a38c-d379622950a7.json": 1785095045.071051,
+    "kanbus-bb12d39b-89a3-4c76-ad1f-a39206627911.json": 1785099236.059992,
     "kanbus-ca0de004-7432-4563-958d-ed111970d891.json": 1785082096.885397,
     "kanbus-d72d6773-2c48-49f4-9af1-5f63cffc0b29.json": 1784996244.994504,
     "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac.json": 1785094075.004522,
@@ -32,6 +42,82 @@
   "issues": [
     {
       "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.460245Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T23:43:33.394162Z",
+          "id": "3ea1a761-cd5a-4577-95f0-63570b3ab0f0",
+          "text": "## Diagnosis: the machinery exists, the caller does not enable it\n\n`catalog.py:335`:\n\n```python\nif context.get(\"createCurationAssignment\"):\n    records.extend(reference_curation_assignment_records(item, reference[\"expected\"], context))\n```\n\n`reference_curation_assignment_records` is defined at `:514` and looks complete. The records are simply never requested, because the research-intake path does not set `createCurationAssignment` in its context. Note the sibling flag `createIngestionRationaleMessage` immediately above behaves the same way — worth checking whether that one is set either, since it is the other half of the same provenance story.\n\nSo this is likely a one-flag fix in the intake caller rather than new code. Trace back from `build_reference_catalog_registration_records` (`catalog.py:133`) to `intake_research_packet_proposals` (`assignments_workflow.py:1131`) and see what context is being built.\n\n**Before flipping it, check what already exists.** There are 12 Assignments total and 0 curation ones, but 996 pending references — so this has been off for a long time, not just for the new 18. Confirm that turning it on does not try to create ~996 assignments retroactively on the next intake run, and decide deliberately whether existing pending references should get assignments backfilled or only new ones.\n\n## Why it matters\n\nA curation Assignment is the workflow record that a prospect needs review. Without one, \"what is in my queue\" cannot be answered from the data model — which is why the ingestion exercise wrote a JSON sidecar instead. It is also the natural home for review state that `references triage-plan` currently has to recompute from scratch each run by listing every Reference, Attachment, Message and Relation unfiltered (`references_commands.py:139-143`), which is fine at 5 accepted references and will not stay fine.\n\nPair this with `TI-a9cb3a` — together they are the difference between a review queue that lives in the schema and one that lives in a file."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.265035Z",
+          "id": "0d7685f3-465f-42e0-9c0c-af5593ebdc05",
+          "text": "Fixed on epic/e2e-ingestion: intake_research_packet_proposals sets createCurationAssignment (and createIngestionRationaleMessage) true by default for the catalog items in that run only. Opt out with --create-curation-assignment false. No retroactive backfill of the ~996 pending queue."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:21:28.501461Z",
+          "id": "7fcebbe8-073a-417c-aa53-0bd35fc93d0d",
+          "text": "Verified: `createCurationAssignment` defaults true for the research-intake catalog only, so the 996 existing pending references are not retroactively flooded. That was the risk worth pausing on and you handled it."
+        }
+      ],
+      "created_at": "2026-07-26T20:02:23.043262Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Observed\n\n`process-research-now --json` returned `registeredReferenceCount: 18` and `curationAssignmentCount: 0`.\n\nSkill contract (`skills/newsroom-research-workflow/SKILL.md`) says the handoff creates curation assignments for pending prospects.\n\n## Expected\n\nNon-zero curation assignment count, or an explicit documented reason when skipped.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
+      "id": "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4",
+      "labels": [],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 2,
+      "status": "closed",
+      "title": "process-research-now reports curationAssignmentCount=0 after registering prospects",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.501461Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": null,
+      "comments": [],
+      "created_at": "2026-07-26T20:02:23.056279Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Observed\n\nAfter `process-research-now` registered 18 HTML prospects (`catalog media_type: text/html`):\n\nurlText: eligible=0 planned=0 changes=0 failures=0\nmetadataGeneration: attempted=18 generated=0 skippedMissingText=18\n\n## Expected\n\nEligible HTML/PDF sources are fetched for extracted text (or a clear per-ref skip reason), then metadata generation can run. Silent 0/18 eligibility with 18 metadata skips is under-delivery.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
+      "id": "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d",
+      "labels": [],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 1,
+      "status": "open",
+      "title": "New pending HTML prospects get no url-text fetch; metadata generation skips all",
+      "type": "bug",
+      "updated_at": "2026-07-26T20:02:23.056279Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": null,
+      "comments": [],
+      "created_at": "2026-07-26T19:44:38.117012Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "The hybrid-lexical build surfaced 55 accepted references in `knowledge-corpus-ai-ml-research` with no `extracted_text` attachment — 4% of that corpus.\n\nThey were correctly skipped by the lexical builder, and the same extractability gate applies to vector passages. So these references are **accepted, evidence-eligible in principle, and unfindable by either retriever in practice.** A human decided they belonged in the corpus and the system cannot surface them.\n\n## Why this matters more than it looks\n\nThis is not a lexical-index defect — the builder did the right thing and now records it in the manifest. It is a corpus-health gap that was invisible until an index build counted it.\n\nThe curation gate is the editorial guarantee: accepted means a person chose this source. A reference that passes that gate but can never be retrieved quietly breaks the guarantee, because the publication cannot cite what it cannot find. It also means every retrieval metric in this initiative was computed over a denominator 4% smaller than the accepted corpus, without anyone knowing.\n\n## What to determine\n\n1. **Why they lack extracted text.** Likely a mix: accession failures, unsupported media types, sources that were already dead by the time extraction ran, PDFs GROBID could not parse. Classify them — the counts will point at the fix.\n2. **Whether they are recoverable.** For any with a live `sourceUri` or an archived `role=\"source\"` attachment, re-running extraction may be enough. Those are cheap wins.\n3. **Whether the number is growing.** A one-time historical residue is very different from an ongoing leak in the accession path. Check when these references were accepted.\n4. **Whether accession should fail loudly.** If extraction fails, the reference currently proceeds to accepted with no retrievable text and nothing signals it. Recording an explicit state — or surfacing a \"accepted but not retrievable\" count in a routine report — would stop the next 55 accumulating silently.\n\n## Related\n\n- `kanbus-ea1686` covers 3 references blocked at canonical-source resolution — a different failure, same family.\n- The end-to-end ingestion exercise (`TI-c46828`) will run accession on fresh sources and may reproduce the cause directly, which would be the fastest route to a diagnosis.\n\nNot urgent. But worth doing before the corpus grows, since the same gap at ten times the volume is 550 references nobody can retrieve.",
+      "id": "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e",
+      "labels": [
+        "ingestion",
+        "corpus-health"
+      ],
+      "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+      "priority": 2,
+      "status": "open",
+      "title": "55 accepted references have no extracted text and cannot be retrieved",
+      "type": "bug",
+      "updated_at": "2026-07-26T19:44:38.117012Z"
+    },
+    {
+      "assignee": null,
       "closed_at": null,
       "comments": [
         {
@@ -39,6 +125,12 @@
           "created_at": "2026-07-25T22:45:51.450983Z",
           "id": "3ce86dd8-b290-45f0-8c00-c3402959f7e7",
           "text": "During the retrieval evaluation harness implementation, we discovered that evaluating against realistic data requires a populated vector index and corresponding corpus data. Because the sandbox lacked this data, we ended up performing ad-hoc bulk copies of production corpus data and forcing vector index rebuilds. This gap needs to be addressed so future evaluations don't rely on moving production data. We should establish a documented, repeatable way to point the harness at a known environment (e.g. a seeded sandbox, a documented read-only production procedure, or a small fixture corpus in the repo)."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:52:57.196142Z",
+          "id": "5841e272-04b0-419c-a2d1-ded4f25ef050",
+          "text": "Golden-set defect found during the age-decay epic (kanbus-bb12d3): the `freshness` category does not test what its name implies.\n\nFour of its five queries return the expected reference at rank 1, so there is no ordering for a recency signal to influence. The fifth (`q-fresh-4`) is `rank=-1` — not retrieved at all — so it is a recall failure a tie-breaker cannot reach.\n\nA category meant to test stale-vs-fresh preference needs cases where **both** a stale and a fresh reference are retrievable and relevant, and only their relative order is in question. As built, the category cannot validate any ranking-order change.\n\nThis is the second acceptance criterion in this initiative set against an instrument that could not observe the change (the first: passage scoring measured against a golden set that scores reference rank). When this epic is picked up, the general fix is worth stating: **a golden query is only useful for validating a change if the change can, in principle, alter its result.** Categories should be designed against the mechanism they test, not named after the intuition."
         }
       ],
       "created_at": "2026-07-25T22:45:45.158486Z",
@@ -59,7 +151,34 @@
       "status": "open",
       "title": "Document and implement repeatable retrieval evaluation environments",
       "type": "epic",
-      "updated_at": "2026-07-26T00:34:05.791850Z"
+      "updated_at": "2026-07-26T20:52:57.196142Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.389635Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:13:56.149920Z",
+          "id": "7988ccd4-049b-40a9-aaea-578ac50528bd",
+          "text": "Fixed on epic/e2e-ingestion: accession resolves retrievedAt (always) and sourcePublishedAt from HTML meta / arXiv header / arXiv id / Last-Modified, and stamps both GraphQL builders (including create-uuid-replacement which previously omitted retrievedAt). Unit tests cover HTML, arXiv, and builder stamping."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.435450Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nAccessioned references carry publication/retrieval timestamps when known so vector metadata can write sourcePublishedAtDay / retrievedAtDay.\n\n## Observed\nAfter accession, four new refs had sourcePublishedAt=null, retrievedAt=null. Sidecar had retrieved_at but GraphQL did not. Force sync wrote retrievedAtDay from importedAt. sourcePublishedAtDay absent until manual update_record set arXiv 2025-05-19 from PDF header.\n\n## Impact\nkanbus-4b0aa6 Rebuild A only partially activated without publication dates.",
+      "id": "TI-71ce66be-6c57-46e0-9344-357599a8006a",
+      "labels": [
+        "ingestion"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 2,
+      "status": "closed",
+      "title": "Accession leaves sourcePublishedAt/retrievedAt null so age-decay sourcePublishedAtDay cannot land",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.389635Z"
     },
     {
       "assignee": null,
@@ -84,8 +203,151 @@
     },
     {
       "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.374454Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:21:28.360261Z",
+          "id": "139a676c-7843-412b-8a7e-b15fbcf99192",
+          "text": "Verified and accepted. Both halves of this are right, and the second one is worth more than the fix.\n\n**Confirmed independently:**\n\n| Case | Result |\n|---|---|\n| scoped rebuild, eligible 1376 → 1 | **BLOCKED** |\n| normal drift 1376 → 1370 | allowed |\n| 1376 → 1 with `allow_shrink` | allowed |\n| Papyrus-main artifact after your read-only run | still 1321 / 5658 / 1376 |\n\nSuite: 469 passing against 462 on develop, and 12 failures against 13 — you added tests and fixed one pre-existing failure along the way.\n\n**The merge fix is the correct fix.** A scoped sync should update the lineages it was asked about and leave the rest alone; remapping postings so survivors need no re-tokenisation is the right shape.\n\n**The guard is the more valuable half, and I want to name why.** The fix stops this bug. The guard stops the *class* — any future change that publishes a catastrophically smaller index now fails loudly instead of silently degrading retrieval until someone notices results got worse. Refusing the promote rather than warning is the right call: a warning in a long sync log is a warning nobody reads.\n\nTwo details you got right that are easy to get wrong: the `≥10` floor means small and first-time indexes are not tripped by their own growth, and `allow_shrink` being unavailable to scoped syncs closes the obvious escape hatch — the operator who hits the guard during a `--reference-id` run cannot make it go away by adding `--force`, which is exactly when they would be most tempted.\n\nThis is the third instance of the same underlying failure mode in this initiative — silent partial work that looks like success. The `except: pass` that disabled archival, the eval measuring something other than the change, and now an index that publishes itself smaller. Each time the fix has been to make the failure loud at the point it happens. Worth keeping as a design instinct rather than a rule: **if a component can do less than asked without erroring, it will eventually do so unobserved.**\n\nMerging."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.474213Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nScoped --reference-id sync updates vectors for one reference without shrinking the corpus lexical artifact.\n\n## Observed\nsync --reference-id <one> --force rebuilt lexical to that one ref (and with --no-passage-vectors wrote skipped_empty). Full-corpus sync required to restore docs=32 refs=4.",
+      "id": "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48",
+      "labels": [
+        "retrieval"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 2,
+      "status": "closed",
+      "title": "knowledge-vector-index --reference-id rebuilds lexical index for that subset only",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.374454Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.446153Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T23:43:33.371325Z",
+          "id": "cb554c8b-730b-447d-a2e9-dcb974743bba",
+          "text": "## Before you change anything: the observation is right, the diagnosis is probably wrong\n\n`Reference.metadata` being null is **by design**, not a bug. `model_attachments.py:327` does:\n\n```python\nelif record[\"modelName\"] == \"Reference\" and \"metadata\" in expected:\n    metadata = parse_jsonish(expected.pop(\"metadata\"))\n```\n\nIt **pops** the field off the record and writes it to a `ModelAttachment` with `role=\"metadata\"`, because DynamoDB items have a size limit and large payloads are offloaded to S3. Every accepted reference in this corpus works that way. So \"Reference.metadata stays null\" is the system behaving correctly.\n\n**The real question is whether `registration_note` reaches that attachment.** Check that first, because it decides which layer is broken:\n\n- **If the note is in the `role=\"metadata\"` attachment**: the write path is fine and the bug is in whatever read `Reference.metadata` directly and found nothing — likely the queue builder. Fix the reader. Do not touch the intake path.\n- **If the note is absent from the attachment too**: the bug is upstream in `catalog.py`. `item_registration_note` is computed at `:286-289` and feeds `curation_note`, but confirm it actually lands in `normalized_metadata` (`:299`) rather than only being used for the curation note.\n\nConcretely: pick one of the 18 new prospects, fetch its `ModelAttachment` rows, find `role=\"metadata\"`, and read the content. That single check tells you which fix to make.\n\n## Why this matters beyond the bug\n\nThe rationale is what makes a review queue reviewable. Without it a prospect is a URL and a title, and the operator has to reconstruct context the machine already had. It is also the input to `kanbus-ec5555` (grounding triage rationales) — the 30-item session found 0/30 rationales sufficient to decide from without opening the source, and missing provenance is part of why.\n\nTogether with `TI-1ad2f4`, this is why the ingestion exercise had to write an `operator-queue.json` sidecar: the schema currently cannot answer \"what is in my review queue and why is each item here.\" That sidecar is a symptom. Fix these two and the queue derives from the data model."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.217289Z",
+          "id": "946b467c-6a4c-4f16-bf75-6d3fd5f2ea45",
+          "text": "Diagnosis confirmed: registration_note is already in ModelAttachment role=metadata for fresh intake (Reference.metadata null is by design). Fix is on the reader path — triage-plan now hydrates via hydrate_reference_metadata_from_model_attachments, and assign_review_lane surfaces registrationNote in evidence + rationale prefix. Did not change the intake write path."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:21:28.487873Z",
+          "id": "d332a941-5bfb-4bc6-9199-d9d90fbb32d0",
+          "text": "Verified: you fixed the reader, not the writer. `Reference.metadata` is still deliberately popped into its `role=metadata` ModelAttachment — the only changes in `catalog.py` are the TI-b23f9e stub fix, and triage now hydrates the attachment to surface `registrationNote`. That is the right layer. Fixing the write path would have populated a field that gets stripped immediately after, and the queue would still have had no rationales."
+        }
+      ],
+      "created_at": "2026-07-26T20:02:23.028830Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Observed (TI-c46828 E2E)\n\n`assignments process-research-now` registered 18 pending references from a research packet catalog.\n\nCatalog items include `metadata.registration_note` (ingestion rationale text). Live `Reference` rows for those ids have `metadata: null` and no other rationale field.\n\n## Expected\n\nIngestion rationale from proposedReferences / catalog metadata is preserved on the pending Reference so triage and operators can see why it was proposed without opening the research packet.\n\n## Evidence\n\n- Assignment: `assignment-research-e2e-ingestion-exercise-ai-agent-tool-use-security-advisories-and-html-primary-so-20260726T193857938451Z`\n- Catalog under `.papyrus-runs/research-proposals-*/research-proposals-catalog.json`\n- Sample ref: `reference-knowledge-corpus-threat-intelligence-research-proposal-5e968ae0d3bbadbf-v1`",
+      "id": "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9",
+      "labels": [],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 1,
+      "status": "closed",
+      "title": "process-research-now drops registration_note; Reference.metadata stays null",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.487873Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.417864Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.155714Z",
+          "id": "4fabc827-c409-479a-ae3d-cfe20e82f082",
+          "text": "Fixed on epic/e2e-ingestion: reference_attachment_records only creates role=source when storagePath is set. URL-only prospects keep sourceUri on the Reference without an empty stub."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.455574Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nProspects either have no source attachment until accession, or stubs clearly marked incomplete. arXiv PDF prospects should not claim mediaType=text/html.\n\n## Observed\nAccepted research-proposal refs had role=source attachments with storagePath=null, sha256=null before accession. arXiv stub was text/html. Readiness still url_only so accession proceeded; stubs remain on superseded proposal lineages.",
+      "id": "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393",
+      "labels": [
+        "ingestion"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 2,
+      "status": "closed",
+      "title": "Intake creates empty role=source stubs (null path/sha; arXiv as text/html)",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.417864Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.474361Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:02:02.530594Z",
+          "id": "b065f06b-8cb0-422a-97a8-1c46c3024639",
+          "text": "Fix implemented on epic/e2e-ingestion in src/papyrus_content/accession.py (augment keeps create; supersedes proposal). Covered by test_accession_replacement_keeps_create_and_supersedes_proposal. Awaiting review/merge."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.293522Z",
+          "id": "11b96fe7-0d5d-4e38-b428-232d4bf16fe1",
+          "text": "Fix committed in 7449984 on epic/e2e-ingestion."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.377740Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nFor research-proposal references, accession mode create-uuid-replacement creates a new Biblicus-keyed Reference lineage with storagePath/sha256/mediaType, attaches role=source, and leaves the proposal lineage superseded.\n\n## Observed\naugment_reference_accession_changes_for_replacement converted the replacement Reference create into an update against the old proposal row. AppSync then issued UpdateItem for the new id (which does not exist) → DynamoDB conditional request failed. Local write + S3 sync could succeed while GraphQL stayed empty (storagePath/sha256 null).\n\n## Fix landed on epic/e2e-ingestion\nKeep create as create; append supersede of the proposal lineage. Unit test: test_accession_replacement_keeps_create_and_supersedes_proposal.\n\n## Evidence\n.papyrus-runs/c46828-e2e/accession-retry.json (pre-fix); accession-graphql-retry.json + accession-verify-final.json (post-fix).",
+      "id": "TI-b55c369e-3bb5-4470-9379-46da7faffa67",
+      "labels": [
+        "ingestion"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 1,
+      "status": "closed",
+      "title": "Accession create-uuid-replacement rewrites GraphQL create into update and fails DynamoDB conditional",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.474361Z"
+    },
+    {
+      "assignee": null,
       "closed_at": null,
-      "comments": [],
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T19:38:38.548120Z",
+          "id": "b017521a-d082-4b73-8c14-37e13adea866",
+          "text": "## Red baseline (before mutations)\n\nBranch: `epic/e2e-ingestion` @ `65692ef` (develop). Worktree: `Threat-Intelligence-ingestion`.\nAuth: `papyrus-agent` → TI AppSync `ur2anu…` + SSM JWT param for `d3on1y5vlrxmam` (endpoint forced; not sandbox).\n\n### Unit\n`procedures/newsroom/tests/test_references_commands.py`: **66 passed**, 0 failed.\n\n### Live TI corpus (`knowledge-corpus-threat-intelligence`, versionState=current)\n| Status | Count |\n|---|---:|\n| pending | **978** |\n| accepted | **5** |\n| archived | **815** |\n| rejected | **0** |\n| **total** | **1798** |\n\nAccepted titles (seed set): NCSC AI guidelines, OWASP LLM Top 10, NIST AI RMF, CISA AI, Amazon Macie.\n\n### Vector index audit (no rebuild)\nIndex: `…/papyrusknowledgevectorbu-4pqqkgvxs8xk/index/papyrus-knowledge`\n\n| Metric | Value |\n|---|---:|\n| acceptedReferences | 5 |\n| existingVectors | 1 |\n| existingIndexedReferences | **0** |\n| referencesWithExtractedText | **0** |\n| missingIndexedReferences | **5** (all accepted) |\n\n**Expected:** accepted refs have extracted text and are indexed.  \n**Observed:** none of the 5 accepted refs are in the vector index; audit reports 0 extracted-text refs.  \n**Delta:** retrieval against TI cannot work as measured on Papyrus main — corpus + index are both thin/empty for evidence.\n\n### Lexical artifact\n`s3://…vq9lqoedok0k/corpora/knowledge-index/lexical/` — **empty / absent** (listing returned nothing). Matches epic note that lexical was never built for this publication.\n\nBaseline recorded; proceeding to research → intake → triage, then **stop for operator curation**.\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:02:37.561307Z",
+          "id": "af06e051-4a66-4a7c-b1fa-be5df2437d1d",
+          "text": "## E2E run — research → intake → triage → STOP for curation\n\nFailures/under-delivery are the product. Full write-up: `docs/ingestion-e2e-TI-c46828.md` on `epic/e2e-ingestion`.\n\n### Research (~21 min)\n- Assignment: `assignment-research-e2e-ingestion-exercise-ai-agent-tool-use-security-advisories-and-html-primary-so-20260726T193857938451Z`\n- Packet: `message-research-packet-f2bf3426c7b188f6`\n- **18** proposed references registered pending (wanted ~10–20).\n- `--max-evidence-items 15` not honored (tactus got 20).\n- Long stretch with empty stdout while Tactus ran (looked hung).\n\n### Intake\n| Expected | Observed |\n|---|---|\n| pending only | 18 pending, 0 accepted |\n| rationale preserved | catalog `registration_note` present; **Reference.metadata null** → **TI-a9cb3a** |\n| curation assignments | **curationAssignmentCount=0** → **TI-1ad2f4** |\n| url-text / metadata | urlText eligible **0**; metadata skippedMissingText **18** → **TI-4db70d** |\n\n### Triage (`assisted-triage-20260726T200140Z-a7c6dc5b`)\n- Pending scanned 996; human queue 967; uncertain 964 / likely_accept 3 / likely_reject 0.\n- All 18 new prospects → **uncertain**.\n- Rationales: inventory only; **0/18** decidable without opening source (same gap as `kanbus-ec5555`).\n\n### Operator queue (STOP)\n`.papyrus-runs/c46828-e2e/operator-queue.json` — 18 HTML-ish prospects. Accept a handful; prefer CSO/HelpNetSecurity-style pages over Reddit/GitHub issues. **Do not ask the agent to accept.**\n\n### Accession HTML (pre-accept probe only)\n`download_reference_source_material` on CSO Online pending ref:\n- mediaType **text/html** (not application/pdf)\n- sha256 matched bytes; body looks like HTML\n- Full S3 `role=source` archive after accept: **still unproven**\n\n### Sync / query\nBlocked until accepts + accession. Vector audit still 0/5 accepted indexed; lexical key absent on TI bucket.\n\n### Defects filed\n- **TI-a9cb3a** — registration_note dropped\n- **TI-1ad2f4** — curationAssignmentCount=0\n- **TI-4db70d** — url-text eligibility 0 / metadata skip-all\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:01:49.001925Z",
+          "id": "89d4c3ea-3688-443e-bafe-28c46df7848e",
+          "text": "## Post-curation half complete (accession → sync → query)\n\nRyan’s accepts/rejects applied earlier. Resume results:\n\n### Accession (HTML + PDF)\n- 3 HTML + 1 PDF S3 archives verified: sha256 match, mediaType `text/html` / `application/pdf` (not PDF-defaulted).\n- GraphQL blocked until fix for TI-b55c36 (create→update rewrite). After fix: Biblicus-keyed current accepted refs with filled source attachments; proposal lineages superseded.\n- Also filed: TI-db8f79 (reindex hard-fail), TI-b23f9e (empty source stubs), TI-e5d8df (metadata-text titles as extracted_text).\n\n### Sync\n- Force vector sync: 36 vectors for 4 new refs; lexical artifact present (was absent at baseline).\n- Age-decay: `retrievedAtDay` landed; `sourcePublishedAtDay` needed manual date on arXiv (TI-71ce66). Comment on kanbus-4b0aa6.\n\n### Query\n- Content: browsing-AI-agent risks → rank 1 arXiv “Hidden Dangers…” (only new refs answer).\n- Identifier: `arXiv:2505.13076` → rank 1 same ref with `fusion.lexicalRank: 1` / `rrfScore: 1.0`.\n\n### Bugs this half\nTI-b55c36, TI-db8f79, TI-e5d8df, TI-71ce66, TI-b23f9e, TI-9b6971 (+ first-half TI-a9cb3a, TI-1ad2f4, TI-4db70d).\n"
+        }
+      ],
       "created_at": "2026-07-26T19:34:13.142417Z",
       "creator": null,
       "custom": {},
@@ -98,10 +360,64 @@
       ],
       "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
       "priority": 1,
-      "status": "open",
+      "status": "in_progress",
       "title": "End-to-end ingestion exercise: prove Phase 0/1 on fresh references",
       "type": "epic",
-      "updated_at": "2026-07-26T19:34:13.142417Z"
+      "updated_at": "2026-07-27T00:01:49.001925Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.404222Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.128749Z",
+          "id": "169a7c89-ca2c-4d71-bdcb-df19b377917a",
+          "text": "Fixed on epic/e2e-ingestion: biblicus_reindex_failed is caught after local write; S3 sync + GraphQL accession records still apply with reindex marked degraded in the manifest."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.397594Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nAccession should degrade or continue to S3 sync + GraphQL updates when Biblicus reindex fails (or require corpus metadata upfront with a clear preflight).\n\n## Observed\nWorktree corpus lacked metadata/. run_biblicus_reindex_for_accession raised after local import files were written. Because the raise is before maybe_sync_accession_to_s3 and apply_record_changes, archives never reached S3 and GraphQL never updated. Assignments stayed claimed.\n\n## Notes\nCopying metadata/ from the main clone unblocked reindex. Default accession also skips S3 unless --sync-s3-apply is passed — easy silent under-delivery on the first live HTML archival path.",
+      "id": "TI-db8f79f0-0a20-4ade-89bd-ffc5d8d4ddbc",
+      "labels": [
+        "ingestion"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 1,
+      "status": "closed",
+      "title": "Accession hard-fails on Biblicus reindex after local write; S3/GraphQL never run",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.404222Z"
+    },
+    {
+      "assignee": null,
+      "closed_at": "2026-07-27T00:21:28.431856Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:14:02.183777Z",
+          "id": "d22aa867-d6c0-48e5-8bb7-36f2f0f3409d",
+          "text": "Fixed on epic/e2e-ingestion: default extract stages are pass-through-text,pdf-text (metadata-text omitted). parse_options accumulates repeated --stage flags so both stages actually run."
+        }
+      ],
+      "created_at": "2026-07-27T00:01:40.415542Z",
+      "creator": null,
+      "custom": {},
+      "dependencies": [],
+      "description": "## Expected\nreferences process-extract-text-now registers body text usable for vector/lexical indexing, not title-only stubs.\n\n## Observed\nDefault stages pass-through-text,pdf-text,metadata-text produced selected snapshot text that was only the title (~40–72 bytes) for all four new TI refs. Pass-through HTML (80–250KB) and pdf-text (76KB) existed under stages/ but lost to metadata-text as the pipeline winner.\n\n## Workaround\nRe-ran with --stage pass-through-text --force true (HTML) and --stage pdf-text --force true (PDF). HTML is still raw HTML (noisy). Related: repeated --stage A --stage B collapses to last value only; comma form works.",
+      "id": "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1",
+      "labels": [
+        "ingestion"
+      ],
+      "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+      "priority": 1,
+      "status": "closed",
+      "title": "Default extract pipeline selects metadata-text titles as extracted_text for HTML/PDF",
+      "type": "bug",
+      "updated_at": "2026-07-27T00:21:28.431856Z"
     },
     {
       "assignee": null,
@@ -252,7 +568,26 @@
     {
       "assignee": null,
       "closed_at": null,
-      "comments": [],
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T18:25:02.102721Z",
+          "id": "63760187-a93f-46d4-a4e0-c6fd10d384ca",
+          "text": "## Concurrency ceiling — vector/lexical sync (from kanbus-a61c12)\n\nObserved while building the hybrid lexical index over Papyrus-main `knowledge-corpus-ai-ml-research` (~1376 accepted refs):\n\n| workers | result |\n|---|---|\n| **1** | Completed full dry-run sync (~22 min). Lexical artifact built: 5658 chunks. |\n| **4** | Failed around **1325/1376** (~96%) with AppSync/`urllib` `Connection refused` / `URLError`. No canonical lexical object was written that run (died before finalize). |\n\nInterpretation: looks like connection exhaustion or AppSync-side throttling under parallel GraphQL+S3 prepare, not a one-off blip. Prefer `--workers 1` (or low single-digit with caution) for full-corpus syncs until the listing path has retry/backoff.\n\n**Retry/backoff:** `index_reference_passages` uses `ThreadPoolExecutor` over `_prepare_reference_for_indexing` with **no retry/backoff** around GraphQL listing/attachment reads (`vector_index.py`). A failed future fails the batch. Not fixed here — note for whoever runs the next rebuild.\n\nSource: `kanbus-a61c12` hybrid lexical epic (2026-07-26).\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:50:38.579835Z",
+          "id": "bcf4b187-603a-4fb2-bb44-1371059a796a",
+          "text": "## Ride-along: recency epoch-day metadata (`kanbus-bb12d3`)\n\n`_base_reference_metadata` now writes `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay` (UTC epoch-day ints) when the reference has dates. **Do not run a solo rebuild for this** — missing dates score neutral (backward-compatible).\n\nWhen the ingestion exercise (`TI-c46828`) triggers a sync, that one sync should pick up these fields. Until then the recency ranking signal is inert on existing vectors (verified: 0/200 sampled vectors have the keys; live `recencyKnown=false`).\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-27T00:01:48.985558Z",
+          "id": "39908b0d-a928-4917-baf3-3926aa64dcc0",
+          "text": "## Rebuild A ride-along (TI-c46828 E2E, TI production)\n\n**When:** 2026-07-26/27. Branch `epic/e2e-ingestion` (merged `origin/develop` mid-run so age-decay + hybrid lexical code were present for the force sync).\n\n**What ran:** `knowledge-vector-index --action sync --corpus-id knowledge-corpus-threat-intelligence --force` after accessioning 4 new accepted refs (3 HTML + 1 arXiv PDF) and attaching extracted text.\n\n**Vector result:** 36 vectors written for 4 refs (4 source + 32 passage). Sample after age-decay code:\n- `retrievedAtDay` present on 36/37 sampled vectors (from `importedAt` when `retrievedAt` null)\n- `sourcePublishedAtDay` initially **0** — accession left `sourcePublishedAt` null on all four\n- After manual `update_record` of arXiv ref to `2025-05-19T00:00:00.000Z` (PDF header) + force sync: sample key `reference-passage-7dac212165c2a1246ea5` carries `sourcePublishedAtDay: 20227`\n\n**Lexical:** wrote `corpora/knowledge-index/lexical/v1/index.json.gz` (docs=32, refs=4/9; 5 older accepted still missing extracted text).\n\n**Blockers filed:** TI-71ce66 (dates null at accession), TI-9b6971 (`--reference-id` sync shrinks lexical). Rebuild A is **partially done** for this corpus: epoch-day path is live; publication-date coverage still depends on intake/accession populating `sourcePublishedAt`.\n"
+        }
+      ],
       "created_at": "2026-07-25T13:31:10.569418Z",
       "creator": null,
       "custom": {
@@ -280,7 +615,7 @@
       "status": "open",
       "title": "Coordinate vector index rebuilds",
       "type": "chore",
-      "updated_at": "2026-07-25T13:31:10.569418Z"
+      "updated_at": "2026-07-27T00:01:48.985558Z"
     },
     {
       "assignee": null,
@@ -639,25 +974,61 @@
     },
     {
       "assignee": null,
-      "closed_at": null,
+      "closed_at": "2026-07-26T19:40:23.638824Z",
       "comments": [
         {
           "author": "ryan",
-          "created_at": "2026-07-26T17:18:22.808179Z",
-          "id": "6cb96c0a-971d-4b79-af99-317c6eb2e687",
+          "created_at": "2026-07-26T17:19:16.789515Z",
+          "id": "ee80eb55-b1bc-4890-a225-3d91d9b11487",
+          "text": "## Kickoff\n\nBranch: `epic/hybrid-lexical-rrf` (develop merged; includes ca0de0 + 5c7cde).\n\n### Red baseline\n- `test_knowledge_query.py`: **54 passed**\n- Full `procedures/newsroom/tests/`: checking…\n\n### Brief challenges (not workarounds)\n1. Line numbers in the brief are stale (semantic call site ~209–218; `_normalize_semantic_matches` moved).\n2. `graphContext` is already gone — fused `score` feeds relevance only (quality still applies).\n3. Passage key is `reference-passage-<sha20(lineageId:storagePath:chunkIndex)>`, not a bare composite — join on that key.\n4. Artifact path must stay under `corpora/` for the Lambda grant (brief is correct; some docs omit the prefix).\n\nImplementing stdlib BM25 artifact + N-list RRF + parallel search with graceful degrade."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T17:30:30.523897Z",
+          "id": "1b199b06-2a12-4d74-900f-90a8b0bb69f8",
+          "text": "## Amendment acknowledged — general identifier tokenizer\n\nUpdated `tokenize_lexical` before finishing the epic:\n\n- Per-type normalizers mirrored from `reference_url_text` (`normalize_doi` / `normalize_arxiv_id` / `normalize_isbn` / `normalize_pmid`) plus CVE/hash/ATT&CK/domain/IP.\n- Defanging is one normalizer among several, not the organizing idea.\n- DOI `10.1145/3442188.3445922` is now a single atomic term (was split at `/`).\n- arXiv ids like `2401.04088` stay atomic (important for this golden set).\n- Tests cover both academic and security identifier families; BM25 exact-DOI fixture included.\n- Leaving `TI-95ddf1` (heading weights → per-corpus config) untouched.\n\nContinuing with local lexical artifact build + pre/post retrieval eval.\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T18:08:35.121559Z",
+          "id": "e00980f6-7b61-4dd8-868c-fded2c28dff0",
+          "text": "## Progress — tokenizer amendment + eval\n\n### Tokenizer (amendment)\n- Per-type normalizers mirrored from `reference_url_text`: DOI / arXiv / ISBN / PMID + CVE / hash / ATT&CK / domain / IP.\n- DOI `10.1145/3442188.3445922` is one atomic term (was split at `/`).\n- Defanging is one normalizer among several.\n- Passage lexical docs append **identifier tokens only** from title/sourceUri/path (not full title prose — that flooded BM25).\n- Explicit tests for academic + security families. Left `TI-95ddf1` untouched.\n\n### Fusion design challenge (eval-driven)\nAlways-on equal-weight RRF let mid-ranked dual-list hits outrank a pure semantic #1 and collapsed paraphrase Hit@5 (5/5 → 1/5). **Fusion is now gated to identifier-shaped queries** (lexical weight 1.5). Non-identifier queries stay semantic-only; BM25 still available when semantic fails.\n\n### Eval (Papyrus main / `knowledge-corpus-ai-ml-research`)\n\n| category | pre Hit@5 | post Hit@5 | pre MRR | post MRR |\n|---|---|---|---|---|\n| identifier | 0/5 | **5/5** | 0.000 | **1.000** |\n| paraphrase | 5/5 | 5/5 | 0.867 | 0.867 |\n| freshness | 4/5 | 4/5 | 0.800 | 0.800 |\n| quality_tie | 5/5 | 5/5 | 0.867 | 0.867 |\n| multi_hop | 5/5 | 5/5 | 0.733 | 0.733 |\n| **global** | 76% | **96%** | 0.653 | **0.853** |\n\nReport: `procedures/newsroom/tests/fixtures/reports/retrieval_post_hybrid_a61c12.json`\n\nUnit: `test_lexical_index` + `test_knowledge_query` = 67 passed.\n\nNext: commit on `epic/hybrid-lexical-rrf` when you ask (not pushed).\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T18:25:02.141139Z",
+          "id": "04ac3794-1253-4809-8a5d-149815aa544b",
+          "text": "## Completeness + S3 load path proven\n\n### Completeness\n- Artifact embeds `manifest` (`referenceCount`, `chunkCount`, `builtAt`, `sourceCommit`).\n- Sidecar `corpora/knowledge-index/lexical/v1/manifest.json` written with the index.\n- Writes are atomic: local `os.replace` via temp file; S3 put to `*.building.<uuid>` then `copy_object` to the canonical key, then manifest, then delete staging.\n- Loader logs the manifest; `audit` compares manifest counts to the live accepted reference listing and emits drift warnings.\n\n### S3 load path (Papyrus main media bucket)\n- Bucket: `amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo`\n- Wrote: `corpora/knowledge-index/lexical/v1/index.json.gz` (2,128,896 bytes) + `manifest.json`\n- Loaded with **no** `PAPYRUS_LEXICAL_INDEX_PATH` — `load_lexical_artifact(bucket_name=...)` only (Lambda-shaped).\n- Observed: `references=1321 chunks=5658`; BM25 `1707.03141` → expected lineage.\n- Key stays under `corpora/*`, matching `grantCorporaRead` in `amplify/backend.ts` — no `backend.ts` change.\n\n### Tokenizer / eval (unchanged from prior comment)\nIdentifier Hit@5 0/5 → 5/5; other categories flat vs baseline; global 76% → 96% Hit@5. `TI-95ddf1` untouched.\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T19:40:19.379720Z",
+          "id": "8b61be1c-a946-4f75-8727-982848bfab61",
+          "text": "## Drift classification — attrition, not a build defect\n\n### Audit (scoped to build corpus `knowledge-corpus-ai-ml-research`)\n\n```json\n{\n  \"uniqueReferences\": 1321,\n  \"eligibleCount\": 1376,\n  \"liveAcceptedReferenceCount\": 1376,\n  \"manifestDrift\": 55,\n  \"internallyComplete\": true,\n  \"skipped\": {\"missing_extracted_text\": 55},\n  \"warnings\": [\n    \"Lexical index covers 1321/1376 eligible references; skippedByReason={\\\"missing_extracted_text\\\": 55} (live=1376, drift=55 explained by attrition)\"\n  ]\n}\n```\n\n### Why the reviewer's 99 ≠ build-scope 55\n\n| slice | count |\n|---|---|\n| Live accepted, **all corpora** | **1420** |\n| of which other corpora (not in `--corpus-id` build) | **44** (journalism 40 + history 4) |\n| Live accepted, ai-ml-research (build scope) | **1376** |\n| Indexed in lexical artifact | **1321** |\n| Missing inside build scope | **55** |\n| 44 + 55 | **99** ← matches all-corpora audit drift |\n\nThe eval artifact was built with `--corpus-id knowledge-corpus-ai-ml-research`. Auditing it against all-corpora accepted (1420) mixes **out-of-scope** refs with **in-scope attrition**.\n\n### Classification of the 55 in-scope misses\n\n**All 55 = `missing_extracted_text`.** Each has ModelAttachment metadata only; no `extracted_text` role/path. Spot-checked via attachment listing (not blocked refs from ea1686). Legitimate indexer attrition — same gate as vector passage indexing (`_prepare_reference_for_indexing`).\n\nNot a truncated write. No rebuild / re-eval required; identifier 5/5 was measured on the 1321 that have extractable text.\n\n### Manifest + build output changes\n\n- `eligibleCount`, `skippedTotal`, `skipped: {reason: n}`, `corpusId` on the manifest (denominator for `referenceCount`).\n- Builder prints `refs=indexed/eligible skipped=…` and `skippedByReason`.\n- Builder runs `audit` after write and prints drift warnings into build stderr + stats.\n- `audit` action compares against the **scoped** reference set (same as the builder), not all-corpora accepted.\n- Live S3 artifact restored/updated with the eligibility fields (`chunkCount` 5658 intact after an accidental tiny overwrite during tests — fixed).\n\nClosing.\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T19:44:05.021267Z",
+          "id": "9436c49a-c3e5-4fdd-a4ea-16cdc61b87ff",
           "text": "## Amendment — read before you finish the tokenizer\n\nThe brief specifies preserving CVE IDs, hashes, domains, IPs, and ATT&CK technique IDs as atomic terms. That list is too narrow and reads as though Papyrus is a threat-intelligence system. It is not — it is a general CMS, and one installation is one publication. **The main P.apyr.us publication is about AI/ML and is DOI-centric**, so academic identifiers matter at least as much as security ones.\n\nI tested the current `_keywords` behaviour against academic identifiers:\n\n| Input | Tokens today |\n|---|---|\n| `978-0-13-235088-4` (ISBN) | `978-0-13-235088-4` ✓ |\n| `2401.04088` (arXiv) | `2401.04088` ✓ |\n| `PMID:31452104` | `pmid`, `31452104` — acceptable |\n| `10.1145/3442188.3445922` (DOI) | `10.1145`, `3442188.3445922` ✗ |\n\n**DOIs split at the slash.** A lexical query for a full DOI will not match it as one term — on the publication where DOIs are the primary identifier. That is a real gap and this epic is where it gets fixed.\n\nSo the tokenizer requirement is: preserve **identifiers generally**, with per-type handling. At minimum DOIs (`10.\\d{4,9}/\\S+`, slash and all), ISBNs, arXiv ids, PMIDs, alongside the CVE/hash/domain/IP/ATT&CK set already specified.\n\nFollow the shape the codebase already uses. `reference_url_text.py` has `_normalize_doi`, `_normalize_arxiv_id`, `_normalize_isbn`, `_normalize_pmid` — per-type normalizers composing into a general capability, with no publication assuming primacy. Reuse or mirror those rather than inventing a parallel security-flavoured set, and keep the defanging step (`hxxp`, `[.]`) as one normalizer among several rather than the organising idea.\n\nTest both families explicitly. A tokeniser that handles CVEs but mangles DOIs is a regression for the larger publication.\n\nRelated, but **not yours and not now**: `TI-95ddf1` covers moving passage heading weights out of engine code into per-corpus config, for the same generality reason. Do not touch that in this epic — it shares a code path and would tangle two changes that should land separately."
         },
         {
           "author": "ryan",
-          "created_at": "2026-07-26T18:11:05.019303Z",
-          "id": "2b991820-d645-4f12-8ee3-924ba85eb7a1",
+          "created_at": "2026-07-26T19:44:05.041971Z",
+          "id": "09c75240-d016-4b92-88da-85f6f2cb38ec",
           "text": "## Note on the failed 4-worker rebuild\n\nThe run that died around 1325/1376 with AppSync `Connection refused` left **no artifact** at `corpora/knowledge-index/lexical/v1/index.json.gz` — I checked both the Papyrus-main and TI buckets and the prefix is empty. So nothing partial is sitting there waiting to be picked up, and the epic results stand as reported.\n\nTwo things to fold into this epic before it closes, though.\n\n**1. The builder has no completeness marker, so a future partial write would degrade silently.**\n\nThis time the run died before writing anything. Next time it might not. A truncated BM25 index does not error — it just returns fewer hits, and a query that should have matched on an exact identifier quietly misses. That is the same silent-failure class as the `except: pass` in the archival epic and the passage-selection blindness in the last one, and it is worse here because the whole point of this arm is exact-match recall.\n\nCheap mitigations, pick what fits:\n- Write a manifest alongside the index: reference count, chunk count, build timestamp, source commit. The loader logs it; `audit` compares it against the live reference listing.\n- Write to a temporary key and copy to the canonical key only on success, so a partial never occupies the path the Lambda reads.\n- Have the loader warn loudly when the manifest count diverges from what GraphQL reports.\n\nThe first alone would be enough for now.\n\n**2. `Connection refused` at 4 workers over ~1376 references is an operational fact worth keeping.**\n\nThat reads like connection exhaustion or throttling on the AppSync side rather than a one-off blip, and the vector-sync path shares the same listing code. Please record the worker count, roughly where it died, and whether a retry at lower concurrency succeeds, on `kanbus-4b0aa6` (coordinate vector index rebuilds). Whoever runs the next full rebuild should know the concurrency ceiling rather than rediscovering it at 96% through a long job.\n\nIf the sync path has no retry/backoff around the GraphQL listing, that is worth noting there too — not necessarily fixing in this epic.\n\n**One observation, not a request.** Since no artifact reached the canonical S3 key, the eval exercised an artifact built some other way. That is fine for measuring ranking quality, but it means the production load path — Lambda reading the gzipped artifact from S3 under the `corpora/` grant — is still unexercised. Worth one deliberate end-to-end check before this epic closes: build to the real key, load it the way the Lambda would, confirm the read grant works without a `backend.ts` change. That was a load-bearing assumption in the design and it should be confirmed rather than inferred."
         },
         {
           "author": "ryan",
-          "created_at": "2026-07-26T19:23:10.351529Z",
-          "id": "ba3b80c0-c508-4c32-b4b9-ad70fe01403f",
+          "created_at": "2026-07-26T19:44:05.058817Z",
+          "id": "ceb25c08-80bb-4e31-a061-72868d047515",
           "text": "Excellent result and genuinely good engineering. One thing to resolve before this closes, and it is an instructive one.\n\n**Verified independently:**\n- DOIs now atomic: `10.1145/3442188.3445922` → one term, slash intact. ISBNs normalise to `9780132350884`, defanged `hxxp://evil[.]com` → `evil.com` + `http`, CVEs preserved. Both identifier families handled without either dominating.\n- S3 load path real: loaded from bucket alone with no local path, key under `corpora/*`, no `backend.ts` change. That design assumption is now confirmed rather than asserted.\n- Atomic promotion via staging → `copy_object`, `os.replace` locally. `sourceCommit` records `+dirty`, so provenance carries working-tree state.\n- 462 passing, same 13 pre-existing failures. No regressions.\n- Concurrency ceiling recorded on `kanbus-4b0aa6`.\n\n**The result is the headline: identifier 0/5 → 5/5, global Hit@5 76% → 96%.** Internally consistent — 24/25, every recovered hit an identifier query, no other category moved. That is the anchor investment paying off precisely as designed, and it is the first empirical confirmation that the Cerebras premise holds on our corpus.\n\n## The gap: you built the completeness check and then didn't run it\n\nThe artifact reports `referenceCount: 1321`. The live corpus holds **1420** current+accepted references. So 99 accepted references — 7% — are absent from the lexical index.\n\nI ran your own audit against it:\n\n```\n\"liveAcceptedReferenceCount\": 1420,\n\"manifestDrift\": 99,\n\"warnings\": [\"Lexical index reference count diverges from live accepted\n              listing (manifest=1321, live=1420, drift=99)\"]\n```\n\nYour tooling caught it immediately and precisely. That is the check working exactly as specified — the drift comparison, the warning, the sample of missing lineage ids, all correct.\n\nBut it was never run against the artifact the eval used, and `1321 refs / 5658 chunks` was reported as if it were a completeness signal. A count with no denominator cannot distinguish \"1321 of 1321 eligible\" from \"1321 of 1420, 99 silently dropped.\" That distinction is the entire reason item 2 existed.\n\nI want to be clear this is a reporting gap, not a code defect: you built the right thing. The lesson is narrower and worth keeping — **an instrument you don't point at the artifact tells you nothing.** It is the same shape as the earlier \"idempotency verified\" that was a dry run, and it will keep recurring unless running the check is part of finishing rather than part of building it.\n\n## What to do\n\n1. **Explain the 99.** Most likely legitimate attrition — accepted references with no `extracted_text` attachment, or text producing no chunks past the length floor. Possibly the 3 blocked references from `kanbus-ea1686`. Classify them; the audit already returns a missing-lineage sample to start from.\n2. **If it is attrition, record it in the manifest.** Add `eligibleCount` and a `skipped` breakdown by reason, so `referenceCount` has a denominator and a future reader can tell complete from truncated without querying GraphQL.\n3. **If it is a build defect, rebuild and re-run the eval.** The current numbers were measured at 93% lexical coverage, so full coverage could only help — but we should know which we are reporting.\n4. **Make `audit` part of the build's own output.** If the builder ran the drift check and printed the warning itself, this could not have been missed.\n\nThe code is sound and I am not asking for changes to it beyond the manifest fields. Post the audit output and your classification of the 99, and this closes."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T19:44:05.070886Z",
+          "id": "03b79668-afd3-44fa-8588-e0dc0ca78577",
+          "text": "Attrition classification verified independently and accepted. Merged to develop as 4569c77.\n\nConfirmed against the live corpus: 1376 accepted references in `knowledge-corpus-ai-ml-research` — matching `eligibleCount` exactly — plus 40 in journalism and 4 in history outside the build's corpus scope. 1376 − 1321 = the 55 lacking extracted text. The drift was a scoping artifact: a corpus-scoped build measured against an all-corpora denominator.\n\nThe manifest now answers the question by itself: `corpusId`, `eligibleCount`, `referenceCount`, `skippedTotal`, and a skip breakdown, with the builder running its own audit after writing. That last part is what stops this recurring — the check now fires whether or not anyone remembers to run it.\n\nEpic closed."
         }
       ],
       "created_at": "2026-07-19T19:00:14.333744Z",
@@ -679,15 +1050,40 @@
       ],
       "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
       "priority": 1,
-      "status": "open",
+      "status": "closed",
       "title": "Hybrid lexical (BM25) retrieval with reciprocal rank fusion",
       "type": "epic",
-      "updated_at": "2026-07-26T19:23:10.351529Z"
+      "updated_at": "2026-07-26T19:44:05.070886Z"
     },
     {
       "assignee": null,
-      "closed_at": null,
-      "comments": [],
+      "closed_at": "2026-07-26T20:53:56.059854Z",
+      "comments": [
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:36:46.342795Z",
+          "id": "1df92ec3-1377-4941-b18f-7501d93cb399",
+          "text": "## Amendment — the description above predates two merges\n\nRead this before the description. `ca0de0` and `a61c12` both landed since it was written, and it is stale in ways that will send you to symbols that no longer exist.\n\n**Corrections:**\n\n- `PROFILE_WEIGHTS` is now **`DEFAULT_WEIGHTS`** (`ranking.py:12`). The three ranking profiles were deleted; there is one weight set. It is written as arithmetic (`0.70 / 0.95`) to document its derivation — follow that style when you renormalise.\n- `score_record` is at `ranking.py:311`, `normalize_ranking_config` at `:25`. Both moved.\n- `_normalize_semantic_matches` is at `engine.py:1220`.\n- **`graphContext` no longer exists.** The blend is relevance + quality only, so you are adding a third component to a pair, not a fourth to a triple.\n- **`fuse_ranked_lists` now exists** (`ranking.py:189`). The description assumes a single semantic arm; retrieval is now hybrid.\n\n**Where recency applies, given fusion.** After it. RRF produces a rank-consensus score that feeds the existing `relevance` component; recency then joins relevance and quality in the weighted sum inside `score_record`. Do not apply decay inside either retriever arm — that double-counts and makes the tie-breaker behave like a filter.\n\nTarget blend: roughly relevance 0.68 / quality 0.25 / recency 0.07, taken proportionally from the existing weights before renormalising. **Do not exceed 0.10 on recency.** An authoritative two-year-old reference must still beat a thin fresh one.\n\n## This epic is measurable, and that is why it is next\n\nThe golden set has a `freshness` category sitting at **hit@5 4/5, MRR 0.8** — one query short. That category exists to test exactly this: two references answering the same question, the newer one preferred. Unlike the passage-scoring epic, where the golden set was structurally blind to the change, here the instrument can see the target.\n\nSo: **if freshness moves 4/5 → 5/5, that is the win.** If nothing moves, say so plainly rather than claiming success — and check first whether the metadata actually landed, because without dates in vector metadata recency scores neutral everywhere and the feature is invisible rather than ineffective. Those are very different findings.\n\nCheck any small movement against the measured noise floor: ranks 1–5 reliable, positions 6–8 noise.\n\n## The trap that will silently no-op this\n\n`_normalize_semantic_matches` (`engine.py:1220`) copies an **allowlist** of metadata keys onto normalised records. New keys are dropped unless added there, and the same applies to `_assign_passage_ranking`. If you skip this, the dates reach the index and never reach the scorer, and everything looks fine.\n\nPlease add a test that a synthetic vector match carrying a date field produces a non-neutral recency score. That test is the guard.\n\n## Rebuild coordination\n\nDates in vector metadata need a re-put to take effect. **Do not trigger a rebuild for this alone.** The change is backward-compatible — missing dates score neutral — and the ingestion exercise (`TI-c46828`) is adding references right now and will need a sync anyway. One sync serves both.\n\nRecord on `kanbus-4b0aa6` that this metadata addition should ride along with that sync, and note in your PR that the feature is inert until it runs."
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:46:52.701783Z",
+          "id": "91299807-e8d1-45cf-8c07-c397b0b81eb8",
+          "text": "## Kickoff\n\nBranch: `epic/recency-age-decay` (from local develop @ ca03a18; includes hybrid lexical).\n\n### Red baseline\n- `test_knowledge_query.py`: **54 passed**\n- Vector metadata probe (200 vectors): **0** have `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay` — dates have **not** landed in the index yet. Until the coordinated sync on `kanbus-4b0aa6`, vector matches will score recency-neutral.\n\n### Amendment notes\nRecency applies in `score_record` after RRF (feeds `relevance`); not inside retriever arms. Weights ≈ 0.68/0.25/0.07. Allowlist + guard test planned.\n\nImplementing.\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:50:38.549830Z",
+          "id": "9f50be9e-1691-4bbe-9f47-42219bf78d70",
+          "text": "## Result — feature shipped; freshness unchanged (dates not in index)\n\n### Metadata check (blocking for eval effect)\nProbed 200 vectors on the baseline index ARN: **0** have `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay`. Live query confirms `recencyKnown=false`, `recencyScore=0.5` on top matches. This is **invisible**, not ineffective — until the coordinated sync on `kanbus-4b0aa6` re-puts metadata.\n\n### Eval (vs post-hybrid / same provenance endpoint+index)\n\n| category | before Hit@5 | after Hit@5 | MRR |\n|---|---|---|---|\n| freshness | 4/5 | **4/5** | 0.800 → 0.800 |\n| identifier | 5/5 | 5/5 | 1.000 |\n| paraphrase | 5/5 | 5/5 | 0.867 |\n| quality_tie | 5/5 | 5/5 | 0.867 |\n| multi_hop | 5/5 | 5/5 | 0.733 |\n| **global** | 96% | 96% | 0.853 |\n\n**Plainly: freshness did not move to 5/5.** The remaining miss (`q-fresh-4`) is a **retrieval miss** (expected lineage absent from top 10), so a post-fusion tie-breaker could not have recovered it anyway.\n\n### What landed\n- Epoch-day fields in `_base_reference_metadata` (omitted when unknown)\n- `recency` in `DEFAULT_WEIGHTS` (~0.68/0.25/0.07), `recencyHalfLifeDays` default 180\n- `score_record` after RRF; passage ranking includes recency from parent\n- Allowlist + guard test for date metadata → non-neutral recency\n- No solo rebuild triggered\n\nReport: `procedures/newsroom/tests/fixtures/reports/retrieval_post_recency_bb12d3.json`\n"
+        },
+        {
+          "author": "ryan",
+          "created_at": "2026-07-26T20:53:56.048173Z",
+          "id": "1948105f-4522-4bdf-b557-4d4719cf075a",
+          "text": "Accepted, and the most useful thing here is that you caught a defect in my acceptance criterion rather than working around it.\n\n**Verified independently:**\n- 0 of 200 sampled vectors carry epoch-day fields. The feature is inert, exactly as you said.\n- `q-fresh-4` has `rank=-1` — the expected reference is **not in the returned results at all**. The other four freshness queries are all rank=1.\n- Weights composed correctly: `(0.70/0.95) * (1 - 0.07)` and `(0.25/0.95) * (1 - 0.07)` plus recency 0.07, keeping the derivation visible rather than baking in decimals.\n- 58 tests green, including the allowlist guard asserting `recencyKnown` on a match carrying dates.\n\n**The criterion I set was wrong, and it is the second time.** I told you freshness 4/5 → 5/5 was the win. But that category's miss is a **recall** failure, not an ordering one — the expected reference is never retrieved, so a post-fusion tie-breaker among retrieved candidates could not reach it under any weighting. I inferred what the instrument measured from the category's name instead of its contents. Same mistake as the passage-scoring epic, where I set a criterion against a golden set that scores reference rank while the change affected passage selection.\n\nYou checked and said so. That is the right behaviour and it is worth more than the feature.\n\n**So this epic has no golden-set validation, and that is honest rather than a gap in your work.** What it does have: unit tests proving the decay math, neutral-on-missing-date behaviour, weight renormalisation, and the allowlist guard. Those are real. The feature is correct and inert; it becomes observable when dates reach the index.\n\n**Two follow-ups, neither yours to do now:**\n\n1. The `freshness` golden category does not test what its name says. Four of five queries have their answer at rank 1, so there is no ordering to get wrong, and the fifth is unreachable. A category meant to test stale-vs-fresh preference needs cases where **both** candidates are retrieved and only their order is in question. I will file this against `TI-5ed2f2`.\n\n2. `q-fresh-4` being a recall miss is independently interesting — a reference the golden set expects that hybrid retrieval does not surface at all, even after the lexical arm took identifiers to 5/5. Worth a look on its own terms; it may be one of the 55 with no extracted text (`TI-5eaa89`), which would connect two findings.\n\n**Rebuild:** correctly deferred, correctly noted on `kanbus-4b0aa6`. The ingestion exercise is mid-flight and will need a sync; this rides along. Please state in the PR description that the feature is inert until that runs, so nobody reads the flat eval as a failed change.\n\nMerging."
+        }
+      ],
       "created_at": "2026-07-19T19:00:14.343964Z",
       "creator": null,
       "custom": {
@@ -707,10 +1103,10 @@
       ],
       "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
       "priority": 2,
-      "status": "open",
+      "status": "closed",
       "title": "Recency (age-decay) ranking signal",
       "type": "epic",
-      "updated_at": "2026-07-19T19:00:14.343964Z"
+      "updated_at": "2026-07-26T20:53:56.059854Z"
     },
     {
       "assignee": null,

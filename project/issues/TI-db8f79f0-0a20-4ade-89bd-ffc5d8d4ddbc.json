@@ -3,7 +3,7 @@
   "title": "Accession hard-fails on Biblicus reindex after local write; S3/GraphQL never run",
   "description": "## Expected\nAccession should degrade or continue to S3 sync + GraphQL updates when Biblicus reindex fails (or require corpus metadata upfront with a clear preflight).\n\n## Observed\nWorktree corpus lacked metadata/. run_biblicus_reindex_for_accession raised after local import files were written. Because the raise is before maybe_sync_accession_to_s3 and apply_record_changes, archives never reached S3 and GraphQL never updated. Assignments stayed claimed.\n\n## Notes\nCopying metadata/ from the main clone unblocked reindex. Default accession also skips S3 unless --sync-s3-apply is passed — easy silent under-delivery on the first live HTML archival path.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "assignee": null,
   "creator": null,
@@ -21,7 +21,7 @@
     }
   ],
   "created_at": "2026-07-27T00:01:40.397594Z",
-  "updated_at": "2026-07-27T00:14:02.142359Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.404222Z",
+  "closed_at": "2026-07-27T00:21:28.404222Z",
   "custom": {}
 }

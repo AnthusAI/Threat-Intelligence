@@ -3,7 +3,7 @@
   "title": "Intake creates empty role=source stubs (null path/sha; arXiv as text/html)",
   "description": "## Expected\nProspects either have no source attachment until accession, or stubs clearly marked incomplete. arXiv PDF prospects should not claim mediaType=text/html.\n\n## Observed\nAccepted research-proposal refs had role=source attachments with storagePath=null, sha256=null before accession. arXiv stub was text/html. Readiness still url_only so accession proceeded; stubs remain on superseded proposal lineages.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "assignee": null,
   "creator": null,
@@ -21,7 +21,7 @@
     }
   ],
   "created_at": "2026-07-27T00:01:40.455574Z",
-  "updated_at": "2026-07-27T00:14:02.168725Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.417864Z",
+  "closed_at": "2026-07-27T00:21:28.417864Z",
   "custom": {}
 }

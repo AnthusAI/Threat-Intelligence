@@ -3,7 +3,7 @@
   "title": "process-research-now reports curationAssignmentCount=0 after registering prospects",
   "description": "## Observed\n\n`process-research-now --json` returned `registeredReferenceCount: 18` and `curationAssignmentCount: 0`.\n\nSkill contract (`skills/newsroom-research-workflow/SKILL.md`) says the handoff creates curation assignments for pending prospects.\n\n## Expected\n\nNon-zero curation assignment count, or an explicit documented reason when skipped.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "assignee": null,
   "creator": null,
@@ -22,10 +22,16 @@
       "author": "ryan",
       "text": "Fixed on epic/e2e-ingestion: intake_research_packet_proposals sets createCurationAssignment (and createIngestionRationaleMessage) true by default for the catalog items in that run only. Opt out with --create-curation-assignment false. No retroactive backfill of the ~996 pending queue.",
       "created_at": "2026-07-27T00:14:02.265035Z"
+    },
+    {
+      "id": "7fcebbe8-073a-417c-aa53-0bd35fc93d0d",
+      "author": "ryan",
+      "text": "Verified: `createCurationAssignment` defaults true for the research-intake catalog only, so the 996 existing pending references are not retroactively flooded. That was the risk worth pausing on and you handled it.",
+      "created_at": "2026-07-27T00:21:28.501461Z"
     }
   ],
   "created_at": "2026-07-26T20:02:23.043262Z",
-  "updated_at": "2026-07-27T00:14:02.278326Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.501461Z",
+  "closed_at": "2026-07-27T00:21:28.460245Z",
   "custom": {}
 }

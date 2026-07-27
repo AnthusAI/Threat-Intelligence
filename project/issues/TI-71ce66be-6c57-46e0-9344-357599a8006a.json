@@ -3,7 +3,7 @@
   "title": "Accession leaves sourcePublishedAt/retrievedAt null so age-decay sourcePublishedAtDay cannot land",
   "description": "## Expected\nAccessioned references carry publication/retrieval timestamps when known so vector metadata can write sourcePublishedAtDay / retrievedAtDay.\n\n## Observed\nAfter accession, four new refs had sourcePublishedAt=null, retrievedAt=null. Sidecar had retrieved_at but GraphQL did not. Force sync wrote retrievedAtDay from importedAt. sourcePublishedAtDay absent until manual update_record set arXiv 2025-05-19 from PDF header.\n\n## Impact\nkanbus-4b0aa6 Rebuild A only partially activated without publication dates.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "assignee": null,
   "creator": null,
@@ -21,7 +21,7 @@
     }
   ],
   "created_at": "2026-07-27T00:01:40.435450Z",
-  "updated_at": "2026-07-27T00:13:56.149920Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.389635Z",
+  "closed_at": "2026-07-27T00:21:28.389635Z",
   "custom": {}
 }

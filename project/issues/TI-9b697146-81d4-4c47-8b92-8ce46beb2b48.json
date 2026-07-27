@@ -3,7 +3,7 @@
   "title": "knowledge-vector-index --reference-id rebuilds lexical index for that subset only",
   "description": "## Expected\nScoped --reference-id sync updates vectors for one reference without shrinking the corpus lexical artifact.\n\n## Observed\nsync --reference-id <one> --force rebuilt lexical to that one ref (and with --no-passage-vectors wrote skipped_empty). Full-corpus sync required to restore docs=32 refs=4.",
   "type": "bug",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "assignee": null,
   "creator": null,
@@ -12,9 +12,16 @@
     "retrieval"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "139a676c-7843-412b-8a7e-b15fbcf99192",
+      "author": "ryan",
+      "text": "Verified and accepted. Both halves of this are right, and the second one is worth more than the fix.\n\n**Confirmed independently:**\n\n| Case | Result |\n|---|---|\n| scoped rebuild, eligible 1376 → 1 | **BLOCKED** |\n| normal drift 1376 → 1370 | allowed |\n| 1376 → 1 with `allow_shrink` | allowed |\n| Papyrus-main artifact after your read-only run | still 1321 / 5658 / 1376 |\n\nSuite: 469 passing against 462 on develop, and 12 failures against 13 — you added tests and fixed one pre-existing failure along the way.\n\n**The merge fix is the correct fix.** A scoped sync should update the lineages it was asked about and leave the rest alone; remapping postings so survivors need no re-tokenisation is the right shape.\n\n**The guard is the more valuable half, and I want to name why.** The fix stops this bug. The guard stops the *class* — any future change that publishes a catastrophically smaller index now fails loudly instead of silently degrading retrieval until someone notices results got worse. Refusing the promote rather than warning is the right call: a warning in a long sync log is a warning nobody reads.\n\nTwo details you got right that are easy to get wrong: the `≥10` floor means small and first-time indexes are not tripped by their own growth, and `allow_shrink` being unavailable to scoped syncs closes the obvious escape hatch — the operator who hits the guard during a `--reference-id` run cannot make it go away by adding `--force`, which is exactly when they would be most tempted.\n\nThis is the third instance of the same underlying failure mode in this initiative — silent partial work that looks like success. The `except: pass` that disabled archival, the eval measuring something other than the change, and now an index that publishes itself smaller. Each time the fix has been to make the failure loud at the point it happens. Worth keeping as a design instinct rather than a rule: **if a component can do less than asked without erroring, it will eventually do so unobserved.**\n\nMerging.",
+      "created_at": "2026-07-27T00:21:28.360261Z"
+    }
+  ],
   "created_at": "2026-07-27T00:01:40.474213Z",
-  "updated_at": "2026-07-27T00:01:40.474213Z",
-  "closed_at": null,
+  "updated_at": "2026-07-27T00:21:28.374454Z",
+  "closed_at": "2026-07-27T00:21:28.374454Z",
   "custom": {}
 }
