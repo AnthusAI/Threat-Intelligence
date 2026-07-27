@@ -22,10 +22,16 @@
       "author": "ryan",
       "text": "## Fix on epic/e2e-ingestion\n\nUncertain-lane leads now open with 1–2 checkable corpus sentences when available: named citation links (cites/cited_by accepted), summary overlap with a named accepted neighbor, shared-domain weak neighbor, or an explicit coverage-gap sentence naming accepted category clusters. `registrationNote` is appended after the corpus lead (not prefixed). Triage-plan loads Category rows for gap phrasing. Lane thresholds unchanged; still no auto-accept.",
       "created_at": "2026-07-27T00:29:48.445599Z"
+    },
+    {
+      "id": "12f13726-36f3-4542-bc6f-ab68db781de0",
+      "author": "ryan",
+      "text": "## Batch report (post-fix)\n\nTwo research assignments → 53 catalog URIs → **46 pending refs** registered (dup noops absorbed).\n\n| Metric | Count |\n|---|---|\n| Mechanical auto-archive/reject (this batch) | 0 |\n| Clustered as near-duplicates | 5 (2 clusters) |\n| Reach human queue | 43 |\n| Rationales with ingestion note | 33/43 |\n| Rationales naming accepted neighbor / cite / coverage gap | 43/43 |\n| Inventory-only “Needs editorial judgment…” | 0/43 |\n\nHonest read on decidability: every uncertain lead now opens with a checkable corpus sentence, so the old 0/30 “nothing to decide from” failure mode is gone. Many leads are still *coverage-gap* or *weak neighbor* calls rather than crisp accept/reject — enough to skip junk (Google SERPs, LinkedIn, Medium) from the rationale alone, but Ryan’s 25–30 human accept/reject session is still the real acceptance test.",
+      "created_at": "2026-07-27T01:58:45.138502Z"
     }
   ],
   "created_at": "2026-07-25T18:52:03.250288Z",
-  "updated_at": "2026-07-27T00:29:48.445599Z",
+  "updated_at": "2026-07-27T01:58:45.138502Z",
   "closed_at": null,
   "custom": {}
 }
