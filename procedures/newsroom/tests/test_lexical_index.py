@@ -11,12 +11,15 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from papyrus_knowledge_query.lexical_index import (
+    LexicalIndexShrinkError,
+    assert_lexical_promote_safe,
     audit_lexical_artifact,
     bm25_search,
     build_lexical_index,
     dumps_lexical_index,
     lexical_manifest_from_artifact,
     loads_lexical_index,
+    merge_lexical_index,
     normalize_defanged_iocs,
     passage_candidate_to_lexical_doc,
     query_has_identifier,
@@ -271,6 +274,102 @@ class LexicalIndexTests(unittest.TestCase):
             manifest = json.loads(sidecar.read_text())
             self.assertEqual(manifest["sourceCommit"], "deadbeef")
             self.assertEqual(manifest["chunkCount"], 1)
+
+    def test_scoped_merge_preserves_other_references(self):
+        """TI-9b6971: --reference-id update must not drop the rest of the corpus index."""
+        existing = build_lexical_index(
+            [
+                {
+                    "key": "reference-passage-keep",
+                    "text": "stable corpus passage about transformers",
+                    "referenceLineageId": "ref-keep",
+                    "chunkIndex": 0,
+                    "corpusId": "corpus-a",
+                    "curationStatus": "accepted",
+                    "title": "Keep",
+                },
+                {
+                    "key": "reference-passage-old",
+                    "text": "outdated passage mentioning CVE-2020-0001",
+                    "referenceLineageId": "ref-update",
+                    "chunkIndex": 0,
+                    "corpusId": "corpus-a",
+                    "curationStatus": "accepted",
+                    "title": "Update me",
+                },
+            ],
+            eligible_count=20,
+            skipped={"missing_extracted_text": 2},
+            corpus_id="corpus-a",
+        )
+        merged = merge_lexical_index(
+            existing,
+            [
+                {
+                    "key": "reference-passage-new",
+                    "text": "fresh passage mentioning CVE-2024-3400",
+                    "referenceLineageId": "ref-update",
+                    "chunkIndex": 0,
+                    "corpusId": "corpus-a",
+                    "curationStatus": "accepted",
+                    "title": "Updated",
+                }
+            ],
+            replace_lineage_ids={"ref-update"},
+            eligible_count=20,
+            skipped={"missing_extracted_text": 2},
+            corpus_id="corpus-a",
+        )
+        lineages = {doc.get("referenceLineageId") for doc in merged["docs"]}
+        self.assertEqual(lineages, {"ref-keep", "ref-update"})
+        self.assertEqual(merged["manifest"]["referenceCount"], 2)
+        self.assertEqual(merged["manifest"]["eligibleCount"], 20)
+        self.assertEqual(len(merged["docs"]), 2)
+        hits = bm25_search(merged, "CVE-2024-3400", limit=5)
+        self.assertEqual(hits[0]["lineageId"], "ref-update")
+        keep_hits = bm25_search(merged, "transformers", limit=5)
+        self.assertEqual(keep_hits[0]["lineageId"], "ref-keep")
+
+    def test_promote_guard_refuses_sharp_eligible_drop(self):
+        """TI-9b6971: manifest-detectable shrink must fail loudly before promote."""
+        existing = build_lexical_index(
+            [
+                {
+                    "key": f"reference-passage-{index}",
+                    "text": f"chunk body about topic {index} with enough tokens here",
+                    "referenceLineageId": f"reference-{index}",
+                    "chunkIndex": 0,
+                }
+                for index in range(40)
+            ],
+            eligible_count=1376,
+            skipped={"missing_extracted_text": 55},
+        )
+        # Match Papyrus-main scale in the manifest fields the guard reads.
+        existing["manifest"]["referenceCount"] = 1321
+        existing["manifest"]["chunkCount"] = 5658
+        existing["manifest"]["eligibleCount"] = 1376
+        scoped = build_lexical_index(
+            [
+                {
+                    "key": "reference-passage-only",
+                    "text": "single scoped reference passage text for rebuild",
+                    "referenceLineageId": "reference-only",
+                    "chunkIndex": 0,
+                }
+            ],
+            eligible_count=1,
+        )
+        with self.assertRaises(LexicalIndexShrinkError):
+            assert_lexical_promote_safe(existing, scoped)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "index.json.gz"
+            write_lexical_index(path, existing, allow_shrink=True)
+            with self.assertRaises(LexicalIndexShrinkError):
+                write_lexical_index(path, scoped)
+            # Existing artifact remains intact after refused promote.
+            reloaded = loads_lexical_index(path.read_bytes())
+            self.assertEqual(reloaded["manifest"]["eligibleCount"], 1376)
 
     def test_audit_compares_manifest_to_live_listing(self):
         artifact = build_lexical_index(
