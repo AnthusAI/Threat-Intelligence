@@ -12,9 +12,16 @@
     "retrieval"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "001d3075-d17c-427b-ba2a-b698ffd487a9",
+      "author": "ryan",
+      "text": "## Golden-set + publication-date coverage (pre-merge)\n\nBranch `fix/recency-prefer-publication-date` @ `bfc2f33`. Report:\n`procedures/newsroom/tests/fixtures/reports/retrieval_post_pubdate_bfc2f3.json`\ncompared to `retrieval_post_recency_bb12d3.json` (same golden set / Papyrus main / ai-ml-research).\n\n### Golden set\n\n| | post-recency (bb12d3) | prefer-pubdate (bfc2f3) | Δ |\n|---|---:|---:|---:|\n| MRR | 0.8533 | 0.6533 | −0.2000 |\n| Hit@5 | 0.96 | 0.76 | −0.20 |\n| paraphrase / freshness / quality_tie / multi_hop MRR | — | **identical to 4 decimals** | 0 |\n| identifier MRR | 1.0 | 0.0 | −1.0 (5/5 MISS) |\n\n**Attribution:** identifier collapse is **not** from this fix. Control on parent `beab60a` under the same env also MISS all 5 identifier queries. Environmental/lexical drift since the post-recency baseline. On every category the instrument can attribute to ranking, the change is **near-neutral** (exactly flat).\n\nFreshness staying flat is consistent with low publication-date coverage (below): most candidates still get neutral `recencyScore=0.5`.\n\n### Publication-date coverage (accepted, GraphQL, read-only)\n\n| Corpus | Accepted | `sourcePublishedAt` | `sourceUpdatedAt` | either | % |\n|---|---:|---:|---:|---:|---:|\n| `knowledge-corpus-ai-ml-research` (golden-set) | 1376 | 316 | 241 | **316** | **23.0%** |\n| `knowledge-corpus-threat-intelligence` (TI prod) | 13 | 1 | 0 | **1** | **7.7%** |\n\nSo for ~77% of golden-set accepted refs (and ~92% of TI accepted), recency was a near-constant **1.0** under the old ingestion-time path and is a near-constant **0.5** after this fix — the signal still barely differentiates. The code fix is still correct. The real follow-on is **extracting publication dates at ingestion** (and syncing into vectors) so age decay has something to work on.\n\nNo records written; no backfill.\n",
+      "created_at": "2026-07-27T22:51:27.212648Z"
+    }
+  ],
   "created_at": "2026-07-27T02:18:46.468715Z",
-  "updated_at": "2026-07-27T02:18:46.468715Z",
+  "updated_at": "2026-07-27T22:51:27.212648Z",
   "closed_at": null,
   "custom": {}
 }
