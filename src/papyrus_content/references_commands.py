@@ -146,6 +146,7 @@ def references_triage_plan(flags: list[str]) -> None:
         attachments=client.list_records("ReferenceAttachment"),
         messages=client.list_records("Message"),
         relations=client.list_records("SemanticRelation"),
+        categories=client.list_records("Category"),
         max_pending=max_pending,
     )
     output_dir = normalize_string(options.get("output-dir"))

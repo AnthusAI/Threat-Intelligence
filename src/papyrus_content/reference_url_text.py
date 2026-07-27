@@ -35,6 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - boto3 exists in normal runtime
     boto3 = None
 
 ARTICLE_TEXT_SUBPROCESS_TIMEOUT_SECONDS = 240
+URL_TEXT_SUBPROCESS_TIMEOUT_SECONDS = 120
 
 
 def build_reference_url_text_attachment_plans(
@@ -1833,6 +1834,7 @@ def resolve_storage_bucket_name() -> str | None:
     explicit_bucket = (
         os.environ.get("papyrusMedia_BUCKET_NAME")
         or os.environ.get("PAPYRUS_MEDIA_BUCKET_NAME")
+        or os.environ.get("PAPYRUS_STORAGE_BUCKET_NAME")
         or os.environ.get("STORAGE_BUCKET_NAME")
         or os.environ.get("AMPLIFY_STORAGE_BUCKET_NAME")
     )
@@ -2067,15 +2069,28 @@ def _run_biblicus_url_text(payload: dict[str, Any], *, grobid_url: str | None = 
         "json",
     ]
     env = _biblicus_env(grobid_url=grobid_url)
-    completed = subprocess.run(
-        command,
-        cwd=BIBLICUS_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        input=json.dumps(payload),
-        env=env,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=BIBLICUS_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            input=json.dumps(payload),
+            env=env,
+            timeout=URL_TEXT_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ReferenceUrlTextExtractionError(
+            reason={
+                "code": "biblicus_url_text_timeout",
+                "message": (
+                    f"Biblicus URL text extraction timed out after "
+                    f"{URL_TEXT_SUBPROCESS_TIMEOUT_SECONDS}s."
+                ),
+                "details": {"sourceUri": payload.get("source_uri") or payload.get("sourceUri")},
+            }
+        ) from error
     stdout = (completed.stdout or "").strip()
     stderr = (completed.stderr or "").strip()
     parsed_stdout = _json_object_or_none(stdout)
@@ -2093,15 +2108,28 @@ def _run_biblicus_url_text(payload: dict[str, Any], *, grobid_url: str | None = 
             "--format",
             "json",
         ]
-        completed = subprocess.run(
-            uv_command,
-            cwd=BIBLICUS_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-            input=json.dumps(payload),
-            env=env,
-        )
+        try:
+            completed = subprocess.run(
+                uv_command,
+                cwd=BIBLICUS_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+                input=json.dumps(payload),
+                env=env,
+                timeout=URL_TEXT_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ReferenceUrlTextExtractionError(
+                reason={
+                    "code": "biblicus_url_text_timeout",
+                    "message": (
+                        f"Biblicus URL text extraction timed out after "
+                        f"{URL_TEXT_SUBPROCESS_TIMEOUT_SECONDS}s."
+                    ),
+                    "details": {"sourceUri": payload.get("source_uri") or payload.get("sourceUri")},
+                }
+            ) from error
         stdout = (completed.stdout or "").strip()
         stderr = (completed.stderr or "").strip()
         parsed_stdout = _json_object_or_none(stdout)
@@ -3768,15 +3796,26 @@ def _resolve_process_source_uri(
         return canonical_uri, None
     # Find-stage metadata lives on ModelAttachment (role=metadata). When callers
     # hydrate that onto Reference.metadata, canonical resolution above succeeds.
-    # As a last resort for URL-only prospects, use the Reference.sourceUri after
-    # find has already run (metadata may be present even when hydration failed).
     direct_source_uri = normalize_http_url(reference.get("sourceUri"))
     if direct_source_uri and _reference_has_find_stage_marker(reference):
+        return direct_source_uri, None
+    # URL-primary research/HTML/PDF prospects already carry a fetchable content
+    # URL. Keep the find-stage gate for DOI resolver hosts that still need
+    # canonical PDF/HTML resolution (TI-4db70d).
+    if direct_source_uri and not _is_doi_resolver_uri(direct_source_uri):
         return direct_source_uri, None
     return None, {
         "code": "needs_find_missing_canonical_source",
         "message": "Reference processing requires find-stage canonical source resolution first.",
     }
+
+
+def _is_doi_resolver_uri(source_uri: str | None) -> bool:
+    normalized = normalize_http_url(source_uri)
+    if not normalized:
+        return False
+    host = (urlparse(normalized).hostname or "").lower()
+    return host in {"doi.org", "dx.doi.org"}
 
 
 def _reference_has_find_stage_marker(reference: dict[str, Any]) -> bool:

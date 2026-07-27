@@ -3,16 +3,29 @@
   "title": "New pending HTML prospects get no url-text fetch; metadata generation skips all",
   "description": "## Observed\n\nAfter `process-research-now` registered 18 HTML prospects (`catalog media_type: text/html`):\n\nurlText: eligible=0 planned=0 changes=0 failures=0\nmetadataGeneration: attempted=18 generated=0 skippedMissingText=18\n\n## Expected\n\nEligible HTML/PDF sources are fetched for extracted text (or a clear per-ref skip reason), then metadata generation can run. Silent 0/18 eligibility with 18 metadata skips is under-delivery.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
   "type": "bug",
-  "status": "open",
+  "status": "in_progress",
   "priority": 1,
   "assignee": null,
   "creator": null,
   "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
   "labels": [],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "c4246e9a-d48e-4bf3-9781-bbc8e6975e8b",
+      "author": "ryan",
+      "text": "## Fix on epic/e2e-ingestion\n\nRoot cause: process-fetch-url-text required a find-stage marker (or source attachment) before using `Reference.sourceUri`. Fresh research HTML prospects have a fetchable URL but no find marker → `skippedNeedsFind` → eligible=0. Tavily intake also forced `--url-text false`, hiding the bug.\n\n### Changes\n1. `_resolve_process_source_uri` allows non-DOI `sourceUri` without find marker (DOI resolver hosts still need find).\n2. Research intake reloads `ReferenceAttachment` after url-text so metadata generation sees extracted text.\n3. Tavily no longer defaults url-text/metadata-from-text to false.\n\nUnit tests cover HTML eligible + DOI still gated.",
+      "created_at": "2026-07-27T00:29:48.410496Z"
+    },
+    {
+      "id": "588d689f-6096-4cef-8383-200223ebf9c7",
+      "author": "ryan",
+      "text": "## Verification\n\nAfter fix: 46/46 new batch HTML prospects resolve as process-eligible without find-stage marker or source attachments. Smoke `run_reference_url_text_extraction` on 3 refs: eligible=3 planned=3 skippedNeedsFind=0 failures=0.\n\nAlso accept `PAPYRUS_STORAGE_BUCKET_NAME` in bucket resolution (production TI env uses that name), and add a 120s Biblicus url-text subprocess timeout so hung fetches fail per-ref instead of stalling the whole intake.",
+      "created_at": "2026-07-27T01:58:45.125938Z"
+    }
+  ],
   "created_at": "2026-07-26T20:02:23.056279Z",
-  "updated_at": "2026-07-26T20:02:23.056279Z",
+  "updated_at": "2026-07-27T01:58:45.125938Z",
   "closed_at": null,
   "custom": {}
 }

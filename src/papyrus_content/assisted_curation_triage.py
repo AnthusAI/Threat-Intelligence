@@ -128,6 +128,7 @@ def build_assisted_triage_plan(
     attachments: list[dict[str, Any]],
     messages: list[dict[str, Any]] | None = None,
     relations: list[dict[str, Any]] | None = None,
+    categories: list[dict[str, Any]] | None = None,
     max_pending: int | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic triage plan from GraphQL records. Pure: no I/O."""
@@ -166,6 +167,15 @@ def build_assisted_triage_plan(
         if reference_reason_code(reference, comments_by_lineage.get(reference.get("lineageId"), []))
         in SCOPE_TRAINING_NEGATIVE_REASON_CODES
     ]
+    accepted_by_lineage = {
+        str(reference.get("lineageId") or reference.get("id") or ""): reference for reference in accepted
+    }
+    citation_links_by_lineage = _citation_links_by_lineage(relations or [], accepted_by_lineage)
+    accepted_categories_by_lineage = _accepted_category_labels_by_lineage(
+        relations or [],
+        categories or [],
+        accepted_by_lineage,
+    )
 
     clusters = cluster_pending_references(pending)
     cluster_by_id = {cluster["clusterId"]: cluster for cluster in clusters}
@@ -219,6 +229,8 @@ def build_assisted_triage_plan(
             exploratory=exploratory,
             cluster=cluster,
             cluster_primary=cluster_primary,
+            citation_links=citation_links_by_lineage.get(lineage_id) or [],
+            accepted_category_labels=accepted_categories_by_lineage,
         )
         prospects.append(
             TriageProspect(
@@ -456,17 +468,24 @@ def assign_review_lane(
     exploratory: bool,
     cluster: dict[str, Any] | None,
     cluster_primary: bool,
+    citation_links: list[dict[str, Any]] | None = None,
+    accepted_category_labels: dict[str, list[str]] | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """Assign a human-review lane. Never accepts. Exploratory skips history scoring."""
     tokens = title_tokens(reference.get("title"))
+    summary_tokens = _reference_summary_tokens(reference)
     domain = source_domain(reference.get("sourceUri"))
     evidence: dict[str, Any] = {"exploratory": exploratory}
     registration_note = _reference_registration_note(reference)
+    citation_links = list(citation_links or [])
+    accepted_category_labels = accepted_category_labels or {}
 
     def _done(lane: str, rationale: str, extra_evidence: dict[str, Any] | None = None) -> tuple[str, str, dict[str, Any]]:
         merged = {**evidence, **(extra_evidence or {})}
         if registration_note:
             merged["registrationNote"] = registration_note
+        if citation_links:
+            merged["citationLinks"] = citation_links
         return lane, _with_registration_note(rationale, registration_note), merged
 
     if exploratory:
@@ -481,9 +500,13 @@ def assign_review_lane(
             )
         return _done("uncertain", rationale)
 
-    best_accept = _best_similarity(tokens, domain, accepted_index)
+    best_accept = _best_similarity(tokens, domain, accepted_index, summary_tokens=summary_tokens)
     best_reject = _best_similarity(tokens, domain, rejected_scope_index)
-    if best_accept and (best_accept["score"] > 0 or best_accept.get("sharedDomain")):
+    if best_accept and (
+        best_accept["score"] > 0
+        or best_accept.get("sharedDomain")
+        or best_accept.get("summaryOverlap", 0) > 0
+    ):
         evidence["acceptedMatch"] = best_accept
     if best_reject and (best_reject["score"] > 0 or best_reject.get("sharedDomain")):
         evidence["rejectedMatch"] = best_reject
@@ -517,14 +540,25 @@ def assign_review_lane(
         return _done("likely_accept", "; ".join(parts) + ". Human accept still required.")
 
     if cluster and cluster_primary and int(cluster.get("size") or 0) > 1:
+        corpus_lead = _corpus_connection_lead(
+            reference,
+            best_accept=best_accept,
+            citation_links=citation_links,
+            accepted_category_labels=accepted_category_labels,
+            accepted_index=accepted_index,
+        )
+        cluster_sentence = (
+            f"Best-sourced member of near-duplicate cluster {cluster['clusterId']} "
+            f"({cluster['size']} members). Sibling titles: "
+            + "; ".join(str(title) for title in (cluster.get("memberTitles") or [])[:3] if title)
+            + "."
+        )
+        rationale = f"{corpus_lead} {cluster_sentence}".strip() if corpus_lead else (
+            cluster_sentence + " No strong accepted/rejected history match."
+        )
         return _done(
             "uncertain",
-            (
-                f"Best-sourced member of near-duplicate cluster {cluster['clusterId']} "
-                f"({cluster['size']} members). Sibling titles: "
-                + "; ".join(str(title) for title in (cluster.get("memberTitles") or [])[:3] if title)
-                + ". No strong accepted/rejected history match."
-            ),
+            rationale,
             {"clusterId": cluster["clusterId"], "clusterSize": cluster["size"]},
         )
 
@@ -551,6 +585,16 @@ def assign_review_lane(
                     },
                 },
             )
+
+    corpus_lead = _corpus_connection_lead(
+        reference,
+        best_accept=best_accept,
+        citation_links=citation_links,
+        accepted_category_labels=accepted_category_labels,
+        accepted_index=accepted_index,
+    )
+    if corpus_lead:
+        return _done("uncertain", corpus_lead)
 
     facts: list[str] = []
     if domain:
@@ -595,7 +639,167 @@ def _with_registration_note(rationale: str, registration_note: str | None) -> st
     if not note:
         return rationale
     clipped = note if len(note) <= 280 else note[:277].rstrip() + "…"
-    return f"Ingestion note: {clipped} — {rationale}"
+    # Corpus-connection lead first; ingestion note is supporting context (kanbus-ec5555).
+    return f"{rationale} Ingestion note: {clipped}"
+
+
+def _corpus_connection_lead(
+    reference: dict[str, Any],
+    *,
+    best_accept: dict[str, Any] | None,
+    citation_links: list[dict[str, Any]],
+    accepted_category_labels: dict[str, list[str]],
+    accepted_index: list[dict[str, Any]],
+) -> str:
+    """1–2 sentences grounded in checkable accepted-corpus facts for uncertain leads."""
+    sentences: list[str] = []
+    if citation_links:
+        link = citation_links[0]
+        direction = str(link.get("direction") or "cites")
+        title = str(link.get("title") or "").strip() or "accepted reference"
+        ref_id = str(link.get("referenceId") or "").strip()
+        if direction == "cited_by":
+            sentences.append(f"Cited by accepted reference “{title}” ({ref_id}).")
+        else:
+            sentences.append(f"Cites accepted reference “{title}” ({ref_id}).")
+
+    if best_accept and (
+        best_accept.get("summaryOverlap", 0) >= 2
+        or (best_accept.get("score") or 0) > 0
+        or best_accept.get("sharedDomain")
+    ):
+        title = str(best_accept.get("title") or "").strip() or "accepted reference"
+        ref_id = str(best_accept.get("referenceId") or "").strip()
+        summary_overlap = int(best_accept.get("summaryOverlap") or 0)
+        score = float(best_accept.get("score") or 0.0)
+        if summary_overlap >= 2:
+            shared = ", ".join((best_accept.get("summaryOverlappingTokens") or [])[:5])
+            sentences.append(
+                f"Summary overlap with accepted “{title}” ({ref_id})"
+                + (f" on {shared}." if shared else ".")
+            )
+        elif score > 0:
+            sentences.append(
+                f"Closest accepted neighbor is “{title}” ({ref_id}; title jaccard={score:.2f}) — "
+                "not strong enough for likely-accept."
+            )
+        elif best_accept.get("sharedDomain"):
+            sentences.append(
+                f"Shares publisher domain with accepted “{title}” ({ref_id}) but title overlap is weak."
+            )
+
+    if not sentences and accepted_index:
+        # Coverage gap: name a few accepted category labels the corpus already owns.
+        label_counts: dict[str, int] = defaultdict(int)
+        for labels in accepted_category_labels.values():
+            for label in labels:
+                label_counts[label] += 1
+        if label_counts:
+            top = sorted(label_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+            label_text = ", ".join(f"“{name}”" for name, _count in top)
+            sentences.append(
+                f"No close accepted neighbor; corpus coverage today clusters around {label_text} "
+                f"across {len(accepted_index)} accepted refs — judge whether this fills a gap."
+            )
+        else:
+            domain = source_domain(reference.get("sourceUri"))
+            domain_bit = f" from {domain}" if domain else ""
+            sentences.append(
+                f"No close accepted neighbor among {len(accepted_index)} accepted refs{domain_bit}; "
+                "treat as a potential coverage gap pending editorial scope check."
+            )
+
+    return " ".join(sentences[:2]).strip()
+
+
+def _reference_summary_tokens(reference: dict[str, Any]) -> set[str]:
+    metadata = parse_jsonish(reference.get("metadata")) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    chunks: list[str] = []
+    for key in ("summary", "abstract", "deck", "subtitle"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            chunks.append(value)
+    # Nested papyrus / generated metadata shapes.
+    for container_key in ("generated", "papyrus"):
+        container = metadata.get(container_key)
+        if isinstance(container, dict):
+            for key in ("summary", "abstract"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    chunks.append(value)
+    return title_tokens(" ".join(chunks))
+
+
+def _citation_links_by_lineage(
+    relations: list[dict[str, Any]],
+    accepted_by_lineage: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Map pending lineage -> accepted citation neighbors (cites / cited_by)."""
+    links: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for relation in relations:
+        if str(relation.get("relationState") or "") != "current":
+            continue
+        predicate = str(relation.get("relationTypeKey") or relation.get("predicate") or "").strip()
+        if predicate != "cites":
+            continue
+        subject = str(relation.get("subjectLineageId") or "").strip()
+        obj = str(relation.get("objectLineageId") or "").strip()
+        if not subject or not obj:
+            continue
+        if obj in accepted_by_lineage and subject not in accepted_by_lineage:
+            accepted = accepted_by_lineage[obj]
+            links[subject].append(
+                {
+                    "direction": "cites",
+                    "referenceId": accepted.get("id"),
+                    "lineageId": obj,
+                    "title": accepted.get("title"),
+                }
+            )
+        if subject in accepted_by_lineage and obj not in accepted_by_lineage:
+            accepted = accepted_by_lineage[subject]
+            links[obj].append(
+                {
+                    "direction": "cited_by",
+                    "referenceId": accepted.get("id"),
+                    "lineageId": subject,
+                    "title": accepted.get("title"),
+                }
+            )
+    return links
+
+
+def _accepted_category_labels_by_lineage(
+    relations: list[dict[str, Any]],
+    categories: list[dict[str, Any]],
+    accepted_by_lineage: dict[str, dict[str, Any]],
+) -> dict[str, list[str]]:
+    category_by_lineage = {
+        str(category.get("lineageId") or category.get("id") or ""): category
+        for category in categories
+        if str(category.get("versionState") or "current") == "current"
+    }
+    labels: dict[str, list[str]] = defaultdict(list)
+    for relation in relations:
+        if str(relation.get("relationState") or "") != "current":
+            continue
+        predicate = str(relation.get("relationTypeKey") or relation.get("predicate") or "").strip()
+        if predicate not in {"classified_as", "authoritative_label"}:
+            continue
+        if relation.get("subjectKind") != "reference" or relation.get("objectKind") != "category":
+            continue
+        subject = str(relation.get("subjectLineageId") or "").strip()
+        if subject not in accepted_by_lineage:
+            continue
+        category = category_by_lineage.get(str(relation.get("objectLineageId") or "").strip())
+        if not category:
+            continue
+        label = str(category.get("label") or category.get("categoryKey") or category.get("id") or "").strip()
+        if label and label not in labels[subject]:
+            labels[subject].append(label)
+    return labels
 
 
 def is_exploratory_reference(reference: dict[str, Any]) -> bool:
@@ -1123,13 +1327,19 @@ def _best_similarity(
     tokens: set[str],
     domain: str,
     index: list[dict[str, Any]],
+    *,
+    summary_tokens: set[str] | None = None,
 ) -> dict[str, Any] | None:
     best: dict[str, Any] | None = None
+    summary_tokens = summary_tokens or set()
     for entry in index:
         score = title_jaccard(tokens, entry["tokens"])
         overlap = sorted(tokens & entry["tokens"])
         shared_domain = bool(domain and entry.get("domain") and domain == entry["domain"])
-        if score <= 0 and not shared_domain:
+        entry_summary = entry.get("summaryTokens") or set()
+        summary_overlap_tokens = sorted(summary_tokens & entry_summary) if summary_tokens and entry_summary else []
+        summary_overlap = len(summary_overlap_tokens)
+        if score <= 0 and not shared_domain and summary_overlap < 2:
             continue
         candidate = {
             "referenceId": entry["referenceId"],
@@ -1139,10 +1349,19 @@ def _best_similarity(
             "overlappingTokens": overlap,
             "sharedDomain": shared_domain,
             "domain": entry.get("domain") or "",
+            "summaryOverlap": summary_overlap,
+            "summaryOverlappingTokens": summary_overlap_tokens,
         }
-        rank = (score, 1 if shared_domain else 0, len(overlap))
+        rank = (score, summary_overlap, 1 if shared_domain else 0, len(overlap))
         best_rank = (
-            (best["score"], 1 if best.get("sharedDomain") else 0, best.get("tokenOverlap") or 0) if best else (-1, 0, 0)
+            (
+                best["score"],
+                best.get("summaryOverlap") or 0,
+                1 if best.get("sharedDomain") else 0,
+                best.get("tokenOverlap") or 0,
+            )
+            if best
+            else (-1, 0, 0, 0)
         )
         if rank > best_rank:
             best = candidate
@@ -1154,6 +1373,7 @@ def _reference_index_entry(reference: dict[str, Any]) -> dict[str, Any]:
         "referenceId": reference.get("id"),
         "title": reference.get("title"),
         "tokens": title_tokens(reference.get("title")),
+        "summaryTokens": _reference_summary_tokens(reference),
         "domain": source_domain(reference.get("sourceUri")),
         "sourceUri": normalize_source_uri(reference.get("sourceUri")),
     }
