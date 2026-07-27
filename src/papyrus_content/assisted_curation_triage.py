@@ -461,6 +461,13 @@ def assign_review_lane(
     tokens = title_tokens(reference.get("title"))
     domain = source_domain(reference.get("sourceUri"))
     evidence: dict[str, Any] = {"exploratory": exploratory}
+    registration_note = _reference_registration_note(reference)
+
+    def _done(lane: str, rationale: str, extra_evidence: dict[str, Any] | None = None) -> tuple[str, str, dict[str, Any]]:
+        merged = {**evidence, **(extra_evidence or {})}
+        if registration_note:
+            merged["registrationNote"] = registration_note
+        return lane, _with_registration_note(rationale, registration_note), merged
 
     if exploratory:
         rationale = (
@@ -472,7 +479,7 @@ def assign_review_lane(
                 f" Near-duplicate of cluster {cluster['clusterId']} "
                 f"(primary {cluster['primaryReferenceId']})."
             )
-        return "uncertain", rationale, evidence
+        return _done("uncertain", rationale)
 
     best_accept = _best_similarity(tokens, domain, accepted_index)
     best_reject = _best_similarity(tokens, domain, rejected_scope_index)
@@ -483,14 +490,13 @@ def assign_review_lane(
 
     if best_reject and best_reject["score"] >= _LIKELY_REJECT_TITLE_JACCARD:
         if not best_accept or best_reject["score"] >= ((best_accept or {}).get("score") or 0) + 0.05:
-            return (
+            return _done(
                 "likely_reject",
                 (
                     f"Title closely matches previously rejected out-of-scope reference "
                     f"“{best_reject['title']}” ({best_reject['referenceId']}; "
                     f"jaccard={best_reject['score']:.2f}). Confirm before rejecting."
                 ),
-                evidence,
             )
 
     if best_accept and (
@@ -508,10 +514,10 @@ def assign_review_lane(
         if best_accept.get("overlappingTokens"):
             parts.append("shared tokens: " + ", ".join(best_accept["overlappingTokens"][:6]))
         parts.append(f"title jaccard={best_accept['score']:.2f}")
-        return "likely_accept", "; ".join(parts) + ". Human accept still required.", evidence
+        return _done("likely_accept", "; ".join(parts) + ". Human accept still required.")
 
     if cluster and cluster_primary and int(cluster.get("size") or 0) > 1:
-        return (
+        return _done(
             "uncertain",
             (
                 f"Best-sourced member of near-duplicate cluster {cluster['clusterId']} "
@@ -519,21 +525,20 @@ def assign_review_lane(
                 + "; ".join(str(title) for title in (cluster.get("memberTitles") or [])[:3] if title)
                 + ". No strong accepted/rejected history match."
             ),
-            {**evidence, "clusterId": cluster["clusterId"], "clusterSize": cluster["size"]},
+            {"clusterId": cluster["clusterId"], "clusterSize": cluster["size"]},
         )
 
     if domain and accepted_index:
         accepted_domains = sorted({entry["domain"] for entry in accepted_index if entry.get("domain")})
         if domain in accepted_domains:
             match = next(entry for entry in accepted_index if entry.get("domain") == domain)
-            return (
+            return _done(
                 "uncertain",
                 (
                     f"Same domain as accepted reference “{match['title']}” ({match['referenceId']}) "
                     f"but title overlap is weak; treat as uncertain rather than likely-accept."
                 ),
                 {
-                    **evidence,
                     "sharedDomainOnly": domain,
                     "acceptedMatch": {
                         "referenceId": match["referenceId"],
@@ -563,11 +568,34 @@ def assign_review_lane(
         facts.append(f"{len(accepted_index)} accepted refs available for comparison; none matched closely")
     else:
         facts.append("accepted set is empty — no positive history signal")
-    return (
+    return _done(
         "uncertain",
         "Needs editorial judgment. Concrete facts: " + "; ".join(facts) + ".",
-        evidence,
     )
+
+
+def _reference_registration_note(reference: dict[str, Any]) -> str | None:
+    metadata = parse_jsonish(reference.get("metadata")) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    for key in (
+        "registration_note",
+        "registrationNote",
+        "ingestion_rationale",
+        "ingestionRationale",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _with_registration_note(rationale: str, registration_note: str | None) -> str:
+    note = str(registration_note or "").strip()
+    if not note:
+        return rationale
+    clipped = note if len(note) <= 280 else note[:277].rstrip() + "…"
+    return f"Ingestion note: {clipped} — {rationale}"
 
 
 def is_exploratory_reference(reference: dict[str, Any]) -> bool:

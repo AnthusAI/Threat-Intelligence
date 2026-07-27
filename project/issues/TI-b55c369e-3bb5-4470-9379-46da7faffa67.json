@@ -18,10 +18,16 @@
       "author": "ryan",
       "text": "Fix implemented on epic/e2e-ingestion in src/papyrus_content/accession.py (augment keeps create; supersedes proposal). Covered by test_accession_replacement_keeps_create_and_supersedes_proposal. Awaiting review/merge.",
       "created_at": "2026-07-27T00:02:02.530594Z"
+    },
+    {
+      "id": "11b96fe7-0d5d-4e38-b428-232d4bf16fe1",
+      "author": "ryan",
+      "text": "Fix committed in 7449984 on epic/e2e-ingestion.",
+      "created_at": "2026-07-27T00:14:02.293522Z"
     }
   ],
   "created_at": "2026-07-27T00:01:40.377740Z",
-  "updated_at": "2026-07-27T00:02:02.530594Z",
+  "updated_at": "2026-07-27T00:14:02.293522Z",
   "closed_at": null,
   "custom": {}
 }

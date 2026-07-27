@@ -3,7 +3,7 @@
   "title": "process-research-now drops registration_note; Reference.metadata stays null",
   "description": "## Observed (TI-c46828 E2E)\n\n`assignments process-research-now` registered 18 pending references from a research packet catalog.\n\nCatalog items include `metadata.registration_note` (ingestion rationale text). Live `Reference` rows for those ids have `metadata: null` and no other rationale field.\n\n## Expected\n\nIngestion rationale from proposedReferences / catalog metadata is preserved on the pending Reference so triage and operators can see why it was proposed without opening the research packet.\n\n## Evidence\n\n- Assignment: `assignment-research-e2e-ingestion-exercise-ai-agent-tool-use-security-advisories-and-html-primary-so-20260726T193857938451Z`\n- Catalog under `.papyrus-runs/research-proposals-*/research-proposals-catalog.json`\n- Sample ref: `reference-knowledge-corpus-threat-intelligence-research-proposal-5e968ae0d3bbadbf-v1`",
   "type": "bug",
-  "status": "open",
+  "status": "in_progress",
   "priority": 1,
   "assignee": null,
   "creator": null,
@@ -16,10 +16,16 @@
       "author": "ryan",
       "text": "## Before you change anything: the observation is right, the diagnosis is probably wrong\n\n`Reference.metadata` being null is **by design**, not a bug. `model_attachments.py:327` does:\n\n```python\nelif record[\"modelName\"] == \"Reference\" and \"metadata\" in expected:\n    metadata = parse_jsonish(expected.pop(\"metadata\"))\n```\n\nIt **pops** the field off the record and writes it to a `ModelAttachment` with `role=\"metadata\"`, because DynamoDB items have a size limit and large payloads are offloaded to S3. Every accepted reference in this corpus works that way. So \"Reference.metadata stays null\" is the system behaving correctly.\n\n**The real question is whether `registration_note` reaches that attachment.** Check that first, because it decides which layer is broken:\n\n- **If the note is in the `role=\"metadata\"` attachment**: the write path is fine and the bug is in whatever read `Reference.metadata` directly and found nothing — likely the queue builder. Fix the reader. Do not touch the intake path.\n- **If the note is absent from the attachment too**: the bug is upstream in `catalog.py`. `item_registration_note` is computed at `:286-289` and feeds `curation_note`, but confirm it actually lands in `normalized_metadata` (`:299`) rather than only being used for the curation note.\n\nConcretely: pick one of the 18 new prospects, fetch its `ModelAttachment` rows, find `role=\"metadata\"`, and read the content. That single check tells you which fix to make.\n\n## Why this matters beyond the bug\n\nThe rationale is what makes a review queue reviewable. Without it a prospect is a URL and a title, and the operator has to reconstruct context the machine already had. It is also the input to `kanbus-ec5555` (grounding triage rationales) — the 30-item session found 0/30 rationales sufficient to decide from without opening the source, and missing provenance is part of why.\n\nTogether with `TI-1ad2f4`, this is why the ingestion exercise had to write an `operator-queue.json` sidecar: the schema currently cannot answer \"what is in my review queue and why is each item here.\" That sidecar is a symptom. Fix these two and the queue derives from the data model.",
       "created_at": "2026-07-26T23:43:33.371325Z"
+    },
+    {
+      "id": "946b467c-6a4c-4f16-bf75-6d3fd5f2ea45",
+      "author": "ryan",
+      "text": "Diagnosis confirmed: registration_note is already in ModelAttachment role=metadata for fresh intake (Reference.metadata null is by design). Fix is on the reader path — triage-plan now hydrates via hydrate_reference_metadata_from_model_attachments, and assign_review_lane surfaces registrationNote in evidence + rationale prefix. Did not change the intake write path.",
+      "created_at": "2026-07-27T00:14:02.217289Z"
     }
   ],
   "created_at": "2026-07-26T20:02:23.028830Z",
-  "updated_at": "2026-07-26T23:43:33.371325Z",
+  "updated_at": "2026-07-27T00:14:02.237495Z",
   "closed_at": null,
   "custom": {}
 }

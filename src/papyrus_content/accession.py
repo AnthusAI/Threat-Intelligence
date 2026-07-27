@@ -9,7 +9,8 @@ import signal
 import subprocess
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -267,7 +268,24 @@ def execute_reference_accession_assignment(
         biblicus_item_id=metadata["biblicusItemId"],
         actor_label=actor_label,
     )
-    reindex_result = run_biblicus_reindex_for_accession(corpus_path=corpus_path, biblicus_workdir=biblicus_workdir, run_dir=run_dir)
+    # Reindex prepares Biblicus catalog/extracted paths, but local archive + S3 +
+    # GraphQL metadata must still land when reindex fails (missing metadata/, uv, etc.).
+    try:
+        reindex_result = run_biblicus_reindex_for_accession(
+            corpus_path=corpus_path,
+            biblicus_workdir=biblicus_workdir,
+            run_dir=run_dir,
+        )
+    except ReferenceAccessionError as error:
+        if error.kind != "biblicus_reindex_failed":
+            raise
+        reindex_result = {
+            "label": "biblicus-reindex",
+            "failed": True,
+            "kind": error.kind,
+            "error": str(error),
+            "degraded": True,
+        }
     s3_sync_result = maybe_sync_accession_to_s3(
         corpus_config=corpus_config,
         corpus_path=corpus_path,
@@ -323,8 +341,9 @@ def download_reference_source_material(
     download_uri: str | None = None,
 ) -> dict[str, Any]:
     download_uri = str(download_uri or "").strip() or source_download_uri_for_reference(reference)
+    last_modified: str | None = None
     try:
-        buffer, content_type, download_uri = _download_reference_payload(download_uri)
+        buffer, content_type, download_uri, last_modified = _download_reference_payload(download_uri)
     except ReferenceAccessionError as error:
         if error.kind != "download_failed":
             raise
@@ -336,7 +355,7 @@ def download_reference_source_material(
         fallback_uri = str(fallback.get("selectedPdfUrl") or "").strip()
         if not fallback_uri or fallback_uri == download_uri:
             raise
-        buffer, content_type, download_uri = _download_reference_payload(fallback_uri)
+        buffer, content_type, download_uri, last_modified = _download_reference_payload(fallback_uri)
     if not buffer:
         raise ReferenceAccessionError(f"Downloaded source for {reference['id']} was empty.", kind="download_empty")
     filename = reference_accession_filename(
@@ -356,6 +375,7 @@ def download_reference_source_material(
         "mediaType": content_type,
         "byteSize": len(buffer),
         "sha256": hashlib.sha256(buffer).hexdigest(),
+        "lastModified": last_modified,
     }
 
 
@@ -375,21 +395,32 @@ def write_reference_source_accession(
     relpath = local_path.relative_to(corpus_path).as_posix()
     storage_path = f"{str(corpus_config.get('path')).rstrip('/')}/{relpath}"
     sidecar_path = Path(f"{local_path}.biblicus.yml")
+    now = _utc_now()
+    source_bytes = local_path.read_bytes()
+    dates = resolve_accession_dates(
+        reference=reference,
+        source_bytes=source_bytes,
+        media_type=str(source_material.get("mediaType") or ""),
+        download_uri=str(source_material.get("downloadUri") or reference.get("sourceUri") or ""),
+        last_modified=source_material.get("lastModified"),
+        now=now,
+    )
     sidecar = {
         "title": reference.get("title"),
         "media_type": source_material["mediaType"],
         "biblicus": {"id": biblicus_item_id, "source": reference.get("sourceUri")},
         "dates": {
-            "published_at": reference.get("sourcePublishedAt"),
-            "updated_at": reference.get("sourceUpdatedAt"),
-            "retrieved_at": reference.get("retrievedAt") or _utc_now(),
+            "published_at": dates.get("sourcePublishedAt"),
+            "updated_at": dates.get("sourceUpdatedAt"),
+            "retrieved_at": dates.get("retrievedAt"),
         },
         "papyrus": {
             "reference_id": reference["id"],
             "reference_lineage_id": reference["lineageId"],
             "download_uri": source_material["downloadUri"],
             "accessioned_by": actor_label,
-            "accessioned_at": _utc_now(),
+            "accessioned_at": now,
+            "publication_date_resolution": dates.get("resolution"),
         },
     }
     sidecar_path.write_text(yaml.safe_dump({key: value for key, value in sidecar.items() if value is not None}, sort_keys=False), encoding="utf-8")
@@ -403,6 +434,10 @@ def write_reference_source_accession(
         "mediaType": source_material["mediaType"],
         "byteSize": source_material["byteSize"],
         "sha256": source_material["sha256"],
+        "sourcePublishedAt": dates.get("sourcePublishedAt"),
+        "sourceUpdatedAt": dates.get("sourceUpdatedAt"),
+        "retrievedAt": dates.get("retrievedAt"),
+        "publicationDateResolution": dates.get("resolution"),
     }
 
 
@@ -642,6 +677,8 @@ def next_reference_version_for_accession(
             "accession_import_run_id": import_run_id,
         }
     )
+    if accession.get("publicationDateResolution"):
+        metadata["publication_date_resolution"] = accession["publicationDateResolution"]
     next_reference = {
         **reference,
         "importRunId": import_run_id,
@@ -650,13 +687,13 @@ def next_reference_version_for_accession(
         "mediaType": accession["mediaType"],
         "byteSize": accession["byteSize"],
         "sha256": accession["sha256"],
-        "retrievedAt": reference.get("retrievedAt") or now,
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": now,
         "versionCreatedAt": now,
         "versionCreatedBy": actor_label,
         "changeReason": "reference-corpus-accession",
     }
+    _apply_accession_temporal_fields(next_reference, reference=reference, accession=accession, now=now)
     next_reference["contentHash"] = hash_short(
         {
             "referenceId": next_reference["id"],
@@ -687,6 +724,8 @@ def new_reference_for_accession_replacement(
             "replaced_reference_lineage_id": reference["lineageId"],
         }
     )
+    if accession.get("publicationDateResolution"):
+        metadata["publication_date_resolution"] = accession["publicationDateResolution"]
     next_reference = {
         **reference,
         "id": f"{lineage_id}-v1",
@@ -715,6 +754,7 @@ def new_reference_for_accession_replacement(
         "metadata": json.dumps(metadata, sort_keys=True),
         "updatedAt": now,
     }
+    _apply_accession_temporal_fields(next_reference, reference=reference, accession=accession, now=now)
     next_reference["contentHash"] = hash_short(
         {
             "referenceId": next_reference["id"],
@@ -811,7 +851,7 @@ def resolve_accession_assignment_metadata(
     return rebuilt_metadata
 
 
-def _download_reference_payload(download_uri: str) -> tuple[bytes, str, str]:
+def _download_reference_payload(download_uri: str) -> tuple[bytes, str, str, str | None]:
     request = urllib.request.Request(
         download_uri,
         headers={"user-agent": "papyrus-reference-accession/1"},
@@ -819,6 +859,7 @@ def _download_reference_payload(download_uri: str) -> tuple[bytes, str, str]:
     try:
         with urllib.request.urlopen(request) as response:
             content_type = response.headers.get_content_type() or media_type_from_url(download_uri) or "application/octet-stream"
+            last_modified = _normalize_http_date(response.headers.get("Last-Modified"))
             buffer = response.read()
     except urllib.error.HTTPError as error:
         raise ReferenceAccessionError(
@@ -827,7 +868,262 @@ def _download_reference_payload(download_uri: str) -> tuple[bytes, str, str]:
         ) from error
     if not buffer:
         raise ReferenceAccessionError(f"Downloaded source from {download_uri} was empty.", kind="download_empty")
-    return buffer, content_type, download_uri
+    return buffer, content_type, download_uri, last_modified
+
+
+def _apply_accession_temporal_fields(
+    next_reference: dict[str, Any],
+    *,
+    reference: dict[str, Any],
+    accession: dict[str, Any],
+    now: str,
+) -> None:
+    """Stamp publication/retrieval times onto the GraphQL Reference payload."""
+    next_reference["retrievedAt"] = (
+        accession.get("retrievedAt") or reference.get("retrievedAt") or now
+    )
+    published = accession.get("sourcePublishedAt") or reference.get("sourcePublishedAt")
+    if published:
+        next_reference["sourcePublishedAt"] = published
+    updated = accession.get("sourceUpdatedAt") or reference.get("sourceUpdatedAt")
+    if updated:
+        next_reference["sourceUpdatedAt"] = updated
+
+
+def resolve_accession_dates(
+    *,
+    reference: dict[str, Any],
+    source_bytes: bytes,
+    media_type: str,
+    download_uri: str,
+    last_modified: str | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Resolve sourcePublishedAt / sourceUpdatedAt / retrievedAt for an accession.
+
+    Prefer existing Reference fields, then content/URL heuristics, then HTTP
+    Last-Modified as a weak published fallback. retrievedAt always lands so
+    age-decay epoch-day metadata can activate after vector sync.
+    """
+    retrieved_at = _normalize_iso_datetime(reference.get("retrievedAt")) or (now or _utc_now())
+    published = _normalize_iso_datetime(reference.get("sourcePublishedAt"))
+    updated = _normalize_iso_datetime(reference.get("sourceUpdatedAt"))
+    resolution: dict[str, Any] = {
+        "publishedSource": "reference.sourcePublishedAt" if published else None,
+        "updatedSource": "reference.sourceUpdatedAt" if updated else None,
+        "retrievedSource": "reference.retrievedAt" if reference.get("retrievedAt") else "accession.now",
+    }
+    if not published or not updated:
+        extracted = extract_dates_from_accession_bytes(
+            source_bytes,
+            media_type=media_type,
+            download_uri=download_uri,
+        )
+        if not published and extracted.get("published"):
+            published = extracted["published"]
+            resolution["publishedSource"] = extracted.get("publishedSource")
+        if not updated and extracted.get("updated"):
+            updated = extracted["updated"]
+            resolution["updatedSource"] = extracted.get("updatedSource")
+    if not published and last_modified:
+        published = last_modified
+        resolution["publishedSource"] = "http.last-modified"
+    return {
+        "sourcePublishedAt": published,
+        "sourceUpdatedAt": updated,
+        "retrievedAt": retrieved_at,
+        "resolution": resolution,
+    }
+
+
+def extract_dates_from_accession_bytes(
+    source_bytes: bytes,
+    *,
+    media_type: str,
+    download_uri: str,
+) -> dict[str, str | None]:
+    normalized_media = str(media_type or "").split(";", 1)[0].strip().lower()
+    text_sample = _accession_text_sample(source_bytes, media_type=normalized_media)
+    published = None
+    updated = None
+    published_source = None
+    updated_source = None
+
+    if text_sample:
+        html_dates = _extract_html_meta_dates(text_sample)
+        if html_dates.get("published"):
+            published = html_dates["published"]
+            published_source = "html.meta"
+        if html_dates.get("updated"):
+            updated = html_dates["updated"]
+            updated_source = "html.meta"
+        arxiv_day = _extract_arxiv_day_from_text(text_sample)
+        if not published and arxiv_day:
+            published = arxiv_day
+            published_source = "arxiv.text"
+
+    if not published:
+        arxiv_month = _extract_arxiv_month_from_uri(download_uri)
+        if arxiv_month:
+            published = arxiv_month
+            published_source = "arxiv.id"
+
+    return {
+        "published": published,
+        "updated": updated,
+        "publishedSource": published_source,
+        "updatedSource": updated_source,
+    }
+
+
+def _accession_text_sample(source_bytes: bytes, *, media_type: str) -> str:
+    if not source_bytes:
+        return ""
+    if media_type.startswith("text/") or media_type in {"application/xhtml+xml", "application/xml", "application/json"}:
+        return source_bytes[:400_000].decode("utf-8", errors="ignore")
+    if media_type == "application/pdf" or source_bytes[:5] == b"%PDF-":
+        # PDF header / first-page text often appears as Latin-1-ish streams early on.
+        return source_bytes[:250_000].decode("latin-1", errors="ignore")
+    return source_bytes[:100_000].decode("utf-8", errors="ignore")
+
+
+def _extract_html_meta_dates(text: str) -> dict[str, str | None]:
+    published_patterns = [
+        r"(?:property|name)=[\"'](?:article:published_time|citation_publication_date|dc\.date|datePublished)[\"'][^>]*content=[\"']([^\"']+)[\"']",
+        r"content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"'](?:article:published_time|citation_publication_date|dc\.date|datePublished)[\"']",
+        r"\"datePublished\"\s*:\s*\"([^\"]+)\"",
+        r"<time[^>]+datetime=[\"']([^\"']+)[\"']",
+    ]
+    updated_patterns = [
+        r"(?:property|name)=[\"'](?:article:modified_time|citation_online_date|dateModified)[\"'][^>]*content=[\"']([^\"']+)[\"']",
+        r"content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"'](?:article:modified_time|citation_online_date|dateModified)[\"']",
+        r"\"dateModified\"\s*:\s*\"([^\"]+)\"",
+    ]
+    return {
+        "published": _first_normalized_datetime(_regex_match_values(text, published_patterns)),
+        "updated": _first_normalized_datetime(_regex_match_values(text, updated_patterns)),
+    }
+
+
+_MONTH_NAME_TO_NUM = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+
+def _extract_arxiv_day_from_text(text: str) -> str | None:
+    # Common arXiv PDF header: "arXiv:2505.13076v1  [cs.CR]  19 May 2025"
+    match = re.search(
+        r"arXiv:\d{4}\.\d{4,5}(?:v\d+)?[^\n]{0,80}?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b",
+            text[:4000],
+            flags=re.IGNORECASE,
+        )
+        if not match or "arxiv" not in text[:4000].lower():
+            return None
+    day = int(match.group(1))
+    month = _MONTH_NAME_TO_NUM.get(match.group(2).lower())
+    year = int(match.group(3))
+    if not month:
+        return None
+    try:
+        return f"{date(year, month, day).isoformat()}T00:00:00Z"
+    except ValueError:
+        return None
+
+
+def _extract_arxiv_month_from_uri(uri: str) -> str | None:
+    match = re.search(r"(?:arxiv\.org/(?:pdf|abs|html)/|arxiv:)(\d{2})(\d{2})\.\d{4,5}", str(uri or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    year = 2000 + int(match.group(1))
+    month = int(match.group(2))
+    if month < 1 or month > 12 or year < 1991 or year > 2100:
+        return None
+    try:
+        return f"{date(year, month, 1).isoformat()}T00:00:00Z"
+    except ValueError:
+        return None
+
+
+def _regex_match_values(text: str, patterns: list[str]) -> list[str]:
+    values: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            token = str(match.group(1) or "").strip()
+            if token:
+                values.append(token)
+    return values
+
+
+def _first_normalized_datetime(values: list[Any]) -> str | None:
+    for value in values:
+        normalized = _normalize_iso_datetime(value)
+        if normalized:
+            return normalized
+    return None
+
+
+def _normalize_iso_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return f"{text}T00:00:00Z"
+    candidate = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(candidate)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except ValueError:
+        pass
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+    if match:
+        return f"{match.group(1)}T00:00:00Z"
+    return None
+
+
+def _normalize_http_date(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def source_download_uri_for_reference(reference: dict[str, Any]) -> str:

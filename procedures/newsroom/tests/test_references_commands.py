@@ -56,7 +56,14 @@ from papyrus_content.model_defaults import (  # noqa: E402
 )
 from papyrus_content.accession import (  # noqa: E402
     augment_reference_accession_changes_for_replacement,
+    extract_dates_from_accession_bytes,
+    new_reference_for_accession_replacement,
+    next_reference_version_for_accession,
+    resolve_accession_dates,
 )
+from papyrus_content.assisted_curation_triage import assign_review_lane  # noqa: E402
+from papyrus_content.catalog import reference_attachment_records  # noqa: E402
+from papyrus_content.options import parse_options  # noqa: E402
 from papyrus_content.references_commands import (  # noqa: E402
     _ensure_cli_grobid_runtime,
     _resolve_grobid_url,
@@ -229,9 +236,13 @@ class ReferenceCommandsTests(unittest.TestCase):
     def test_normalize_extraction_stages_defaults(self):
         self.assertEqual(
             normalize_extraction_stages(None),
-            ["pass-through-text", "pdf-text", "metadata-text"],
+            ["pass-through-text", "pdf-text"],
         )
         self.assertEqual(normalize_extraction_stages("pdf-text,metadata-text"), ["pdf-text", "metadata-text"])
+        self.assertEqual(
+            normalize_extraction_stages(["pass-through-text", "pdf-text"]),
+            ["pass-through-text", "pdf-text"],
+        )
 
     @mock.patch("papyrus_content.reference_citation_resolution._fetch_json")
     def test_resolve_citation_reference_prefers_strong_identifier_match(self, mock_fetch_json):
@@ -2232,6 +2243,112 @@ class ReferenceCommandsTests(unittest.TestCase):
         supersede = next(c for c in out if c["expected"]["id"] == proposal["id"])
         self.assertEqual(supersede["action"], "update")
         self.assertEqual(supersede["expected"]["versionState"], "superseded")
+
+    def test_resolve_accession_dates_sets_retrieved_and_html_published(self):
+        html = b"""<!DOCTYPE html><html><head>
+        <meta property="article:published_time" content="2026-03-15T12:00:00Z">
+        </head><body>Prompt injection</body></html>"""
+        dates = resolve_accession_dates(
+            reference={"id": "ref-1"},
+            source_bytes=html,
+            media_type="text/html",
+            download_uri="https://www.csoonline.com/article/1/example.html",
+            now="2026-07-27T00:00:00Z",
+        )
+        self.assertEqual(dates["retrievedAt"], "2026-07-27T00:00:00Z")
+        self.assertEqual(dates["sourcePublishedAt"], "2026-03-15T12:00:00Z")
+        self.assertEqual(dates["resolution"]["publishedSource"], "html.meta")
+
+    def test_extract_dates_from_arxiv_pdf_header_and_uri(self):
+        pdfish = b"%PDF-1.4\n" + b"arXiv:2505.13076v1  [cs.CR]  19 May 2025\nThe Hidden Dangers\n"
+        from_text = extract_dates_from_accession_bytes(
+            pdfish,
+            media_type="application/pdf",
+            download_uri="https://arxiv.org/pdf/2505.13076",
+        )
+        self.assertEqual(from_text["published"], "2025-05-19T00:00:00Z")
+        from_uri = extract_dates_from_accession_bytes(
+            b"%PDF-1.4\nempty",
+            media_type="application/pdf",
+            download_uri="https://arxiv.org/pdf/2505.13076",
+        )
+        self.assertEqual(from_uri["published"], "2025-05-01T00:00:00Z")
+
+    def test_accession_graphql_builders_stamp_temporal_fields(self):
+        reference = {
+            "id": "reference-knowledge-corpus-x-research-proposal-abc-v1",
+            "lineageId": "reference-knowledge-corpus-x-research-proposal-abc",
+            "corpusId": "knowledge-corpus-x",
+            "curationStatus": "accepted",
+            "versionNumber": 1,
+            "retrievedAt": None,
+            "sourcePublishedAt": None,
+        }
+        accession = {
+            "biblicusItemId": "eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+            "storagePath": "corpora/x/imports/file.html",
+            "mediaType": "text/html",
+            "byteSize": 12,
+            "sha256": "abc",
+            "sourcePublishedAt": "2026-03-15T12:00:00Z",
+            "retrievedAt": "2026-07-27T00:00:00Z",
+            "publicationDateResolution": {"publishedSource": "html.meta"},
+        }
+        now = "2026-07-27T00:00:00Z"
+        versioned = next_reference_version_for_accession(reference, "import-1", accession, "agent", now)
+        self.assertEqual(versioned["retrievedAt"], "2026-07-27T00:00:00Z")
+        self.assertEqual(versioned["sourcePublishedAt"], "2026-03-15T12:00:00Z")
+        replacement = new_reference_for_accession_replacement(
+            reference, "knowledge-corpus-x", "import-1", accession, "agent", now
+        )
+        self.assertEqual(replacement["retrievedAt"], "2026-07-27T00:00:00Z")
+        self.assertEqual(replacement["sourcePublishedAt"], "2026-03-15T12:00:00Z")
+
+    def test_intake_skips_empty_source_attachment_for_url_only(self):
+        reference = {
+            "id": "reference-x-v1",
+            "lineageId": "reference-x",
+            "versionNumber": 1,
+            "storagePath": None,
+            "sourceUri": "https://example.com/article",
+            "mediaType": "text/html",
+        }
+        records = reference_attachment_records({}, reference, {"importRunId": "run", "now": "2026-07-27T00:00:00Z"})
+        self.assertEqual(records, [])
+        with_path = {
+            **reference,
+            "storagePath": "corpora/x/imports/item.html",
+            "sha256": "abc",
+            "byteSize": 10,
+        }
+        records = reference_attachment_records({}, with_path, {"importRunId": "run", "now": "2026-07-27T00:00:00Z"})
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["expected"]["storagePath"], "corpora/x/imports/item.html")
+
+    def test_parse_options_accumulates_repeated_stage_flags(self):
+        options = parse_options(["--stage", "pass-through-text", "--stage", "pdf-text", "--force", "true"])
+        self.assertEqual(options["stage"], ["pass-through-text", "pdf-text"])
+        self.assertEqual(options["force"], "true")
+
+    def test_assign_review_lane_surfaces_registration_note(self):
+        reference = {
+            "id": "ref-1",
+            "title": "Completely novel title about zebra widgets",
+            "sourceUri": "https://example.net/post",
+            "metadata": {"registration_note": "Found via web search for agent tool-use abuse."},
+        }
+        lane, rationale, evidence = assign_review_lane(
+            reference,
+            accepted_index=[],
+            rejected_scope_index=[],
+            exploratory=False,
+            cluster=None,
+            cluster_primary=True,
+        )
+        self.assertEqual(lane, "uncertain")
+        self.assertIn("Ingestion note:", rationale)
+        self.assertIn("agent tool-use abuse", rationale)
+        self.assertEqual(evidence.get("registrationNote"), "Found via web search for agent tool-use abuse.")
 
 
 if __name__ == "__main__":
