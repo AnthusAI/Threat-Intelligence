@@ -3,9 +3,9 @@
   "title": "Publication dates missing for 77% of accepted references; age-decay signal is inert",
   "description": "Age decay (`bb12d3`) is closed as delivered. It is installed but **unfed**: most accepted references carry no publication date, so the signal is a near-constant and changes nothing.\n\n## Measured 2026-07-27 (read-only, on `fix/recency-prefer-publication-date`)\n\n| Corpus | Accepted | with `sourcePublishedAt` or `sourceUpdatedAt` |\n|---|---:|---:|\n| ai-ml-research | 1376 | **316 (23.0%)** |\n| threat-intelligence | 13 | **1 (7.7%)** |\n\nCorroborating evidence: `retrieval_post_hybrid_a61c12` and `retrieval_post_recency_bb12d3` are identical to four decimals — `mrr_sum` included. Landing age decay moved literally nothing.\n\nBefore `TI-f1cc13`, recency read `max()` across six date keys including `retrievedAt`/`importedAt`, so ~all documents scored ~1.0 (maximally fresh). After the fix, the 77% / 92% without publication dates score a neutral 0.5. **The fix is correct** — 0.5 is honest where 1.0 was a lie — but honest-and-inert is still inert. Recency consumes 7% of the ranking weight budget and conveys nothing for most of the corpus.\n\n## Related, and closed too early\n\nBug `71ce66` — \"Accession leaves `sourcePublishedAt`/`retrievedAt` null so age-decay `sourcePublishedAtDay` cannot land\" — is **closed**. The coverage numbers above say the problem is still here. Either that fix only covered newly accessioned references and never backfilled the existing 1060, or it is not holding. Establish which before writing new code; do not assume.\n\n## Work\n\n1. **Extract publication dates at ingestion.** PDFs: GROBID/Biblicus already parse metadata — check whether a date is being extracted and dropped on the floor rather than absent. HTML: `<meta>` (`article:published_time`, `citation_publication_date`, `dcterms.date`), JSON-LD `datePublished`, and `<time datetime>`. Most threat-intel vendor posts and advisories carry at least one.\n2. **Backfill existing accepted references** from already-archived source bytes and `extracted_text`. No re-fetch — per the initiative, everything needed is already stored.\n3. **Re-run the golden set** and report whether recency now moves anything. If coverage rises substantially and rankings still do not change, that is a real finding: say so, and the 7% weight should be reconsidered rather than defended.\n\n## Constraints\n\n- **Never** let `retrievedAt` or `importedAt` back into the recency path. That was `TI-f1cc13`; a backfill that fills `sourcePublishedAt` *from* an ingestion timestamp reintroduces the same bug wearing a different field name. Absent is better than fabricated.\n- Where no date can be found, leave it null. `recencyKnown=false` exists precisely for this.\n- Report coverage before and after as counts, not just percentages.",
   "type": "epic",
-  "status": "open",
+  "status": "in_progress",
   "priority": 1,
-  "assignee": null,
+  "assignee": "ryan",
   "creator": null,
   "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
   "labels": [
@@ -18,9 +18,16 @@
       "type": "blocked-by"
     }
   ],
-  "comments": [],
+  "comments": [
+    {
+      "id": "8755fe7f-b714-4c7a-bc6e-cf4f7dd678c6",
+      "author": "ryan",
+      "text": "## Diagnosis + first cut (no GraphQL writes yet)\n\nBranch `epic/publication-date-extraction`. Parallel to lexical/identifier work (`TI-b9f6da`); golden-set re-measure still waits on that.\n\n### Why 71ce66 being closed did not fix coverage\n\n`71ce66` only stamps dates on **new accession**. All 1060 accepted ai-ml refs still missing dates were imported in **2026-05** and never went through that path again. The fix held for forward work; it never backfilled.\n\n### The dates were already extracted — Papyrus dropped them\n\nBiblicus `metadata/catalog.json` for AI-ML-research:\n\n| | count |\n|---|---:|\n| catalog items | 1377 |\n| with `metadata.dates.published_at` | **1128** |\n| provenances | `source-metadata` 1069, `curator` 33, `source-metadata-month-imputed` 8 |\n\nZero provenances look like import/retrieve/crawl. So this is **not** an extraction gap at Biblicus — it is a register-path gap.\n\n`catalog.reference_record` only read top-level `item.published_at`, which Biblicus almost never sets. Nested `metadata.dates.published_at` was ignored. That is why create-from-catalog left `sourcePublishedAt` null.\n\n### Guardrail (f1cc13)\n\n- New helper `publication_dates.py` allowlists catalog provenances and **rejects** anything with import/retrieve/ingest/crawl markers.\n- `assert_not_operational_timestamp` drops a candidate equal to `retrievedAt` / `importedAt` / `updatedAt`.\n- Accession no longer promotes HTTP `Last-Modified` to `sourcePublishedAt` (often crawl/serve time — same lie under another name).\n\n### Dry-run backfill (Papyrus main / ai-ml accepted)\n\n```\nscanned 1376\nskipped-has-date 316\nplanned 949\nskipped-no-source 111\nskipped-operational-collision 0\n```\n\nPlanned sources:\n\n| source | count |\n|---|---:|\n| `catalog.dates.published_at:source-metadata` | 778 |\n| `arxiv.id` (month imputed from URI) | 138 |\n| `catalog.dates.published_at:curator` | 28 |\n| `catalog.dates.published_at:source-metadata-month-imputed` | 5 |\n\nProjected coverage if applied: **316 + 949 = 1265 / 1376 (91.9%)**, with 111 left honestly null.\n\nCommand (still dry-run until you say apply):\n\n```bash\npoetry run papyrus references backfill-publication-dates \\\n  --corpus-key AI-ML-research \\\n  --config /Users/ryan/Projects/Papyrus/corpora/papyrus-steering.yml \\\n  --catalog /tmp/aiml-catalog.json \\\n  --dry-run\n```\n\nNot applied. Not pushed. Vector `sourcePublishedAtDay` sync and golden-set re-run remain after apply + `TI-b9f6da`.\n",
+      "created_at": "2026-07-27T23:07:22.773712Z"
+    }
+  ],
   "created_at": "2026-07-27T22:55:43.267756Z",
-  "updated_at": "2026-07-27T22:55:43.267756Z",
+  "updated_at": "2026-07-27T23:07:22.773712Z",
   "closed_at": null,
   "custom": {}
 }

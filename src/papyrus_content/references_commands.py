@@ -417,6 +417,210 @@ def references_backfill_reviewed_feed_key(flags: list[str]) -> None:
     print(f"references\tbackfill-reviewed-feed-key\tupdated\t{len(changes)}")
 
 
+def references_backfill_publication_dates(flags: list[str]) -> None:
+    """Fill missing sourcePublishedAt/sourceUpdatedAt from Biblicus catalog dates.
+
+    Never copies retrievedAt/importedAt/updatedAt into publication fields (TI-f1cc13).
+    """
+    from .publication_dates import (
+        assert_not_operational_timestamp,
+        publication_date_from_arxiv_uri,
+        publication_dates_from_catalog_item,
+    )
+
+    options = parse_options(flags)
+    if not options.get("corpus-key"):
+        raise ValueError("references backfill-publication-dates requires --corpus-key <key>.")
+    if not options.get("catalog"):
+        raise ValueError(
+            "references backfill-publication-dates requires --catalog <catalog.json> "
+            "(Biblicus metadata/catalog.json; do not invent dates from GraphQL timestamps)."
+        )
+    apply = resolve_mutation_apply(options, "references backfill-publication-dates")
+    allow_arxiv_id = parse_boolean_option(options.get("allow-arxiv-id"), True, "--allow-arxiv-id")
+    status_filter = normalize_string(options.get("status")) or "accepted"
+    limit = normalize_non_negative_integer(options.get("limit"), "--limit")
+
+    steering_config = load_steering_config(options.get("config")) or require_steering_config()
+    corpus_config = require_corpus_config(steering_config, options["corpus-key"], "--corpus-key")
+    corpus_id = knowledge_corpus_id(corpus_config)
+    catalog = json.loads(Path(str(options["catalog"])).read_text(encoding="utf-8"))
+    items = catalog.get("items") if isinstance(catalog.get("items"), dict) else {}
+    if not items:
+        raise ValueError(f"Catalog {options['catalog']} has no items.")
+
+    by_arxiv: dict[str, dict[str, Any]] = {}
+    by_sha: dict[str, dict[str, Any]] = {}
+    by_external: dict[str, dict[str, Any]] = {}
+    for item_id, item in items.items():
+        if not isinstance(item, dict):
+            continue
+        by_external[str(item_id)] = item
+        by_external[str(item.get("id") or item_id)] = item
+        md = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        arxiv = str(md.get("arxiv_id") or "").strip()
+        if arxiv:
+            by_arxiv[arxiv.split("v")[0]] = item
+        sha = str(item.get("sha256") or "").strip()
+        if sha:
+            by_sha[sha] = item
+
+    client, _ = create_authoring_client()
+    from . import graphql_authoring as ga
+
+    if "referencesByCurationStatusKeyAndUpdatedAt" not in ga.INDEX_DEFINITIONS:
+        ga.INDEX_DEFINITIONS["referencesByCurationStatusKeyAndUpdatedAt"] = {
+            "field": "listReferencesByCurationStatusKeyAndUpdatedAt",
+            "partitionKey": "curationStatusKey",
+            "fields": ga.REFERENCE_FIELDS,
+        }
+    references = client.list_by_index(
+        "referencesByCurationStatusKeyAndUpdatedAt",
+        f"{corpus_id}#{status_filter}",
+        limit=None,
+    ) or []
+
+    planned: list[dict[str, Any]] = []
+    skipped_has_date = 0
+    skipped_no_source = 0
+    skipped_operational_collision = 0
+    source_counts: dict[str, int] = {}
+    for reference in references:
+        if str(reference.get("sourcePublishedAt") or "").strip() or str(reference.get("sourceUpdatedAt") or "").strip():
+            skipped_has_date += 1
+            continue
+        external = str(reference.get("externalItemId") or "").strip()
+        sha = str(reference.get("sha256") or "").strip()
+        uri = str(reference.get("sourceUri") or "")
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        if external and external in by_external:
+            candidates.append(("externalItemId", by_external[external]))
+        if sha and sha in by_sha:
+            candidates.append(("sha256", by_sha[sha]))
+        match = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", uri, flags=re.IGNORECASE)
+        if match and match.group(1) in by_arxiv:
+            candidates.append(("arxiv", by_arxiv[match.group(1)]))
+
+        published = None
+        updated = None
+        published_source = None
+        updated_source = None
+        match_how = None
+        for how, item in candidates:
+            catalog_dates = publication_dates_from_catalog_item(item)
+            if catalog_dates.get("sourcePublishedAt") or catalog_dates.get("sourceUpdatedAt"):
+                published = catalog_dates.get("sourcePublishedAt")
+                updated = catalog_dates.get("sourceUpdatedAt")
+                published_source = catalog_dates.get("publishedSource")
+                updated_source = catalog_dates.get("updatedSource")
+                match_how = how
+                break
+        if not published and allow_arxiv_id:
+            arxiv_dates = publication_date_from_arxiv_uri(uri)
+            published = arxiv_dates.get("sourcePublishedAt")
+            published_source = arxiv_dates.get("publishedSource")
+            if published and not match_how:
+                match_how = "arxiv.id"
+            elif published and match_how:
+                match_how = f"{match_how}+arxiv.id"
+
+        published = assert_not_operational_timestamp(
+            candidate=published,
+            operational=reference,
+        )
+        updated = assert_not_operational_timestamp(
+            candidate=updated,
+            operational=reference,
+        )
+        if not published and not updated:
+            if published_source or updated_source:
+                skipped_operational_collision += 1
+            else:
+                skipped_no_source += 1
+            continue
+
+        source_key = str(published_source or updated_source or "unknown")
+        source_counts[source_key] = source_counts.get(source_key, 0) + 1
+        expected = {
+            **reference,
+            "updatedAt": reference.get("updatedAt"),
+        }
+        if published:
+            expected["sourcePublishedAt"] = published
+        if updated:
+            expected["sourceUpdatedAt"] = updated
+        planned.append(
+            {
+                "current": reference,
+                "expected": expected,
+                "matchHow": match_how,
+                "publishedSource": published_source,
+                "updatedSource": updated_source,
+            }
+        )
+        if limit and len(planned) >= limit:
+            break
+
+    print(f"references\tbackfill-publication-dates\tmode\t{'apply' if apply else 'dry-run'}")
+    print(f"references\tbackfill-publication-dates\tcorpus\t{corpus_id}")
+    print(f"references\tbackfill-publication-dates\tstatus\t{status_filter}")
+    print(f"references\tbackfill-publication-dates\tscanned\t{len(references)}")
+    print(f"references\tbackfill-publication-dates\tskipped-has-date\t{skipped_has_date}")
+    print(f"references\tbackfill-publication-dates\tskipped-no-source\t{skipped_no_source}")
+    print(
+        "references\tbackfill-publication-dates\tskipped-operational-collision\t"
+        f"{skipped_operational_collision}"
+    )
+    print(f"references\tbackfill-publication-dates\tplanned\t{len(planned)}")
+    for source_key, count in sorted(source_counts.items(), key=lambda row: (-row[1], row[0])):
+        print(f"references\tbackfill-publication-dates\tsource\t{source_key}\t{count}")
+    for change in planned[:25]:
+        current = change["current"]
+        expected = change["expected"]
+        print(
+            "references\tbackfill-publication-dates\tcandidate\t"
+            f"{current.get('id')}\t{change.get('matchHow')}\t"
+            f"{change.get('publishedSource') or '-'}\t{expected.get('sourcePublishedAt') or '-'}\t"
+            f"{change.get('updatedSource') or '-'}\t{expected.get('sourceUpdatedAt') or '-'}"
+        )
+    if len(planned) > 25:
+        print(f"references\tbackfill-publication-dates\tpreview-truncated\t{len(planned) - 25}")
+    if not apply:
+        print(
+            "references\tbackfill-publication-dates\tapply\tskipped\t"
+            "re-run without --dry-run to write GraphQL (never fabricates from retrievedAt/importedAt)"
+        )
+        return
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    for index, change in enumerate(planned, start=1):
+        payload = {
+            "id": change["expected"]["id"],
+            "sourcePublishedAt": change["expected"].get("sourcePublishedAt"),
+            "sourceUpdatedAt": change["expected"].get("sourceUpdatedAt"),
+            "updatedAt": now,
+        }
+        # Preserve required fields for upsert when schema demands them.
+        for key in (
+            "lineageId",
+            "corpusId",
+            "externalItemId",
+            "title",
+            "curationStatus",
+            "curationStatusKey",
+            "importedAt",
+            "createdAt",
+            "newsroomFeedKey",
+            "versionNumber",
+            "versionState",
+        ):
+            if change["expected"].get(key) is not None:
+                payload[key] = change["expected"][key]
+        client.upsert("Reference", {k: v for k, v in payload.items() if v is not None})
+        if index == len(planned) or index % 50 == 0:
+            print(f"references\tbackfill-publication-dates\tprogress\t{index}/{len(planned)}")
+    print(f"references\tbackfill-publication-dates\tupdated\t{len(planned)}")
+
+
 def references_backfill_source_archives(flags: list[str]) -> None:
     from .reference_url_text import (
         _download_source_attachment_from_uri, 

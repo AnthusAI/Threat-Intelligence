@@ -337,6 +337,8 @@ def reference_records(item: dict[str, Any], context: dict[str, Any]) -> list[dic
 
 
 def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from .publication_dates import publication_dates_from_catalog_item
+
     external_item_id = _required_string(item.get("item_id") or item.get("id") or item.get("externalItemId"), "item_id")
     lineage_id = reference_lineage_id_for(context["corpusId"], external_item_id)
     metadata = sanitize_reference_metadata(item.get("metadata") if isinstance(item.get("metadata"), dict) else item)
@@ -350,6 +352,11 @@ def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str,
         or metadata.get("status"),
         "accepted",
     )
+    # Biblicus puts real publication dates under metadata.dates (+ date_provenance).
+    # Top-level published_at alone was the old shape and almost never present — that
+    # is why create-from-catalog left 77% of accepted refs without sourcePublishedAt
+    # (TI-06361a). Never copy importedAt/retrievedAt into these fields.
+    catalog_dates = publication_dates_from_catalog_item(item)
     reference = {
         "id": f"{lineage_id}-v1",
         "lineageId": lineage_id,
@@ -362,8 +369,8 @@ def reference_record(item: dict[str, Any], context: dict[str, Any]) -> dict[str,
         "mediaType": _string_or_null(item.get("media_type") or item.get("mediaType")),
         "byteSize": _integer_or_null(item.get("bytes") or item.get("byte_size") or item.get("byteSize")),
         "sha256": _string_or_null(item.get("sha256") or item.get("checksum")),
-        "sourcePublishedAt": _string_or_null(item.get("published_at") or item.get("publishedAt")),
-        "sourceUpdatedAt": _string_or_null(item.get("updated_at") or item.get("updatedAt")),
+        "sourcePublishedAt": catalog_dates.get("sourcePublishedAt"),
+        "sourceUpdatedAt": catalog_dates.get("sourceUpdatedAt"),
         "retrievedAt": _string_or_null(item.get("retrieved_at") or item.get("retrievedAt")),
         "importRunId": context["importRunId"],
         "importedAt": context["now"],

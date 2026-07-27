@@ -113,6 +113,7 @@ from .relations_commands import relations_backfill, relations_import_types
 from .references_commands import (
     references_attach_extracted_text,
     references_backfill_corpus_storage_paths,
+    references_backfill_publication_dates,
     references_backfill_reviewed_feed_key,
     references_backfill_source_archives,
     references_create_doi_backfill_assignment,
@@ -265,6 +266,7 @@ PORTED_COMMANDS = frozenset(
         "references:export-analysis-manifest",
         "references:export-scope-training",
         "references:backfill-reviewed-feed-key",
+        "references:backfill-publication-dates",
         "references:backfill-corpus-storage-paths",
         "references:backfill-source-archives",
         "assignments:list",
@@ -512,6 +514,8 @@ def dispatch(group: str, command: str, flags: list[str]) -> None:
         references_export_scope_training(flags)
     elif route == "references:backfill-reviewed-feed-key":
         references_backfill_reviewed_feed_key(flags)
+    elif route == "references:backfill-publication-dates":
+        references_backfill_publication_dates(flags)
     elif route == "references:backfill-corpus-storage-paths":
         references_backfill_corpus_storage_paths(flags)
     elif route == "references:backfill-source-archives":

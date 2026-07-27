@@ -925,9 +925,10 @@ def resolve_accession_dates(
         if not updated and extracted.get("updated"):
             updated = extracted["updated"]
             resolution["updatedSource"] = extracted.get("updatedSource")
-    if not published and last_modified:
-        published = last_modified
-        resolution["publishedSource"] = "http.last-modified"
+    # Do not promote HTTP Last-Modified to sourcePublishedAt. For many hosts it is
+    # crawl/serve time — the same lie as copying retrievedAt into the recency path
+    # (TI-f1cc13 / TI-06361a). Leave null when content/URL heuristics find nothing.
+    _ = last_modified  # retained in signature for callers; intentionally unused
     return {
         "sourcePublishedAt": published,
         "sourceUpdatedAt": updated,
