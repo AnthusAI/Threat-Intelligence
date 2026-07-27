@@ -552,18 +552,20 @@ def finalize_tavily_deep_research(
     reference_ids: list[str] = []
     if parse_boolean_option(options.get("intake-proposals"), True, "--intake-proposals"):
         steering_config = normalize_string(options.get("config")) or "corpora/papyrus-steering.yml"
-        intake_result = intake_research_packet_proposals(
-            client,
-            {
-                "assignment": assignment_id,
-                "config": steering_config,
-                "corpus-key": corpus_key,
-                "status": options.get("status") or "pending",
-                "url-text": options.get("url-text", "false"),
-                "metadata-from-text": options.get("metadata-from-text", "false"),
-                "actor-label": actor_label,
-            },
-        )
+        intake_options: dict[str, Any] = {
+            "assignment": assignment_id,
+            "config": steering_config,
+            "corpus-key": corpus_key,
+            "status": options.get("status") or "pending",
+            "actor-label": actor_label,
+        }
+        # Inherit intake defaults (url-text / metadata-from-text true) unless the
+        # caller explicitly overrides. Do not force false — that hid TI-4db70d.
+        if "url-text" in options:
+            intake_options["url-text"] = options["url-text"]
+        if "metadata-from-text" in options:
+            intake_options["metadata-from-text"] = options["metadata-from-text"]
+        intake_result = intake_research_packet_proposals(client, intake_options)
         for row in intake_result.get("references") or []:
             if isinstance(row, dict) and row.get("referenceId"):
                 reference_ids.append(str(row["referenceId"]))

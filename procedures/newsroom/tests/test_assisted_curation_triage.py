@@ -13,6 +13,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from papyrus_content.assisted_curation_triage import (  # noqa: E402
     apply_mechanical_dispositions,
+    assign_review_lane,
     build_assisted_triage_plan,
     list_mechanical_dispositions,
     load_triage_plan,
@@ -141,8 +142,12 @@ class AssistedCurationTriageTests(unittest.TestCase):
 
         self.assertIn(uncertain["id"], human_by_id)
         self.assertEqual(human_by_id[uncertain["id"]]["lane"], "uncertain")
-        self.assertIn("example.com", human_by_id[uncertain["id"]]["rationale"])
-        self.assertIn("Needs editorial judgment", human_by_id[uncertain["id"]]["rationale"])
+        # Uncertain leads must name a corpus connection / gap, not inventory-only facts.
+        self.assertIn("accepted", human_by_id[uncertain["id"]]["rationale"].lower())
+        self.assertTrue(
+            "coverage gap" in human_by_id[uncertain["id"]]["rationale"].lower()
+            or "no close accepted neighbor" in human_by_id[uncertain["id"]]["rationale"].lower()
+        )
 
         # Cluster surfaces one primary; sibling stays out of human queue.
         cluster_primaries = [row for row in plan["humanQueue"] if row.get("clusterSize", 1) > 1]
@@ -151,6 +156,84 @@ class AssistedCurationTriageTests(unittest.TestCase):
         self.assertEqual(primary["clusterSize"], 2)
         self.assertTrue(primary["clusterPrimary"])
         self.assertNotIn(pending_dup_a["id"] if primary["referenceId"] == pending_dup_b["id"] else pending_dup_b["id"], human_by_id)
+
+    def test_uncertain_rationale_names_citation_and_summary_overlap(self):
+        accepted = _ref(
+            item_id="accepted-prompt",
+            title="Prompt injection defenses for agent tool use",
+            status="accepted",
+            source_uri="https://example.org/prompt-injection",
+            metadata={"summary": "Agent tool use abuse via indirect prompt injection in browsing agents."},
+        )
+        pending = _ref(
+            item_id="pending-related",
+            title="Zebra widgets procurement memo",
+            source_uri="https://vendor.example/memo",
+            metadata={
+                "summary": "Indirect prompt injection risks for browsing agents and tool use.",
+                "registration_note": "Proposed after advisory sweep on agent tooling.",
+            },
+        )
+        relations = [
+            {
+                "id": "rel-cites-1",
+                "relationState": "current",
+                "predicate": "cites",
+                "relationTypeKey": "cites",
+                "subjectLineageId": pending["lineageId"],
+                "objectLineageId": accepted["lineageId"],
+                "subjectKind": "reference",
+                "objectKind": "reference",
+            }
+        ]
+        plan = build_assisted_triage_plan(
+            corpus_id=CORPUS_ID,
+            references=[accepted, pending],
+            attachments=[],
+            relations=relations,
+        )
+        row = next(item for item in plan["humanQueue"] if item["referenceId"] == pending["id"])
+        self.assertEqual(row["lane"], "uncertain")
+        self.assertIn("Cites accepted reference", row["rationale"])
+        self.assertIn("accepted-prompt", row["rationale"])
+        self.assertIn("Summary overlap", row["rationale"])
+        self.assertIn("Ingestion note:", row["rationale"])
+        self.assertLess(row["rationale"].index("Cites accepted"), row["rationale"].index("Ingestion note:"))
+
+    def test_assign_review_lane_citation_link_alone_grounds_uncertain(self):
+        lane, rationale, evidence = assign_review_lane(
+            {
+                "id": "ref-pending",
+                "title": "Unrelated title about coffee roasting",
+                "sourceUri": "https://blog.example/coffee",
+            },
+            accepted_index=[
+                {
+                    "referenceId": "ref-accepted",
+                    "title": "NIST AI RMF",
+                    "tokens": {"nist", "risk", "management"},
+                    "summaryTokens": set(),
+                    "domain": "nist.gov",
+                    "sourceUri": "https://nist.gov/rmf",
+                }
+            ],
+            rejected_scope_index=[],
+            exploratory=False,
+            cluster=None,
+            cluster_primary=True,
+            citation_links=[
+                {
+                    "direction": "cited_by",
+                    "referenceId": "ref-accepted",
+                    "lineageId": "lineage-accepted",
+                    "title": "NIST AI RMF",
+                }
+            ],
+        )
+        self.assertEqual(lane, "uncertain")
+        self.assertIn("Cited by accepted reference", rationale)
+        self.assertIn("ref-accepted", rationale)
+        self.assertEqual(evidence["citationLinks"][0]["direction"], "cited_by")
 
     def test_history_based_likely_reject_and_prior_rejected_uri(self):
         accepted = _ref(

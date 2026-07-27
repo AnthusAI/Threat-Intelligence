@@ -3768,15 +3768,26 @@ def _resolve_process_source_uri(
         return canonical_uri, None
     # Find-stage metadata lives on ModelAttachment (role=metadata). When callers
     # hydrate that onto Reference.metadata, canonical resolution above succeeds.
-    # As a last resort for URL-only prospects, use the Reference.sourceUri after
-    # find has already run (metadata may be present even when hydration failed).
     direct_source_uri = normalize_http_url(reference.get("sourceUri"))
     if direct_source_uri and _reference_has_find_stage_marker(reference):
+        return direct_source_uri, None
+    # URL-primary research/HTML/PDF prospects already carry a fetchable content
+    # URL. Keep the find-stage gate for DOI resolver hosts that still need
+    # canonical PDF/HTML resolution (TI-4db70d).
+    if direct_source_uri and not _is_doi_resolver_uri(direct_source_uri):
         return direct_source_uri, None
     return None, {
         "code": "needs_find_missing_canonical_source",
         "message": "Reference processing requires find-stage canonical source resolution first.",
     }
+
+
+def _is_doi_resolver_uri(source_uri: str | None) -> bool:
+    normalized = normalize_http_url(source_uri)
+    if not normalized:
+        return False
+    host = (urlparse(normalized).hostname or "").lower()
+    return host in {"doi.org", "dx.doi.org"}
 
 
 def _reference_has_find_stage_marker(reference: dict[str, Any]) -> bool:

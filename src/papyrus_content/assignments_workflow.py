@@ -1234,9 +1234,10 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         if parse_boolean_option(options.get("url-text"), True, "--url-text"):
             if changed_reference_ids:
                 refreshed_references = _references_for_changed_ids(client, changed_reference_ids)
-                # Fresh research-proposal references have no attachments or citation graph yet.
-                refreshed_attachments: list[dict[str, Any]] = []
-                refreshed_semantic_relations: list[dict[str, Any]] = []
+                # Fresh research-proposal references usually have no attachments yet;
+                # URL-primary HTML/PDF sourceUri is enough for process eligibility (TI-4db70d).
+                refreshed_attachments = client.list_records("ReferenceAttachment")
+                refreshed_semantic_relations = client.list_records("SemanticRelation")
                 max_count = normalize_non_negative_integer(options.get("url-text-max-count"), "--url-text-max-count")
                 force = parse_boolean_option(options.get("url-text-force"), False, "--url-text-force")
                 corpus_id = knowledge_corpus_id(corpus_config)
@@ -1263,7 +1264,8 @@ def intake_research_packet_proposals(client: PapyrusGraphQLAuthoringClient, opti
         if parse_boolean_option(options.get("metadata-from-text"), True, "--metadata-from-text"):
             if changed_reference_ids:
                 refreshed_references = _references_for_changed_ids(client, changed_reference_ids)
-                refreshed_attachments: list[dict[str, Any]] = []
+                # Reload attachments after url-text so generation sees extracted_text rows.
+                refreshed_attachments = client.list_records("ReferenceAttachment")
                 corpus_id = knowledge_corpus_id(corpus_config)
                 metadata_generation_result = run_reference_metadata_generation_from_extracted_text(
                     references=refreshed_references,

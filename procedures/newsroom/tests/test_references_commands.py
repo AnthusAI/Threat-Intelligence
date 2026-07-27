@@ -2348,7 +2348,39 @@ class ReferenceCommandsTests(unittest.TestCase):
         self.assertEqual(lane, "uncertain")
         self.assertIn("Ingestion note:", rationale)
         self.assertIn("agent tool-use abuse", rationale)
+        # Corpus/inventory lead comes before the ingestion note.
+        self.assertLess(rationale.index("Needs editorial judgment"), rationale.index("Ingestion note:"))
         self.assertEqual(evidence.get("registrationNote"), "Found via web search for agent tool-use abuse.")
+
+    def test_url_primary_html_without_find_marker_is_process_eligible(self):
+        from papyrus_content.reference_url_text import _resolve_process_source_uri
+
+        uri, error = _resolve_process_source_uri(
+            {
+                "id": "ref-html-1",
+                "sourceUri": "https://www.csoonline.com/article/example.html",
+                "mediaType": "text/html",
+                "metadata": {},
+            },
+            [],
+        )
+        self.assertIsNone(error)
+        self.assertEqual(uri, "https://www.csoonline.com/article/example.html")
+
+    def test_doi_resolver_without_find_marker_still_needs_find(self):
+        from papyrus_content.reference_url_text import _resolve_process_source_uri
+
+        uri, error = _resolve_process_source_uri(
+            {
+                "id": "ref-doi-1",
+                "sourceUri": "https://doi.org/10.1234/example",
+                "mediaType": "text/html",
+                "metadata": {},
+            },
+            [],
+        )
+        self.assertIsNone(uri)
+        self.assertEqual((error or {}).get("code"), "needs_find_missing_canonical_source")
 
 
 if __name__ == "__main__":
