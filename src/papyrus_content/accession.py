@@ -588,15 +588,42 @@ def augment_reference_accession_changes_for_replacement(
     accession: dict[str, Any],
     metadata: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    """Finalize GraphQL changes for create-uuid-replacement accession.
+
+    Replacement intentionally creates a new Biblicus-keyed lineage. Do not rewrite
+    that create into an update against the research-proposal row — AppSync then
+    issues UpdateItem for the new id (which does not exist) and fails the
+    DynamoDB conditional check, leaving storagePath/sha256 unset after a successful
+    local write and S3 sync.
+
+    Also supersede the replaced proposal lineage so only the accessioned row stays
+    versionState=current.
+    """
+    _ = accession
     if metadata.get("accessionMode") != "create-uuid-replacement":
         return changes
-    for change in changes:
-        if change["modelName"] == "Reference" and change["action"] == "create":
-            expected = change["expected"]
-            if expected.get("lineageId") != reference.get("lineageId"):
-                change["action"] = "update"
-                change["current"] = reference
-    return changes
+    already_superseding = any(
+        change.get("modelName") == "Reference"
+        and change.get("expected", {}).get("id") == reference.get("id")
+        and change.get("expected", {}).get("versionState") == "superseded"
+        for change in changes
+    )
+    if already_superseding or not reference.get("id"):
+        return changes
+    now = _utc_now()
+    return [
+        *changes,
+        {
+            "modelName": "Reference",
+            "expected": {
+                "id": reference["id"],
+                "versionState": "superseded",
+                "updatedAt": now,
+            },
+            "current": reference,
+            "action": "update",
+        },
+    ]
 
 
 def next_reference_version_for_accession(

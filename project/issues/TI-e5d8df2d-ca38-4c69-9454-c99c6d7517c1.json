@@ -1,0 +1,20 @@
+{
+  "id": "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1",
+  "title": "Default extract pipeline selects metadata-text titles as extracted_text for HTML/PDF",
+  "description": "## Expected\nreferences process-extract-text-now registers body text usable for vector/lexical indexing, not title-only stubs.\n\n## Observed\nDefault stages pass-through-text,pdf-text,metadata-text produced selected snapshot text that was only the title (~40–72 bytes) for all four new TI refs. Pass-through HTML (80–250KB) and pdf-text (76KB) existed under stages/ but lost to metadata-text as the pipeline winner.\n\n## Workaround\nRe-ran with --stage pass-through-text --force true (HTML) and --stage pdf-text --force true (PDF). HTML is still raw HTML (noisy). Related: repeated --stage A --stage B collapses to last value only; comma form works.",
+  "type": "bug",
+  "status": "open",
+  "priority": 1,
+  "assignee": null,
+  "creator": null,
+  "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+  "labels": [
+    "ingestion"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-27T00:01:40.415542Z",
+  "updated_at": "2026-07-27T00:01:40.415542Z",
+  "closed_at": null,
+  "custom": {}
+}

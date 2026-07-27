@@ -34,10 +34,16 @@
       "author": "ryan",
       "text": "## Ride-along: recency epoch-day metadata (`kanbus-bb12d3`)\n\n`_base_reference_metadata` now writes `sourcePublishedAtDay` / `sourceUpdatedAtDay` / `retrievedAtDay` (UTC epoch-day ints) when the reference has dates. **Do not run a solo rebuild for this** — missing dates score neutral (backward-compatible).\n\nWhen the ingestion exercise (`TI-c46828`) triggers a sync, that one sync should pick up these fields. Until then the recency ranking signal is inert on existing vectors (verified: 0/200 sampled vectors have the keys; live `recencyKnown=false`).\n",
       "created_at": "2026-07-26T20:50:38.579835Z"
+    },
+    {
+      "id": "39908b0d-a928-4917-baf3-3926aa64dcc0",
+      "author": "ryan",
+      "text": "## Rebuild A ride-along (TI-c46828 E2E, TI production)\n\n**When:** 2026-07-26/27. Branch `epic/e2e-ingestion` (merged `origin/develop` mid-run so age-decay + hybrid lexical code were present for the force sync).\n\n**What ran:** `knowledge-vector-index --action sync --corpus-id knowledge-corpus-threat-intelligence --force` after accessioning 4 new accepted refs (3 HTML + 1 arXiv PDF) and attaching extracted text.\n\n**Vector result:** 36 vectors written for 4 refs (4 source + 32 passage). Sample after age-decay code:\n- `retrievedAtDay` present on 36/37 sampled vectors (from `importedAt` when `retrievedAt` null)\n- `sourcePublishedAtDay` initially **0** — accession left `sourcePublishedAt` null on all four\n- After manual `update_record` of arXiv ref to `2025-05-19T00:00:00.000Z` (PDF header) + force sync: sample key `reference-passage-7dac212165c2a1246ea5` carries `sourcePublishedAtDay: 20227`\n\n**Lexical:** wrote `corpora/knowledge-index/lexical/v1/index.json.gz` (docs=32, refs=4/9; 5 older accepted still missing extracted text).\n\n**Blockers filed:** TI-71ce66 (dates null at accession), TI-9b6971 (`--reference-id` sync shrinks lexical). Rebuild A is **partially done** for this corpus: epoch-day path is live; publication-date coverage still depends on intake/accession populating `sourcePublishedAt`.\n",
+      "created_at": "2026-07-27T00:01:48.985558Z"
     }
   ],
   "created_at": "2026-07-25T13:31:10.569418Z",
-  "updated_at": "2026-07-26T20:50:38.579835Z",
+  "updated_at": "2026-07-27T00:01:48.985558Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",

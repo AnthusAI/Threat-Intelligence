@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "99d669e7-7ab8-454a-890b-5f3d7e56e89d",
+  "issue_id": "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T00:01:40.474Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Expected\nScoped --reference-id sync updates vectors for one reference without shrinking the corpus lexical artifact.\n\n## Observed\nsync --reference-id <one> --force rebuilt lexical to that one ref (and with --no-passage-vectors wrote skipped_empty). Full-corpus sync required to restore docs=32 refs=4.",
+    "issue_type": "bug",
+    "labels": [
+      "retrieval"
+    ],
+    "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+    "priority": 2,
+    "status": "open",
+    "title": "knowledge-vector-index --reference-id rebuilds lexical index for that subset only"
+  }
+}

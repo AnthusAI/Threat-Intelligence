@@ -54,6 +54,9 @@ from papyrus_content.model_defaults import (  # noqa: E402
     DEFAULT_REFERENCE_FILTER_MODEL,
     DEFAULT_REFERENCE_SUMMARY_MODEL,
 )
+from papyrus_content.accession import (  # noqa: E402
+    augment_reference_accession_changes_for_replacement,
+)
 from papyrus_content.references_commands import (  # noqa: E402
     _ensure_cli_grobid_runtime,
     _resolve_grobid_url,
@@ -2197,6 +2200,38 @@ class ReferenceCommandsTests(unittest.TestCase):
         printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list)
         self.assertIn("references\tcurate-recent\trun\trun-1", printed)
         self.assertRegex(printed, r"references\tcurate-recent\tselected\t\d+")
+
+    def test_accession_replacement_keeps_create_and_supersedes_proposal(self):
+        proposal = {
+            "id": "reference-knowledge-corpus-x-research-proposal-abc-v1",
+            "lineageId": "reference-knowledge-corpus-x-research-proposal-abc",
+            "versionState": "current",
+        }
+        replacement_id = "reference-knowledge-corpus-x-eb0cf5f5-f10a-c30f-90f9-02203bfea42e-v1"
+        changes = [
+            {
+                "modelName": "Reference",
+                "action": "create",
+                "expected": {
+                    "id": replacement_id,
+                    "lineageId": "reference-knowledge-corpus-x-eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+                    "versionState": "current",
+                },
+                "current": None,
+            }
+        ]
+        out = augment_reference_accession_changes_for_replacement(
+            changes,
+            reference=proposal,
+            accession={"storagePath": "corpora/x/imports/file.html"},
+            metadata={"accessionMode": "create-uuid-replacement"},
+        )
+        create = next(c for c in out if c["expected"]["id"] == replacement_id)
+        self.assertEqual(create["action"], "create")
+        self.assertIsNone(create["current"])
+        supersede = next(c for c in out if c["expected"]["id"] == proposal["id"])
+        self.assertEqual(supersede["action"], "update")
+        self.assertEqual(supersede["expected"]["versionState"], "superseded")
 
 
 if __name__ == "__main__":

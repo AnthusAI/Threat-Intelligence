@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "3e8a868c-f23f-4a65-8e4b-675662fdda0b",
+  "issue_id": "TI-b55c369e-3bb5-4470-9379-46da7faffa67",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T00:01:40.378Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Expected\nFor research-proposal references, accession mode create-uuid-replacement creates a new Biblicus-keyed Reference lineage with storagePath/sha256/mediaType, attaches role=source, and leaves the proposal lineage superseded.\n\n## Observed\naugment_reference_accession_changes_for_replacement converted the replacement Reference create into an update against the old proposal row. AppSync then issued UpdateItem for the new id (which does not exist) → DynamoDB conditional request failed. Local write + S3 sync could succeed while GraphQL stayed empty (storagePath/sha256 null).\n\n## Fix landed on epic/e2e-ingestion\nKeep create as create; append supersede of the proposal lineage. Unit test: test_accession_replacement_keeps_create_and_supersedes_proposal.\n\n## Evidence\n.papyrus-runs/c46828-e2e/accession-retry.json (pre-fix); accession-graphql-retry.json + accession-verify-final.json (post-fix).",
+    "issue_type": "bug",
+    "labels": [
+      "ingestion"
+    ],
+    "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+    "priority": 1,
+    "status": "open",
+    "title": "Accession create-uuid-replacement rewrites GraphQL create into update and fails DynamoDB conditional"
+  }
+}

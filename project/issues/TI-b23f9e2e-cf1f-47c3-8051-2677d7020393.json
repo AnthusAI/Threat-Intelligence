@@ -1,0 +1,20 @@
+{
+  "id": "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393",
+  "title": "Intake creates empty role=source stubs (null path/sha; arXiv as text/html)",
+  "description": "## Expected\nProspects either have no source attachment until accession, or stubs clearly marked incomplete. arXiv PDF prospects should not claim mediaType=text/html.\n\n## Observed\nAccepted research-proposal refs had role=source attachments with storagePath=null, sha256=null before accession. arXiv stub was text/html. Readiness still url_only so accession proceeded; stubs remain on superseded proposal lineages.",
+  "type": "bug",
+  "status": "open",
+  "priority": 2,
+  "assignee": null,
+  "creator": null,
+  "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+  "labels": [
+    "ingestion"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-27T00:01:40.455574Z",
+  "updated_at": "2026-07-27T00:01:40.455574Z",
+  "closed_at": null,
+  "custom": {}
+}

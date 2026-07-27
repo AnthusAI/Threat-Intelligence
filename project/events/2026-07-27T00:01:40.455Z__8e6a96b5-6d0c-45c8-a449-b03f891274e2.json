@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "8e6a96b5-6d0c-45c8-a449-b03f891274e2",
+  "issue_id": "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T00:01:40.455Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Expected\nProspects either have no source attachment until accession, or stubs clearly marked incomplete. arXiv PDF prospects should not claim mediaType=text/html.\n\n## Observed\nAccepted research-proposal refs had role=source attachments with storagePath=null, sha256=null before accession. arXiv stub was text/html. Readiness still url_only so accession proceeded; stubs remain on superseded proposal lineages.",
+    "issue_type": "bug",
+    "labels": [
+      "ingestion"
+    ],
+    "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+    "priority": 2,
+    "status": "open",
+    "title": "Intake creates empty role=source stubs (null path/sha; arXiv as text/html)"
+  }
+}
