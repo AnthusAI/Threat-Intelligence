@@ -174,6 +174,48 @@ class RequireLexicalEngineTests(unittest.TestCase):
                 )
         self.assertIn("Lexical provider not configured", str(ctx.exception))
 
+    def test_missing_provider_warns_by_default(self):
+        from papyrus_knowledge_query.engine import run_knowledge_query
+        from papyrus_knowledge_query.services import KnowledgeQueryServices
+
+        class Semantic:
+            name = "fake-semantic"
+
+            def search(self, query, scope, limit):
+                return [{"lineageId": "ref-sem", "rank": 1, "score": 0.8, "title": "S"}]
+
+        with mock.patch.dict(os.environ, {"PAPYRUS_REQUIRE_LEXICAL": ""}, clear=False):
+            os.environ.pop("PAPYRUS_REQUIRE_LEXICAL", None)
+            result = run_knowledge_query(
+                {"semanticQuery": "anything", "output": {"format": "structured"}},
+                KnowledgeQueryServices(semantic=Semantic(), lexical=None),
+            )
+        self.assertTrue(
+            any("Lexical provider not configured" in w for w in (result.get("warnings") or []))
+        )
+
+    def test_build_environment_services_require_lexical_without_bucket(self):
+        from papyrus_knowledge_query import services as svc_mod
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PAPYRUS_REQUIRE_LEXICAL": "1",
+                "PAPYRUS_SEMANTIC_PROVIDER": "none",
+            },
+            clear=False,
+        ):
+            os.environ.pop("PAPYRUS_STORAGE_BUCKET_NAME", None)
+            os.environ.pop("PAPYRUS_LEXICAL_INDEX_PATH", None)
+            os.environ.pop("papyrusMedia_BUCKET_NAME", None)
+            with mock.patch.object(svc_mod, "_semantic_from_environment", return_value=object()):
+                with mock.patch.object(svc_mod, "_corpus_text_from_environment", return_value=None):
+                    with mock.patch.object(svc_mod, "_graph_from_environment", return_value=None):
+                        with mock.patch.object(svc_mod, "_bucket_from_amplify_outputs", return_value=""):
+                            with self.assertRaises(RuntimeError) as ctx:
+                                svc_mod.build_environment_services()
+        self.assertIn("no lexical provider could be constructed", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

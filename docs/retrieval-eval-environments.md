@@ -68,11 +68,10 @@ The harness:
 
 | Profile | Intent | Status |
 |---|---|---|
-| Seeded sandbox | Disposable AppSync + small accepted corpus + derived indexes, rebuilt by a documented script | Not built — do not invent ad-hoc copies |
-| Checked-in fixture corpus | Tiny offline corpus for CI without AWS | Not built; `local-fixture` covers scoring unit tests only |
+| Seeded sandbox | Disposable AppSync + small accepted corpus + derived indexes, rebuilt by a documented script | Deferred — tracked as follow-on; do not invent ad-hoc copies |
+| Checked-in fixture corpus | Tiny offline corpus for CI without AWS | Deferred — `local-fixture` covers scoring unit tests only |
 
-When either lands, add it to `retrieval_eval_environments.json` with the same
-fields (`mode`, provenance knobs, `require_lexical`, expected floors).
+The epic acceptance for **TI-5ed2f2** is met by the documented read-only production procedure above (one of the three options named in the epic). Seeded sandbox and offline fixture corpus remain optional follow-ons, not blockers.
 
 ## Golden-set design
 

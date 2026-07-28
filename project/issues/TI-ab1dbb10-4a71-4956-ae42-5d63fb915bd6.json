@@ -1,0 +1,21 @@
+{
+  "id": "TI-ab1dbb10-4a71-4956-ae42-5d63fb915bd6",
+  "title": "Seeded sandbox profile for retrieval eval",
+  "description": "Follow-on from closed TI-5ed2f2. Epic acceptance was met via read-only Papyrus-main profile. Still desirable: disposable seeded sandbox (AppSync + small accepted corpus + derived indexes) so agents never ad-hoc copy production data. Add a profile to retrieval_eval_environments.json when built.",
+  "type": "story",
+  "status": "open",
+  "priority": 3,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "eval",
+    "tooling"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-28T21:37:43.392762Z",
+  "updated_at": "2026-07-28T21:37:43.392762Z",
+  "closed_at": null,
+  "custom": {}
+}

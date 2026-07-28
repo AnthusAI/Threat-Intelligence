@@ -24,10 +24,16 @@
       "author": "ryan",
       "text": "## Cross-link from ranking work\n\nMeasured while verifying TI-f1cc13 (read-only GraphQL):\n\n| Corpus | Accepted | either pub/updated | % |\n|---|---:|---:|---:|\n| `knowledge-corpus-ai-ml-research` | 1376 | 316 | **23.0%** |\n| `knowledge-corpus-threat-intelligence` | 13 | 1 | **7.7%** |\n\nAfter prefer-publication-date, most refs get neutral recency (0.5) instead of false-fresh from ingestion time. Signal is honest but still mostly inert until ingestion extracts publication dates (and vectors carry them). Freshness goldens are being redesigned to `prefer_order` pairs under **TI-5ed2f2** so age-decay can be observed when coverage improves.\n",
       "created_at": "2026-07-27T23:07:58.592519Z"
+    },
+    {
+      "id": "09ad5cf9-83a7-4961-b428-202921b0f8c5",
+      "author": "ryan",
+      "text": "## Still open — not owned by ranking eval work\n\nTI-f1cc13 (date *policy*) is closed. This epic remains the ingestion/coverage work so age-decay has real publication dates (>23% today on ai-ml). Freshness prefer_order goldens can now observe order flips when coverage improves (see q-fresh-5 wrong_order baseline on TI-5ed2f2 report).\n",
+      "created_at": "2026-07-28T21:37:34.226787Z"
     }
   ],
   "created_at": "2026-07-27T22:55:43.267756Z",
-  "updated_at": "2026-07-27T23:07:58.592519Z",
+  "updated_at": "2026-07-28T21:37:34.226787Z",
   "closed_at": null,
   "custom": {}
 }

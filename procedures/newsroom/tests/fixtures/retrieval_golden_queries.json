@@ -130,7 +130,7 @@
   },
   {
     "id": "q-fresh-4",
-    "query": "Evolutionary computation with large language models: survey on evolutionary computation combined with LLMs versus apprenticeship learning from demonstration",
+    "query": "Evolutionary Computation and Large Language Models survey versus Apprenticeship Learning via Inverse Reinforcement Learning Abbeel Ng",
     "metric": "prefer_order",
     "prefer_before": [
       [
@@ -139,11 +139,11 @@
       ]
     ],
     "category": "freshness",
-    "notes": "Ordering case: EC+LLM survey (2025) before Apprenticeship Learning (2004). Replaces the old singleton recall miss that could not observe ranking."
+    "notes": "Ordering case: EC+LLM survey (2025) before Apprenticeship Learning (2004). Query names both so they co-retrieve; scores relative order only."
   },
   {
     "id": "q-fresh-5",
-    "query": "Automated meta-analysis with multi-agent systems: Manalyzer versus apprenticeship learning from demonstration",
+    "query": "Manalyzer automated meta-analysis using multi-agent systems versus Apprenticeship Learning via Inverse Reinforcement Learning Abbeel Ng",
     "metric": "prefer_order",
     "prefer_before": [
       [
@@ -152,7 +152,7 @@
       ]
     ],
     "category": "freshness",
-    "notes": "Ordering case: Manalyzer before Apprenticeship Learning (2004)."
+    "notes": "Ordering case: Manalyzer before Apprenticeship Learning (2004). Query names both so they co-retrieve; scores relative order only."
   },
   {
     "id": "q-qual-1",
