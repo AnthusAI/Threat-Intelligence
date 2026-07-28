@@ -13,9 +13,16 @@
     "knowledge-query"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "134672fe-a738-4bc7-a09d-0106fa77e216",
+      "author": "ryan",
+      "text": "## Ranking / eval status (2026-07-27)\n\n**In progress:** TI-5ed2f2 (repeatable retrieval eval environments) on branch `epic/repeatable-retrieval-eval` in the ranking worktree — pinned `papyrus-main-ai-ml-readonly` profile, harness lexical preflight, freshness → `prefer_order`, optional `PAPYRUS_REQUIRE_LEXICAL`.\n\n**P0 open:** TI-b9f6da — identifier 0/5 on develop. Live lexical artifact intact (5658 docs / 1321 refs); BM25 ranks goldens #1 offline; query path is semantic-only (silent fallback / missing provider). Do not rebuild until env cause is recorded.\n\n**Ready to merge (pending):** TI-f1cc13 prefer-publication-date (`bfc2f33` + measurement). Not the cause of identifier collapse.\n\n**Blocked signal:** TI-06361a — publication dates on only ~23% of ai-ml accepted refs; age-decay stays mostly inert until ingestion fills dates.\n",
+      "created_at": "2026-07-27T23:08:07.556039Z"
+    }
+  ],
   "created_at": "2026-07-19T19:00:04.777161Z",
-  "updated_at": "2026-07-27T22:56:52.890747Z",
+  "updated_at": "2026-07-27T23:08:07.556039Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",

@@ -91,48 +91,68 @@
   },
   {
     "id": "q-fresh-1",
-    "query": "Recent reinforcement learning approaches for self-evolving agent memory",
-    "expect_reference_lineage_ids": [
-      "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72"
+    "query": "Reinforcement learning for agent memory: MemRL self-evolving agent memory versus traditional apprenticeship learning from demonstration",
+    "metric": "prefer_order",
+    "prefer_before": [
+      [
+        "reference-knowledge-corpus-ai-ml-research-1e22ceae-b9f2-4c88-b1e2-449e4ff2cc72",
+        "reference-knowledge-corpus-ai-ml-research-273a68e9-7523-49bf-bc60-9fa4a5c29ba0"
+      ]
     ],
     "category": "freshness",
-    "notes": "MemRL (2026) should rank above older RL papers like Apprenticeship Learning (2004)"
+    "notes": "Ordering case: MemRL (2026) before Apprenticeship Learning (2004). Both must appear in top-10; otherwise incomplete, not a ranking win."
   },
   {
     "id": "q-fresh-2",
-    "query": "Latest toolkits for ontology processing and alignment",
-    "expect_reference_lineage_ids": [
-      "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1"
+    "query": "Ontology embedding and alignment: OntoAligner toolkit versus a survey of ontology embedding methods and resources",
+    "metric": "prefer_order",
+    "prefer_before": [
+      [
+        "reference-knowledge-corpus-ai-ml-research-7a8062a2-1578-448b-be2f-a19d1be000a1",
+        "reference-knowledge-corpus-ai-ml-research-356b6461-2314-49db-bdff-3bc7e2ba8f2d"
+      ]
     ],
     "category": "freshness",
-    "notes": "OntoAligner (2025) should rank above older ontology embedding surveys"
+    "notes": "Ordering case: OntoAligner (2025) before the older ontology embedding survey."
   },
   {
     "id": "q-fresh-3",
-    "query": "Newest game-theoretic approaches for safe agentic systems",
-    "expect_reference_lineage_ids": [
-      "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031"
+    "query": "Safe agentic systems evaluation: MaMa game-theoretic approaches versus measuring agents in production",
+    "metric": "prefer_order",
+    "prefer_before": [
+      [
+        "reference-knowledge-corpus-ai-ml-research-2d5ee619-d23a-4cc1-a495-0f4c5e6c8031",
+        "reference-knowledge-corpus-ai-ml-research-e0225603-b00a-4d2f-9b29-c807f48e1bc7"
+      ]
     ],
     "category": "freshness",
-    "notes": "MaMa (2026) should rank above older agent evaluation frameworks"
+    "notes": "Ordering case: MaMa (2026) before Measuring Agents in Production. Pair co-retrieves on multi_hop; freshness scores relative order only."
   },
   {
     "id": "q-fresh-4",
-    "query": "Recent multi-agent evolutionary computation frameworks",
-    "expect_reference_lineage_ids": [
-      "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b"
+    "query": "Evolutionary computation with large language models: survey on evolutionary computation combined with LLMs versus apprenticeship learning from demonstration",
+    "metric": "prefer_order",
+    "prefer_before": [
+      [
+        "reference-knowledge-corpus-ai-ml-research-863bfe1b-2003-45cd-a7e4-bc93529aff8b",
+        "reference-knowledge-corpus-ai-ml-research-273a68e9-7523-49bf-bc60-9fa4a5c29ba0"
+      ]
     ],
     "category": "freshness",
-    "notes": "Evolutionary Computation and LLMs (2025) should rank high"
+    "notes": "Ordering case: EC+LLM survey (2025) before Apprenticeship Learning (2004). Replaces the old singleton recall miss that could not observe ranking."
   },
   {
     "id": "q-fresh-5",
-    "query": "State of the art in automated meta-analysis using multi-agent systems",
-    "expect_reference_lineage_ids": [
-      "reference-knowledge-corpus-ai-ml-research-ad36c997-4a03-4b40-ab47-3d619e52ecac"
+    "query": "Automated meta-analysis with multi-agent systems: Manalyzer versus apprenticeship learning from demonstration",
+    "metric": "prefer_order",
+    "prefer_before": [
+      [
+        "reference-knowledge-corpus-ai-ml-research-ad36c997-4a03-4b40-ab47-3d619e52ecac",
+        "reference-knowledge-corpus-ai-ml-research-273a68e9-7523-49bf-bc60-9fa4a5c29ba0"
+      ]
     ],
     "category": "freshness",
-    "notes": "Manalyzer should rank high"
+    "notes": "Ordering case: Manalyzer before Apprenticeship Learning (2004)."
   },
   {
     "id": "q-qual-1",

@@ -1,0 +1,38 @@
+{
+  "default": "papyrus-main-ai-ml-readonly",
+  "environments": {
+    "papyrus-main-ai-ml-readonly": {
+      "mode": "read_only_production",
+      "description": "Canonical golden-set environment: Papyrus-main AppSync + S3 Vectors + media bucket lexical artifact. Read-only — do not sync, rebuild, or mutate corpus data from eval runs.",
+      "aws_profile": "papyrus-agent",
+      "aws_region": "us-east-1",
+      "graphql_endpoint": "https://64hviw44q5cq5nwjcigmasowlq.appsync-api.us-east-1.amazonaws.com/graphql",
+      "jwt_secret_ssm_param": "/amplify/dbsyytcm9drqa/main-branch-cb38ada667/PAPYRUS_JWT_SECRET",
+      "vector_index_arn": "arn:aws:s3vectors:us-east-1:335163751677:bucket/amplify-dbsyytcm9drqa-mai-papyrusknowledgevectorbu-62gho8vanqsa/index/papyrus-knowledge",
+      "storage_bucket": "amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo",
+      "lexical_s3_key": "corpora/knowledge-index/lexical/v1/index.json.gz",
+      "corpus_id": "knowledge-corpus-ai-ml-research",
+      "require_lexical": true,
+      "expected_lexical": {
+        "min_docs": 5000,
+        "min_unique_references": 1200
+      },
+      "baseline_report": "procedures/newsroom/tests/fixtures/reports/retrieval_post_hybrid_a61c12.json",
+      "notes": [
+        "Mint JWT via: PYTHONPATH=src poetry run python3 -m papyrus.cli auth refresh-jwt",
+        "Do not ad-hoc copy production corpus into sandbox or force vector rebuilds for eval.",
+        "Identifier Hit@5 collapsing to 0/5 with MRR 0.6533 means the lexical arm did not contribute — treat as environment failure, not ranking regression."
+      ]
+    },
+    "local-fixture": {
+      "mode": "fixture",
+      "description": "Offline unit-test profile only. Does not substitute for a live corpus eval.",
+      "require_lexical": false,
+      "corpus_id": "fixture",
+      "notes": [
+        "Use procedures/newsroom/tests/test_retrieval_eval.py for scoring/preflight logic.",
+        "A small checked-in corpus fixture for end-to-end offline eval is not yet built."
+      ]
+    }
+  }
+}

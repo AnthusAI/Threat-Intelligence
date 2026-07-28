@@ -13,9 +13,16 @@
     "knowledge-query"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "e75e33c4-314e-41f7-9e06-55d7ebf78719",
+      "author": "ryan",
+      "text": "## Investigation update (2026-07-27) — do not rebuild yet\n\nChecked live artifact first (per acceptance: broken state is evidence).\n\n### Lexical artifact is intact (hypothesis 1 rejected for current object)\n\n`s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/knowledge-index/lexical/v1/index.json.gz`\n(last modified 2026-07-26T19:39:26Z):\n\n| Field | Value |\n|---|---:|\n| docs/chunks | **5658** |\n| unique referenceLineageId | **1321** |\n| eligibleCount | **1376** |\n| skipped missing_extracted_text | **55** |\n\nBM25 against this file ranks all 5 golden identifier queries at **rank 1**. Eval retrieved lists for those queries match **pre-hybrid / semantic-only** order. So the arm is not reading trash — it is **not contributing at query time**.\n\n### Loader vs hybrid path\n\n- `load_lexical_artifact`: fails loudly (missing path/bucket / S3 errors propagate).\n- `_hybrid_semantic_search`: catches lexical exceptions, appends `Lexical search unavailable: …`, returns semantic-only. **That silent fallback matches the observed signature** (identifier 0/5, MRR 0.6533).\n- Additional gap: if `lexical_provider` is `None` (no bucket / no `PAPYRUS_STORAGE_BUCKET_NAME` / no amplify_outputs bucket), the lexical future is **never submitted** and previously produced **no warning at all**.\n\n### Next checks (still open)\n\nWhy the eval/process did not get lexical hits: bucket/env for `BM25LexicalProvider`, swallowed exception in warnings, or provider `None`. Do **not** rebuild the artifact until that is recorded.\n\n### Related work in flight on TI-5ed2f2\n\nEval harness will set `PAPYRUS_REQUIRE_LEXICAL=1` and preflight lexical floors so this failure mode cannot produce a “valid” golden report. Engine raises under that flag; default runtime still falls back with a warning (now also when provider is missing).\n",
+      "created_at": "2026-07-27T23:07:58.570404Z"
+    }
+  ],
   "created_at": "2026-07-27T22:55:43.255246Z",
-  "updated_at": "2026-07-27T22:55:43.255246Z",
+  "updated_at": "2026-07-27T23:07:58.570404Z",
   "closed_at": null,
   "custom": {}
 }
