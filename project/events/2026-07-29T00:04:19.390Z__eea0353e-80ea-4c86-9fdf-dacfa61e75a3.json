@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "eea0353e-80ea-4c86-9fdf-dacfa61e75a3",
+  "issue_id": "TI-b9f6dac0-db9d-4f8c-b489-52d4abb13862",
+  "event_type": "field_updated",
+  "occurred_at": "2026-07-29T00:04:19.390Z",
+  "actor_id": "ryan",
+  "payload": {
+    "changes": {
+      "priority": {
+        "from": 0,
+        "to": 1
+      }
+    }
+  }
+}

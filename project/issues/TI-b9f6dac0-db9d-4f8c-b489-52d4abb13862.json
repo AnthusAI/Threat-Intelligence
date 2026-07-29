@@ -4,7 +4,7 @@
   "description": "The identifier category — the headline achievement of this initiative — scores **0/5 on `develop` today**. Fix this before trusting any other retrieval measurement.\n\n## Evidence\n\n| Report | commit | identifier | MRR |\n|---|---|---:|---:|\n| `retrieval_baseline.json` (pre-hybrid) | — | 0/5 | 0.6533 |\n| `retrieval_post_hybrid_a61c12.json` | a61c12 | **5/5** | 0.8533 |\n| `retrieval_post_recency_bb12d3.json` | bb12d3 | **5/5** | 0.8533 |\n| `retrieval_post_pubdate_bfc2f3.json` | bfc2f33, 2026-07-27 | **0/5** | 0.6533 |\n\nReproduced on parent `beab60a` under the same environment, so it is **not** caused by the prefer-publication-date change. The four non-identifier categories are bit-identical throughout.\n\n**The MRR is exactly the pre-hybrid baseline — 0.6533, to four decimals.** That is the tell. This is not a degraded lexical arm returning weaker hits; the system is scoring as though the lexical arm contributes *nothing at all*. Fusion is running with one arm.\n\n## Leading hypothesis, in the order worth checking\n\n1. **The lexical artifact was overwritten with a subset.** Closed bug `9b6971` — \"`knowledge-vector-index --reference-id` rebuilds lexical index for that subset only\" — describes exactly this failure. The bug is closed, but closing the code path does not repair an artifact already clobbered by it. Check `corpora/knowledge-index/lexical/v1/index.json.gz`: how many documents does it actually contain? Compare against 1376 accepted in `knowledge-corpus-ai-ml-research`.\n   - Note `assert_lexical_promote_safe` (`LEXICAL_SHRINK_GUARD_RATIO = 0.5`, `MIN_EXISTING = 10`) only blocks a shrink *below half*. A subset rebuild of 60% passes the guard silently. And the guard cannot fire at all on a path that does not call it.\n2. **The artifact is missing or unreadable from the eval environment** — wrong bucket, wrong prefix, credentials, region. If the loader swallows that and falls back to semantic-only, it would produce exactly this signature. **If a silent fallback exists, that is a second bug: it must fail loudly.**\n3. **The long-standing corpus gap.** The initiative has carried an unexplained \"99-reference gap between the lexical artifact (1321) and the live accepted corpus (1420)\" since `a61c12` landed. It was never explained. Accepted is now 1376. Resolve this number properly rather than noting it again.\n\n## Acceptance\n\n- Identifier back to **5/5**, global MRR ≈ **0.8533**, on `develop`, in a report committed with the usual provenance block.\n- State the lexical artifact's document count and the accepted-reference count **in the report note**, as two explicit numbers. This gap has been carried as a footnote for weeks; make it a measured field so drift is visible next time.\n- If the cause was a silent fallback or a guard that could not fire, fix that too and add a test. An index that quietly serves nothing is the recurring failure mode of this whole initiative: silent partial work that looks like success.\n\n## Do not\n\n- Do not re-tune ranking weights to recover MRR. The retrieval logic is not what changed.\n- Do not rebuild the lexical artifact until you have recorded what the current one contains. The broken state is the evidence.",
   "type": "bug",
   "status": "open",
-  "priority": 0,
+  "priority": 1,
   "assignee": null,
   "creator": null,
   "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
@@ -13,9 +13,16 @@
     "knowledge-query"
   ],
   "dependencies": [],
-  "comments": [],
+  "comments": [
+    {
+      "id": "a7ccc55b-1461-48fb-8581-3d9d8ea6e13c",
+      "author": "ryan",
+      "text": "Root cause confirmed, and it is not what the title says. The lexical artifact was never corrupt: `PAPYRUS_STORAGE_BUCKET_NAME` was unset in the ranking worktree (no `amplify_outputs.json`), so the lexical provider constructed as None and fusion silently ran semantic-only. Identifier 0/5 / MRR 0.6533 was the eval harness lying, not develop being broken. Verified 5/5 again under a pinned environment (`retrieval_post_b9f6da_lexical_env.json`, commit `fec178d`).\n\n**The long-carried 99-reference gap is now explained.** The report records it as measured fields: lexical unique_references=1321, accepted/eligible=1376, skipped missing_extracted_text=**55**. 1376 − 1321 = 55. That is TI-5eaa89, already open. The mystery footnote was a known bug wearing a different number.\n\n**Remaining work — why this stays open, reduced to P1:**\n\nThe fail-loud guard is opt-in and off by default. `_require_lexical_env()` returns False unless `PAPYRUS_REQUIRE_LEXICAL` is set, and grep finds that variable set **nowhere** in the repo — not in amplify backend config, not in the Lambda environment, not in any default. So the eval harness is protected only when a human remembers the flag, and **production still silently degrades to semantic-only** if the lexical index ever fails to load. The defect this issue was filed for is fully intact in the runtime that matters.\n\nA guard that must be switched on is not a guard. Invert the default: require the lexical arm whenever a semantic provider exists, and make the opt-*out* explicit and narrow (e.g. `PAPYRUS_ALLOW_SEMANTIC_ONLY=1` for offline fixture runs, TI-4f25f6). Add a test that a missing bucket raises rather than degrades.\n\nThat inversion closes this issue.",
+      "created_at": "2026-07-29T00:04:19.373829Z"
+    }
+  ],
   "created_at": "2026-07-27T22:55:43.255246Z",
-  "updated_at": "2026-07-27T22:55:43.255246Z",
+  "updated_at": "2026-07-29T00:04:19.390641Z",
   "closed_at": null,
   "custom": {}
 }
