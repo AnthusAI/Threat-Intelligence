@@ -71,7 +71,9 @@ def normalize_extraction_stages(value: Any) -> list[str]:
         return [str(entry) for entry in value if str(entry).strip()]
     if isinstance(value, str) and value.strip():
         return [entry.strip() for entry in value.split(",") if entry.strip()]
-    return ["pass-through-text", "pdf-text", "metadata-text"]
+    # Omit metadata-text from defaults: as the final pipeline stage it can win with
+    # title-only stubs and hide pass-through/pdf body text (TI-e5d8df).
+    return ["pass-through-text", "pdf-text"]
 
 
 def reference_text_extraction_assignment_record(

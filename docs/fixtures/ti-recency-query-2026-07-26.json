@@ -1,0 +1,332 @@
+{
+  "query": "Hidden Dangers of Browsing AI Agents",
+  "found": [
+    {
+      "path": ".semanticMatches[0]",
+      "title": "The Hidden Dangers of Browsing AI Agents",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticMatches[0].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticMatches[1]",
+      "title": "Prompt injection breaks today's AI agents, study warns - CSO Online",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[1].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[2]",
+      "title": "Prompt Injection Attacks: Types, Examples & Mitigations | CyCognito",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[2].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[3]",
+      "title": "Indirect prompt injection is taking hold in the wild - Help Net Security",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[3].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticMatches[4]",
+      "title": "The Hidden Dangers of Browsing AI Agents",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticMatches[4].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticPassages[0]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticPassages[0].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".semanticPassages[1]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticPassages[1].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticPassages[2]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".semanticPassages[2].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".evidencePassages[0]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".evidencePassages[0].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".evidencePassages[1]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".evidencePassages[1].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".evidencePassages[2]",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".evidencePassages[2].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[0]",
+      "title": "The Hidden Dangers of Browsing AI Agents",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".relatedRecords[0].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".relatedRecords[1]",
+      "title": "Prompt injection breaks today's AI agents, study warns - CSO Online",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[1].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[2]",
+      "title": "Prompt Injection Attacks: Types, Examples & Mitigations | CyCognito",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[2].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[3]",
+      "title": "Indirect prompt injection is taking hold in the wild - Help Net Security",
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".relatedRecords[3].ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[1].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".contextBlocks[1].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".contextBlocks[2].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[2].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[3].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[3].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[8].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".contextBlocks[8].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 1.0
+    },
+    {
+      "path": ".contextBlocks[9].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[9].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[10].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[10].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[11].provenance",
+      "title": null,
+      "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    },
+    {
+      "path": ".contextBlocks[11].provenance.ranking",
+      "title": null,
+      "lineageId": null,
+      "recencyKnown": true,
+      "recencyScore": 0.9962
+    }
+  ],
+  "warnings": [],
+  "keys": [
+    "anchors",
+    "contextBlocks",
+    "evidencePassages",
+    "expandedObjects",
+    "insightMessages",
+    "operationalRelations",
+    "qualityRelations",
+    "rankingWarnings",
+    "referenceAttachments",
+    "referenceSummaries",
+    "referenceTokenBudgets",
+    "relatedRecords",
+    "relations",
+    "request",
+    "semanticMatches",
+    "semanticPassages"
+  ]
+}

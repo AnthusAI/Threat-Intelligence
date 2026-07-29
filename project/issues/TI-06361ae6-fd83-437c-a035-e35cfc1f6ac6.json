@@ -1,0 +1,45 @@
+{
+  "id": "TI-06361ae6-fd83-437c-a035-e35cfc1f6ac6",
+  "title": "Publication dates missing for 77% of accepted references; age-decay signal is inert",
+  "description": "Age decay (`bb12d3`) is closed as delivered. It is installed but **unfed**: most accepted references carry no publication date, so the signal is a near-constant and changes nothing.\n\n## Measured 2026-07-27 (read-only, on `fix/recency-prefer-publication-date`)\n\n| Corpus | Accepted | with `sourcePublishedAt` or `sourceUpdatedAt` |\n|---|---:|---:|\n| ai-ml-research | 1376 | **316 (23.0%)** |\n| threat-intelligence | 13 | **1 (7.7%)** |\n\nCorroborating evidence: `retrieval_post_hybrid_a61c12` and `retrieval_post_recency_bb12d3` are identical to four decimals — `mrr_sum` included. Landing age decay moved literally nothing.\n\nBefore `TI-f1cc13`, recency read `max()` across six date keys including `retrievedAt`/`importedAt`, so ~all documents scored ~1.0 (maximally fresh). After the fix, the 77% / 92% without publication dates score a neutral 0.5. **The fix is correct** — 0.5 is honest where 1.0 was a lie — but honest-and-inert is still inert. Recency consumes 7% of the ranking weight budget and conveys nothing for most of the corpus.\n\n## Related, and closed too early\n\nBug `71ce66` — \"Accession leaves `sourcePublishedAt`/`retrievedAt` null so age-decay `sourcePublishedAtDay` cannot land\" — is **closed**. The coverage numbers above say the problem is still here. Either that fix only covered newly accessioned references and never backfilled the existing 1060, or it is not holding. Establish which before writing new code; do not assume.\n\n## Work\n\n1. **Extract publication dates at ingestion.** PDFs: GROBID/Biblicus already parse metadata — check whether a date is being extracted and dropped on the floor rather than absent. HTML: `<meta>` (`article:published_time`, `citation_publication_date`, `dcterms.date`), JSON-LD `datePublished`, and `<time datetime>`. Most threat-intel vendor posts and advisories carry at least one.\n2. **Backfill existing accepted references** from already-archived source bytes and `extracted_text`. No re-fetch — per the initiative, everything needed is already stored.\n3. **Re-run the golden set** and report whether recency now moves anything. If coverage rises substantially and rankings still do not change, that is a real finding: say so, and the 7% weight should be reconsidered rather than defended.\n\n## Constraints\n\n- **Never** let `retrievedAt` or `importedAt` back into the recency path. That was `TI-f1cc13`; a backfill that fills `sourcePublishedAt` *from* an ingestion timestamp reintroduces the same bug wearing a different field name. Absent is better than fabricated.\n- Where no date can be found, leave it null. `recencyKnown=false` exists precisely for this.\n- Report coverage before and after as counts, not just percentages.",
+  "type": "epic",
+  "status": "open",
+  "priority": 1,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "retrieval",
+    "ingestion"
+  ],
+  "dependencies": [
+    {
+      "target": "TI-e15c4d",
+      "type": "blocked-by"
+    }
+  ],
+  "comments": [
+    {
+      "id": "d3ca144e-0e69-4536-810b-b3e6d2e40cec",
+      "author": "ryan",
+      "text": "## Cross-link from ranking work\n\nMeasured while verifying TI-f1cc13 (read-only GraphQL):\n\n| Corpus | Accepted | either pub/updated | % |\n|---|---:|---:|---:|\n| `knowledge-corpus-ai-ml-research` | 1376 | 316 | **23.0%** |\n| `knowledge-corpus-threat-intelligence` | 13 | 1 | **7.7%** |\n\nAfter prefer-publication-date, most refs get neutral recency (0.5) instead of false-fresh from ingestion time. Signal is honest but still mostly inert until ingestion extracts publication dates (and vectors carry them). Freshness goldens are being redesigned to `prefer_order` pairs under **TI-5ed2f2** so age-decay can be observed when coverage improves.\n",
+      "created_at": "2026-07-27T23:07:58.592519Z"
+    },
+    {
+      "id": "09ad5cf9-83a7-4961-b428-202921b0f8c5",
+      "author": "ryan",
+      "text": "## Still open — not owned by ranking eval work\n\nTI-f1cc13 (date *policy*) is closed. This epic remains the ingestion/coverage work so age-decay has real publication dates (>23% today on ai-ml). Freshness prefer_order goldens can now observe order flips when coverage improves (see q-fresh-5 wrong_order baseline on TI-5ed2f2 report).\n",
+      "created_at": "2026-07-28T21:37:34.226787Z"
+    },
+    {
+      "id": "c645b5aa-b4aa-42de-bb6d-e260a209cca5",
+      "author": "ryan",
+      "text": "## Handoff — ingestion agent (do not start yet)\n\n**Assignee lane:** ingestion agent applies this epic (extract publication dates, backfill from archived bytes, re-measure).\n\n**Hard gate:** blocked by **TI-e15c4d** — fail-loud retrieval-eval guard must land on `develop` first.\n\nWhy: step 3 of this epic re-runs the golden set. Without `PAPYRUS_REQUIRE_LEXICAL` + lexical preflight on the harness, a missing storage bucket silently scores semantic-only (TI-b9f6da). Post-backfill MRR would be untrustworthy.\n\nWhen TI-e15c4d closes:\n1. Pull `develop`\n2. Apply date extraction + backfill (never fabricate from retrievedAt/importedAt — TI-f1cc13)\n3. Re-measure with `PAPYRUS_RETRIEVAL_EVAL_ENV=papyrus-main-ai-ml-readonly`\n4. Report coverage counts before/after and whether freshness `prefer_order` moved (baseline: q-fresh-5 was wrong_order)\n",
+      "created_at": "2026-07-29T00:10:54.090016Z"
+    }
+  ],
+  "created_at": "2026-07-27T22:55:43.267756Z",
+  "updated_at": "2026-07-29T00:10:54.090016Z",
+  "closed_at": null,
+  "custom": {}
+}

@@ -1,0 +1,1373 @@
+{
+  "tiRecency": {
+    "refs": [
+      {
+        "id": "reference-knowledge-corpus-threat-intelligence-eb0cf5f5-f10a-c30f-90f9-02203bfea42e-v1",
+        "lineageId": "reference-knowledge-corpus-threat-intelligence-eb0cf5f5-f10a-c30f-90f9-02203bfea42e",
+        "title": "Prompt injection breaks today's AI agents, study warns - CSO Online",
+        "sourcePublishedAt": null,
+        "retrievedAt": null,
+        "importedAt": "2026-07-26T23:49:54.389581Z",
+        "mediaType": "text/html",
+        "recencyFromGraphql": {
+          "recencyScore": 0.9962,
+          "recencyKnown": true,
+          "recencyAgeDays": 1.0,
+          "recencySourceDay": 20660
+        },
+        "vectorCount": 9,
+        "vectorSourcePublishedAtDays": [],
+        "vectorRetrievedAtDays": [
+          20660
+        ],
+        "vectorRecencyScores": [
+          0.9962
+        ],
+        "vectorRecencyKnown": true,
+        "vectors": [
+          {
+            "key": "reference-passage-0625b3ec7ae0bb1165b2",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-ae4739fa4192c538d006",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-e34b998a28c207aa8e84",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-7566edf9b35b19dedf6f",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-98a8ba28186f86d3d4e6",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          }
+        ]
+      },
+      {
+        "id": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347-v1",
+        "lineageId": "reference-knowledge-corpus-threat-intelligence-fe38f260-3384-8ebc-13c6-e2a9fdd85347",
+        "title": "Indirect prompt injection is taking hold in the wild - Help Net Security",
+        "sourcePublishedAt": null,
+        "retrievedAt": null,
+        "importedAt": "2026-07-26T23:50:16.808034Z",
+        "mediaType": "text/html",
+        "recencyFromGraphql": {
+          "recencyScore": 0.9962,
+          "recencyKnown": true,
+          "recencyAgeDays": 1.0,
+          "recencySourceDay": 20660
+        },
+        "vectorCount": 9,
+        "vectorSourcePublishedAtDays": [],
+        "vectorRetrievedAtDays": [
+          20660
+        ],
+        "vectorRecencyScores": [
+          0.9962
+        ],
+        "vectorRecencyKnown": true,
+        "vectors": [
+          {
+            "key": "reference-passage-7ea289ea8487bb041b91",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-ce0dd0cda9f508301db8",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-c90c9f2c75d8a68ea53d",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-summary-15277bb9475b9acb55e8",
+            "vectorKind": "reference_summary",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-81edbfa840d7b1f090bb",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          }
+        ]
+      },
+      {
+        "id": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a-v1",
+        "lineageId": "reference-knowledge-corpus-threat-intelligence-7a354c94-3809-16bb-5998-82676d8beb9a",
+        "title": "Prompt Injection Attacks: Types, Examples & Mitigations | CyCognito",
+        "sourcePublishedAt": null,
+        "retrievedAt": null,
+        "importedAt": "2026-07-26T23:50:38.974616Z",
+        "mediaType": "text/html",
+        "recencyFromGraphql": {
+          "recencyScore": 0.9962,
+          "recencyKnown": true,
+          "recencyAgeDays": 1.0,
+          "recencySourceDay": 20660
+        },
+        "vectorCount": 9,
+        "vectorSourcePublishedAtDays": [],
+        "vectorRetrievedAtDays": [
+          20660
+        ],
+        "vectorRecencyScores": [
+          0.9962
+        ],
+        "vectorRecencyKnown": true,
+        "vectors": [
+          {
+            "key": "reference-passage-e477766eff7bfe97c5d3",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-5c54c9b8b017381207ce",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-summary-80ccef334037950e5da1",
+            "vectorKind": "reference_summary",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-b8afbf40bece5662833a",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          },
+          {
+            "key": "reference-passage-adbb9987843eb2413f18",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": null,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20660,
+            "recency": {
+              "recencyScore": 0.9962,
+              "recencyKnown": true,
+              "recencyAgeDays": 1.0,
+              "recencySourceDay": 20660
+            }
+          }
+        ]
+      },
+      {
+        "id": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e-v1",
+        "lineageId": "reference-knowledge-corpus-threat-intelligence-4d1e22a5-2b89-5899-ae2d-29165f7cf40e",
+        "title": "The Hidden Dangers of Browsing AI Agents",
+        "sourcePublishedAt": "2025-05-19T00:00:00.000Z",
+        "retrievedAt": "2026-07-26T23:50:57.976087Z",
+        "importedAt": "2026-07-26T23:50:57.976087Z",
+        "mediaType": "application/pdf",
+        "recencyFromGraphql": {
+          "recencyScore": 0.9962,
+          "recencyKnown": true,
+          "recencyAgeDays": 1.0,
+          "recencySourceDay": 20660
+        },
+        "vectorCount": 9,
+        "vectorSourcePublishedAtDays": [
+          20227
+        ],
+        "vectorRetrievedAtDays": [
+          20661
+        ],
+        "vectorRecencyScores": [
+          1.0
+        ],
+        "vectorRecencyKnown": true,
+        "vectors": [
+          {
+            "key": "reference-passage-7dac212165c2a1246ea5",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": 20227,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20661,
+            "recency": {
+              "recencyScore": 1.0,
+              "recencyKnown": true,
+              "recencyAgeDays": 0.0,
+              "recencySourceDay": 20661
+            }
+          },
+          {
+            "key": "reference-passage-960e84f3defa111e968e",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": 20227,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20661,
+            "recency": {
+              "recencyScore": 1.0,
+              "recencyKnown": true,
+              "recencyAgeDays": 0.0,
+              "recencySourceDay": 20661
+            }
+          },
+          {
+            "key": "reference-passage-11aefa9abd7d9274adb4",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": 20227,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20661,
+            "recency": {
+              "recencyScore": 1.0,
+              "recencyKnown": true,
+              "recencyAgeDays": 0.0,
+              "recencySourceDay": 20661
+            }
+          },
+          {
+            "key": "reference-summary-172ff6bb8417c312b366",
+            "vectorKind": "reference_summary",
+            "sourcePublishedAtDay": 20227,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20661,
+            "recency": {
+              "recencyScore": 1.0,
+              "recencyKnown": true,
+              "recencyAgeDays": 0.0,
+              "recencySourceDay": 20661
+            }
+          },
+          {
+            "key": "reference-passage-78042a0dd2df9d92530f",
+            "vectorKind": "reference_passage",
+            "sourcePublishedAtDay": 20227,
+            "sourceUpdatedAtDay": null,
+            "retrievedAtDay": 20661,
+            "recency": {
+              "recencyScore": 1.0,
+              "recencyKnown": true,
+              "recencyAgeDays": 0.0,
+              "recencySourceDay": 20661
+            }
+          }
+        ]
+      }
+    ],
+    "vectorsByLineage": {},
+    "summary": {
+      "vectorMatched": 36,
+      "vectorScanned": 37,
+      "recencyKnownVectors": 36,
+      "distinctRecencyScores": [
+        0.9962,
+        1.0
+      ],
+      "allFourHaveVectors": true,
+      "allFourRecencyKnown": true,
+      "scoresVary": true
+    }
+  },
+  "papyrusMainAttrition": {
+    "acceptedCurrent": 1376,
+    "lexicalIndexedLineages": 1321,
+    "acceptedNotInLexical": 55,
+    "manifest": {
+      "version": 1,
+      "referenceCount": 1321,
+      "eligibleCount": 1376,
+      "skippedTotal": 55,
+      "skipped": {
+        "missing_extracted_text": 55
+      },
+      "chunkCount": 5658,
+      "builtAt": "2026-07-26T19:39:19Z",
+      "sourceCommit": "cb22a492c43fc7987f0298382eaea04b0fcb876c+dirty",
+      "corpusId": "knowledge-corpus-ai-ml-research",
+      "inflatedBytes": 9734394
+    },
+    "primaryClass": {
+      "has_extracted_but_not_indexed": 55
+    },
+    "media": {
+      "pdf": 46,
+      "html": 4,
+      "text/plain": 5
+    },
+    "months": {
+      "2026-05": 55
+    },
+    "recoverability": {
+      "source_archive": 55
+    },
+    "roleSetHistogram": {
+      "('extracted_text', 'extracted_text_raw', 'source')": 41,
+      "('extracted_text', 'source')": 14
+    },
+    "s3ExtractedOk": 40,
+    "s3ExtractedEmpty": 0,
+    "s3ExtractedMissing": 15,
+    "s3SizeMinMedianMax": [
+      5,
+      62,
+      219
+    ],
+    "vectorLineagesPresent": 55,
+    "vectorLineagesAbsent": 0,
+    "vectorDayPrevalenceSample": {
+      "n": 2000,
+      "sourcePublishedAtDay": 0,
+      "retrievedAtDay": 0,
+      "anyDay": 0
+    },
+    "graphqlDatePrevalence": {
+      "accepted": 1376,
+      "sourcePublishedAt": 316,
+      "retrievedAt": 50,
+      "importedAt": 1376
+    },
+    "rows": [
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-01d07330-23d9-4c55-96c5-12979182a826-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-01d07330-23d9-4c55-96c5-12979182a826",
+        "title": "Meta-Baseline: Exploring Simple Meta-Learning for Few-Shot Learning",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2003.04390",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 67,
+        "importedAt": "2026-05-23T11:24:56.087Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:24:56.087Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-0a29a577-5516-44ca-945c-0359a10e2f31-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-0a29a577-5516-44ca-945c-0359a10e2f31",
+        "title": "Generative Reward Models",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2410.12832",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 24,
+        "importedAt": "2026-05-23T11:24:56.087Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:24:56.087Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-0a44357b-38c8-475e-9bd2-6c7a6697d744-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-0a44357b-38c8-475e-9bd2-6c7a6697d744",
+        "title": "Automatically detecting data drift in machine learning classifiers",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2111.05672",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 66,
+        "importedAt": "2026-05-23T13:38:32.520473Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:38:32.520473Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-0d71d07a-a546-4a67-a016-6a2afbf9ece3-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-0d71d07a-a546-4a67-a016-6a2afbf9ece3",
+        "title": "ImPaKT: A Dataset for Open-Schema Knowledge Base Construction",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2212.10770",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 61,
+        "importedAt": "2026-05-23T12:46:30.025800Z",
+        "curationStatusUpdatedAt": "2026-05-23T12:46:30.025800Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-0e4e29bd-a5da-4e6b-863b-4e663776c5a9-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-0e4e29bd-a5da-4e6b-863b-4e663776c5a9",
+        "title": "SOTOPIA-$\\pi$: Interactive Learning of Socially Intelligent Language Agents",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2403.08715",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 72,
+        "importedAt": "2026-05-23T13:05:24.215562Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:05:24.215562Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-13602171-c2e2-4c86-b811-6b6c27d3d2a3-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-13602171-c2e2-4c86-b811-6b6c27d3d2a3",
+        "title": "SI-Bench: Benchmarking Social Intelligence of Large Language Models in Human-to-Human Conversations",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2510.23182",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 70,
+        "importedAt": "2026-05-23T13:19:05.654988Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:19:05.654988Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-148f33df-7205-56c0-b5ae-23cb71c367c9-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-148f33df-7205-56c0-b5ae-23cb71c367c9",
+        "title": "Streamo",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2512.21334",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 5,
+        "importedAt": "2026-05-23T15:29:39.133395Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:29:39.133395Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-17eb0da5-fcc1-4e1b-a203-c11215e9f415-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-17eb0da5-fcc1-4e1b-a203-c11215e9f415",
+        "title": "The Power of Scale for Parameter-Efficient Prompt Tuning",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2104.08691",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 10,
+        "importedAt": "2026-05-23T10:49:03.782Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:49:03.782Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-195aeb08-8c60-4262-883b-b3d4470ec2ac-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-195aeb08-8c60-4262-883b-b3d4470ec2ac",
+        "title": "Evolutionary Multimodal Optimization: A Short Survey",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/1508.00457",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 52,
+        "importedAt": "2026-05-23T14:03:15.166408Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:03:15.166408Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-1cb60a6d-8bc7-4c91-9ed5-244505af4760-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-1cb60a6d-8bc7-4c91-9ed5-244505af4760",
+        "title": "R-Tuning: Instructing Large Language Models to Say `I Don't Know'",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2311.09677",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 65,
+        "importedAt": "2026-05-23T10:02:15.022Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:02:15.022Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-1ed93b7a-541c-4723-b98b-5932236f7735-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-1ed93b7a-541c-4723-b98b-5932236f7735",
+        "title": "Distributed Representations of Sentences and Documents",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/1405.4053",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 219,
+        "importedAt": "2026-05-23T14:51:06.639218Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:51:06.639218Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-212a0fb7-29d2-476f-b76f-f1e88ae8d8d3-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-212a0fb7-29d2-476f-b76f-f1e88ae8d8d3",
+        "title": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2501.12948",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 82,
+        "importedAt": "2026-05-23T10:49:03.782Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:49:03.782Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-222cb090-199e-421d-8b3a-25ac23240e12-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-222cb090-199e-421d-8b3a-25ac23240e12",
+        "title": "LLMTaxo: Leveraging Large Language Models for Constructing Taxonomy of Factual Claims from Social Media",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2504.12325",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 10,
+        "importedAt": "2026-05-23T12:46:30.025800Z",
+        "curationStatusUpdatedAt": "2026-05-23T12:46:30.025800Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-230f1e9a-12c6-46a7-b8b1-89529b50b94f-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-230f1e9a-12c6-46a7-b8b1-89529b50b94f",
+        "title": "PubTables-1M: Towards comprehensive table extraction from unstructured documents",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2110.00061",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 10,
+        "importedAt": "2026-05-23T14:09:26.943928Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:09:26.943928Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-2594e08b-22d7-4aa1-834c-2e905261413a-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-2594e08b-22d7-4aa1-834c-2e905261413a",
+        "title": "Autogenesis: A Self-Evolving Agent Protocol",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2604.15034",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 43,
+        "importedAt": "2026-05-23T13:00:34.555184Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:00:34.555184Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-2eecb6e9-d1a5-48e6-886b-d1ed5b3e7ab3-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-2eecb6e9-d1a5-48e6-886b-d1ed5b3e7ab3",
+        "title": "Gemma 3 Technical Report",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2503.19786",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 62,
+        "importedAt": "2026-05-23T11:59:39.767Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:59:39.767Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-2f396987-a381-40a9-bb2f-13038ce98d8b-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-2f396987-a381-40a9-bb2f-13038ce98d8b",
+        "title": "R1-VL: Learning to Reason with Multimodal Large Language Models via Step-wise Group Relative Policy Optimization",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2503.12937",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 67,
+        "importedAt": "2026-05-23T14:21:16.173350Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:21:16.173350Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-2f8e49fc-9e4a-0f23-6d22-367e844e409f-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-2f8e49fc-9e4a-0f23-6d22-367e844e409f",
+        "title": "An Information Theory of Compute-Optimal Size Scaling, Emergence, and Plateaus in Language Models",
+        "mediaType": "text/html",
+        "sourceUri": "https://arxiv.org/html/2410.01243v2",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 93,
+        "importedAt": "2026-05-23T16:42:39.764609Z",
+        "curationStatusUpdatedAt": "2026-05-23T16:30:05.953Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-38339fe7-f0b1-434a-ad56-8be54f7c8be5-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-38339fe7-f0b1-434a-ad56-8be54f7c8be5",
+        "title": "Potemkin Understanding in Large Language Models",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2506.21521",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 55,
+        "importedAt": "2026-05-23T10:02:15.022Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:02:15.022Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-472fa66b-793b-4f61-acb0-52ccf714f50b-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-472fa66b-793b-4f61-acb0-52ccf714f50b",
+        "title": "Large Language Models as Oracles for Ontology Alignment",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2508.08500",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 25,
+        "importedAt": "2026-05-23T14:03:15.166408Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:03:15.166408Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-4787b1bf-fb8f-4681-978a-f669255f14ae-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-4787b1bf-fb8f-4681-978a-f669255f14ae",
+        "title": "A Survey on Ontology Enrichment from Text",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2019.icon-1.11.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T14:51:06.639218Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:51:06.639218Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-4c4a22b4-f456-44a9-ae8d-127ea70feaa9-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-4c4a22b4-f456-44a9-ae8d-127ea70feaa9",
+        "title": "125894",
+        "mediaType": "text/html",
+        "sourceUri": "https://neurips.cc/virtual/2025/loc/san-diego/125894",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 9,
+        "importedAt": "2026-05-23T11:59:39.767Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:59:39.767Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-4fae170f-1e83-4858-bfa0-fb2176a2634d-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-4fae170f-1e83-4858-bfa0-fb2176a2634d",
+        "title": "Large Language Models as Optimizers",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2309.03409",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 43,
+        "importedAt": "2026-05-23T11:59:39.767Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:59:39.767Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-50ad5c75-3ff7-47a5-ba54-c226550b7af3-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-50ad5c75-3ff7-47a5-ba54-c226550b7af3",
+        "title": "Agent Laboratory: Using LLM Agents as Research Assistants",
+        "mediaType": "text/html",
+        "sourceUri": "https://paperswithcode.com/paper/agent-laboratory-using-llm-agents-as-research",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 57,
+        "importedAt": "2026-05-23T11:59:39.767Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:59:39.767Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-59cd108e-dadf-4e52-a9d3-e9a3716ab63c-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-59cd108e-dadf-4e52-a9d3-e9a3716ab63c",
+        "title": "TaxoCom: Topic Taxonomy Completion with Hierarchical Discovery of Novel Topic Clusters",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2201.06771",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 92,
+        "importedAt": "2026-05-23T15:34:06.975843Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:34:06.975843Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-5c3f5f92-f10c-5d83-84d3-dfc1a1063b17-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-5c3f5f92-f10c-5d83-84d3-dfc1a1063b17",
+        "title": "The Use of Knowledge in Society (Hayek 1945) \u2014",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://statisticaleconomics.org/wp-content/uploads/2013/03/the_use_of_knowledge_in_society_-_hayek.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T11:24:56.087Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:24:56.087Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-5c410df3-e36b-49e4-a465-b3a948e5b33e-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-5c410df3-e36b-49e4-a465-b3a948e5b33e",
+        "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2303.11366",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 69,
+        "importedAt": "2026-05-23T10:12:49.620Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:12:49.620Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-71448762-0b5d-4e99-8c22-12f0a36570de-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-71448762-0b5d-4e99-8c22-12f0a36570de",
+        "title": "Language Models Are Capable of Metacognitive Monitoring and Control of Their Internal Activations",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2505.13763",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 105,
+        "importedAt": "2026-05-23T14:42:29.069941Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:42:29.069941Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-724e6b09-2ecb-42d3-a094-9236c18a9bfa-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-724e6b09-2ecb-42d3-a094-9236c18a9bfa",
+        "title": "From Noise to Signal: When Outliers Seed New Topics",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2603.18358",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 26,
+        "importedAt": "2026-05-23T15:34:06.975843Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:34:06.975843Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-7fe4f3f0-8de6-46ca-a614-ca99b698e6f4-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-7fe4f3f0-8de6-46ca-a614-ca99b698e6f4",
+        "title": "Gorilla: Large Language Model Connected with Massive APIs",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2305.15334",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 65,
+        "importedAt": "2026-05-23T14:21:16.173350Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:21:16.173350Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-84ef661c-3da0-4e48-98bf-fe2cac041c91-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-84ef661c-3da0-4e48-98bf-fe2cac041c91",
+        "title": "CodeTaxo: Enhancing Taxonomy Expansion with Limited Examples via Code Language Prompts",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2408.09070",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 94,
+        "importedAt": "2026-05-23T13:00:34.555184Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:00:34.555184Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-8df6f719-09fb-405a-a1fd-5958134a34a1-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-8df6f719-09fb-405a-a1fd-5958134a34a1",
+        "title": "Rank, Chunk, and Expand: Lineage-Oriented Reasoning for Taxonomy Expansion - ACL Anthology",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2025.findings-acl.671.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:08:00.972027Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:08:00.972027Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-98ee8a44-be4d-477d-bf82-c5dcf77697e7-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-98ee8a44-be4d-477d-bf82-c5dcf77697e7",
+        "title": "Large Language Models Have Intrinsic Meta-Cognition, but Need a Good Lens",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2506.08410",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 81,
+        "importedAt": "2026-05-23T15:20:55.489703Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:20:55.489703Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-9be6c005-343d-427e-86d8-b5215adb7dd5-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-9be6c005-343d-427e-86d8-b5215adb7dd5",
+        "title": "Lecture 2 Knowledge Curation",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://cs.stanford.edu/people/shaoyj/assets/pdf/cs224v_Knowlege_Curation_202409.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:25:23.228636Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:25:23.228636Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-a0724997-324f-5668-81b7-ae4b962bdb93-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-a0724997-324f-5668-81b7-ae4b962bdb93",
+        "title": "Kwai Keye-VL 1.5 Technical Report \u2014",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2509.01563",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 41,
+        "importedAt": "2026-05-23T13:23:39.146618Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:23:39.146618Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-a0caeb14-e4d5-4150-834e-0a83496cfb81-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-a0caeb14-e4d5-4150-834e-0a83496cfb81",
+        "title": "Title: Just a moment... URL Source: http://dl.acm.org/doi/10.1145/3627673.3679608 Warning: Target URL returned error 403: Forbidden Warning: This page maybe requiring CAPTCHA, please make sure you are authorized to access this page. Markdown Content: ## dl.acm.org ## Performing security verification This website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.",
+        "mediaType": "text/plain",
+        "sourceUri": "https://dl.acm.org/doi/10.1145/3627673.3679608",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T10:12:49.620Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:12:49.620Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-ab801981-eb9d-4bb4-9dcb-53ad1dcafe92-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-ab801981-eb9d-4bb4-9dcb-53ad1dcafe92",
+        "title": null,
+        "mediaType": "text/plain",
+        "sourceUri": "https://dl.acm.org/doi/10.1145/2333112.2333115",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T14:46:35.065627Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:46:35.065627Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-b9cd7368-648d-421e-8b83-5435db6a7285-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-b9cd7368-648d-421e-8b83-5435db6a7285",
+        "title": "Magentic-One: A Generalist Multi-Agent System for Solving Complex Tasks - Microsoft",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://www.microsoft.com/en-us/research/wp-content/uploads/2024/11/Magentic-One.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T14:59:36.298187Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:59:36.298187Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-ba95d058-9499-453c-bc16-4632bbcd0032-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-ba95d058-9499-453c-bc16-4632bbcd0032",
+        "title": "Long Term Memory: The Foundation of AI Self-Evolution",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2410.15665",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 61,
+        "importedAt": "2026-05-23T15:12:11.709957Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:12:11.709957Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-c282e7cf-107e-459c-a4e9-29f285254a43-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-c282e7cf-107e-459c-a4e9-29f285254a43",
+        "title": "TaxoGen: Unsupervised Topic Taxonomy Construction by Adaptive Term Embedding and Clustering - Jiawei Han",
+        "mediaType": "application/pdf",
+        "sourceUri": "http://hanj.cs.illinois.edu/pdf/kdd18_czhang.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:08:00.972027Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:08:00.972027Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-ca61285c-6585-48d1-b07c-d9e94c866c81-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-ca61285c-6585-48d1-b07c-d9e94c866c81",
+        "title": null,
+        "mediaType": "text/plain",
+        "sourceUri": "https://dl.acm.org/doi/10.1145/3445965",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T13:19:05.654988Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:19:05.654988Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-cac2f569-f824-458b-9fc2-590420872058-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-cac2f569-f824-458b-9fc2-590420872058",
+        "title": "Assisting in Writing Wikipedia-like Articles From Scratch with Large Language Models - ACL Anthology",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2024.naacl-long.347.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:08:00.972027Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:08:00.972027Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-cba1ae34-3923-4638-84e2-749293d06512-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-cba1ae34-3923-4638-84e2-749293d06512",
+        "title": "Random Forests",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://doi.org/10.1023/A:1010933404324",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 108,
+        "importedAt": "2026-05-23T11:24:56.087Z",
+        "curationStatusUpdatedAt": "2026-05-23T11:24:56.087Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-cce7b401-844a-4cd2-b9d7-ea0994b61e32-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-cce7b401-844a-4cd2-b9d7-ea0994b61e32",
+        "title": "Improving Automatic Evaluation of Large Language Models (LLMs) in Biomedical Relation Extraction via LLMs-as-the-Judge - ACL Anthology",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2025.acl-long.1238.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:03:48.331932Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:03:48.331932Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-cef49cbe-df45-4d64-afe4-b89604d3dc0c-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-cef49cbe-df45-4d64-afe4-b89604d3dc0c",
+        "title": "Benchmarking Table Extraction: Multimodal LLMs vs Traditional OCR - ACL Anthology",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2025.xllm-1.2.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T15:25:23.228636Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:25:23.228636Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-d62d96ad-227e-40d9-9304-af4dbbc4d5ce-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-d62d96ad-227e-40d9-9304-af4dbbc4d5ce",
+        "title": "Self-Consuming Generative Models Go MAD",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2307.01850",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 47,
+        "importedAt": "2026-05-23T15:34:06.975843Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:34:06.975843Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-e129a3c9-3e0e-4314-986f-2ab7f50654ea-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-e129a3c9-3e0e-4314-986f-2ab7f50654ea",
+        "title": "How to train your MAML",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/1810.09502",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 30,
+        "importedAt": "2026-05-23T15:03:48.331932Z",
+        "curationStatusUpdatedAt": "2026-05-23T15:03:48.331932Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-e1c73c36-5dd2-467e-a902-8b47d9a9bd54-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-e1c73c36-5dd2-467e-a902-8b47d9a9bd54",
+        "title": "Terminal Agents Suffice for Enterprise Automation",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2604.00073",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 57,
+        "importedAt": "2026-05-23T13:09:58.249619Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:09:58.249619Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-eb583d14-e9e0-4341-9c01-8612e3fca510-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-eb583d14-e9e0-4341-9c01-8612e3fca510",
+        "title": "TaxoAdapt: Aligning LLM-Based Multidimensional Taxonomy Construction to Evolving Research Corpora - ACL Anthology",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://aclanthology.org/2025.acl-long.1442.pdf",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T14:51:06.639218Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:51:06.639218Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-eca443d8-6851-4391-bdcd-a3eb4ab25ef4-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-eca443d8-6851-4391-bdcd-a3eb4ab25ef4",
+        "title": "EvoTaxo: Building and Evolving Taxonomy from Social Media Streams",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2603.19711",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 26,
+        "importedAt": "2026-05-23T10:12:49.620Z",
+        "curationStatusUpdatedAt": "2026-05-23T10:12:49.620Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-f2a6a2cd-005e-48ea-b329-7eb942cb919a-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-f2a6a2cd-005e-48ea-b329-7eb942cb919a",
+        "title": null,
+        "mediaType": "text/plain",
+        "sourceUri": "https://www.sciencedirect.com/science/article/pii/S1570826820300585",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T13:14:37.951021Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:14:37.951021Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-f4578e98-ccb3-4fc9-ba50-ca1b293bbbd4-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-f4578e98-ccb3-4fc9-ba50-ca1b293bbbd4",
+        "title": "Mathematical exploration and discovery at scale",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2511.02864",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 89,
+        "importedAt": "2026-05-23T13:05:24.215562Z",
+        "curationStatusUpdatedAt": "2026-05-23T13:05:24.215562Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-fdb38b5b-f3af-43f2-abd2-8d15ae51184a-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-fdb38b5b-f3af-43f2-abd2-8d15ae51184a",
+        "title": "Integration of Neural Embeddings and Probabilistic Models in Topic Modeling",
+        "mediaType": "text/plain",
+        "sourceUri": "https://www.tandfonline.com/doi/full/10.1080/08839514.2024.2403904",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "source"
+        ],
+        "s3Extracted": "missing:ClientError",
+        "s3Bytes": null,
+        "importedAt": "2026-05-23T12:41:58.237326Z",
+        "curationStatusUpdatedAt": "2026-05-23T12:41:58.237326Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-ff9461de-15cf-4f32-bb63-3d9d35224145-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-ff9461de-15cf-4f32-bb63-3d9d35224145",
+        "title": "GraphRAFT: Retrieval Augmented Fine-Tuning for Knowledge Graphs on Graph Databases",
+        "mediaType": "application/pdf",
+        "sourceUri": "https://arxiv.org/abs/2504.05478",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 90,
+        "importedAt": "2026-05-23T14:21:16.173350Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:21:16.173350Z"
+      },
+      {
+        "id": "reference-knowledge-corpus-ai-ml-research-ffce10e1-662d-4395-9017-c12e812e2dfd-v1",
+        "lineageId": "reference-knowledge-corpus-ai-ml-research-ffce10e1-662d-4395-9017-c12e812e2dfd",
+        "title": "2506.00664v1",
+        "mediaType": "text/html",
+        "sourceUri": "https://arxiv.org/html/2506.00664v1",
+        "class": "has_extracted_but_not_indexed",
+        "roles": [
+          "extracted_text",
+          "extracted_text_raw",
+          "source"
+        ],
+        "s3Extracted": "ok",
+        "s3Bytes": 111,
+        "importedAt": "2026-05-23T14:03:15.166408Z",
+        "curationStatusUpdatedAt": "2026-05-23T14:03:15.166408Z"
+      }
+    ]
+  },
+  "papyrusMainLiveQueryRecencySummary": {
+    "recencyKnownCount": 0,
+    "topN": 5,
+    "recencyScore": 0.5,
+    "note": "All top-5 hits on ai-ml-research query returned recencyKnown=false / score=0.5"
+  }
+}

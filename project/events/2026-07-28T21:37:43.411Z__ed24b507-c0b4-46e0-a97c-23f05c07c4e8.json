@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "ed24b507-c0b4-46e0-a97c-23f05c07c4e8",
+  "issue_id": "TI-4f25f668-b7ba-495d-950f-6a705fd4d2ff",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-28T21:37:43.411Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Follow-on from closed TI-5ed2f2. Scoring unit tests exist; no tiny checked-in corpus for offline E2E without AWS. Build only if CI needs it.",
+    "issue_type": "story",
+    "labels": [
+      "eval",
+      "tooling"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 3,
+    "status": "open",
+    "title": "Checked-in fixture corpus for offline retrieval eval"
+  }
+}

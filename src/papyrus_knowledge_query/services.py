@@ -782,7 +782,16 @@ def build_environment_services(event: dict[str, Any] | None = None) -> Knowledge
     semantic = _semantic_from_environment()
     corpus_text = _corpus_text_from_environment()
     lexical = _lexical_from_environment(corpus_text)
+    if semantic is not None and lexical is None and _require_lexical_env():
+        raise RuntimeError(
+            "PAPYRUS_REQUIRE_LEXICAL is set but no lexical provider could be constructed "
+            "(set PAPYRUS_STORAGE_BUCKET_NAME / PAPYRUS_LEXICAL_INDEX_PATH, or provide amplify_outputs.json)"
+        )
     return KnowledgeQueryServices(graph=graph, semantic=semantic, lexical=lexical, corpus_text=corpus_text)
+
+
+def _require_lexical_env() -> bool:
+    return (os.environ.get("PAPYRUS_REQUIRE_LEXICAL") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def normalize_anchor(anchor: dict[str, Any]) -> dict[str, Any]:

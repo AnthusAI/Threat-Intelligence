@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "6b60185b-ef71-4fbc-9e45-066078ea9155",
+  "issue_id": "TI-06361ae6-fd83-437c-a035-e35cfc1f6ac6",
+  "event_type": "dependency_removed",
+  "occurred_at": "2026-07-29T00:10:40.914Z",
+  "actor_id": "ryan",
+  "payload": {
+    "dependency_type": "blocked-by",
+    "target_id": "TI-b9f6da"
+  }
+}

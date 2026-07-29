@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "2eabf9e8-a66b-4844-9479-0d0efa2d27c2",
+  "issue_id": "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-26T20:02:23.056Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Observed\n\nAfter `process-research-now` registered 18 HTML prospects (`catalog media_type: text/html`):\n\nurlText: eligible=0 planned=0 changes=0 failures=0\nmetadataGeneration: attempted=18 generated=0 skippedMissingText=18\n\n## Expected\n\nEligible HTML/PDF sources are fetched for extracted text (or a clear per-ref skip reason), then metadata generation can run. Silent 0/18 eligibility with 18 metadata skips is under-delivery.\n\n## Evidence\n\n`.papyrus-runs/c46828-e2e/process-research-now.json` on branch `epic/e2e-ingestion`.",
+    "issue_type": "bug",
+    "labels": [],
+    "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+    "priority": 1,
+    "status": "open",
+    "title": "New pending HTML prospects get no url-text fetch; metadata generation skips all"
+  }
+}

@@ -13,10 +13,13 @@ from typing import Any
 
 from .engine import _chunk_text, _clean_text, object_title
 from .lexical_index import (
+    LexicalIndexShrinkError,
+    assert_lexical_promote_safe,
     audit_lexical_artifact,
     build_lexical_index,
     clear_lexical_index_cache,
     load_lexical_artifact,
+    merge_lexical_index,
     passage_candidate_to_lexical_doc,
     write_lexical_artifact_to_s3,
     write_lexical_index,
@@ -825,7 +828,9 @@ def _base_reference_metadata(
         "curationStatusKey": reference.get("curationStatusKey"),
     }
     # Epoch-day integers — S3 Vectors filterable scalars. Omitted when unknown so
-    # older vectors without these keys remain valid (recency scores neutral).
+    # older vectors without these keys remain valid. retrievedAtDay is provenance
+    # for operators; ranking decay uses only sourcePublished/Updated days
+    # (see ranking.recency_signal_from_record / TI-f1cc13).
     if published_day is not None:
         metadata["sourcePublishedAtDay"] = published_day
     if updated_day is not None:
@@ -1422,21 +1427,67 @@ def _finalize_lexical_index(
     skip_reasons = dict(stats.pop("_lexicalSkipReasons", {}) or {})
     eligible_ids = set(stats.pop("_lexicalEligibleIds", set()) or set())
     eligible_count = int(stats.get("referencesScanned") or len(eligible_ids) or 0)
+    scoped = bool(options.reference_ids)
     report: dict[str, Any] = {
         "docsCollected": len(docs),
         "uniqueKeys": len({doc.get("key") for doc in docs if doc.get("key")}),
         "eligibleCount": eligible_count,
         "skipped": skip_reasons,
+        "scoped": scoped,
     }
     if not docs:
         report["status"] = "skipped_empty"
         return report
-    artifact = build_lexical_index(
-        docs,
-        eligible_count=eligible_count,
-        skipped=skip_reasons,
-        corpus_id=options.corpus_id or None,
+
+    existing: dict[str, Any] | None = None
+    try:
+        existing = _load_lexical_artifact_for_services(services)
+    except Exception as exc:  # noqa: BLE001 — first write or missing artifact is fine
+        if scoped:
+            _progress(f"lexical merge: no existing artifact to merge into ({exc})")
+        existing = None
+
+    replace_lineage_ids = set(eligible_ids)
+    replace_lineage_ids.update(
+        str(doc.get("referenceLineageId") or "")
+        for doc in docs
+        if doc.get("referenceLineageId")
     )
+    replace_lineage_ids.discard("")
+
+    if scoped and existing is not None:
+        existing_manifest = existing.get("manifest") if isinstance(existing.get("manifest"), dict) else {}
+        # Keep the prior corpus-wide denominator; scoped scans only see a handful of refs.
+        merge_eligible = int(existing_manifest.get("eligibleCount") or existing_manifest.get("referenceCount") or 0)
+        merge_skipped = (
+            dict(existing_manifest.get("skipped") or {})
+            if isinstance(existing_manifest.get("skipped"), dict)
+            else {}
+        )
+        artifact = merge_lexical_index(
+            existing,
+            docs,
+            replace_lineage_ids=replace_lineage_ids,
+            eligible_count=merge_eligible or None,
+            skipped=merge_skipped or None,
+            corpus_id=options.corpus_id or existing_manifest.get("corpusId") or None,
+        )
+        report["merged"] = True
+        report["eligibleCount"] = artifact.get("manifest", {}).get("eligibleCount")
+        _progress(
+            "lexical index merged scoped update: "
+            f"replaced={len(replace_lineage_ids)} incomingDocs={len(docs)} "
+            f"totalDocs={len(artifact.get('docs') or [])}"
+        )
+    else:
+        artifact = build_lexical_index(
+            docs,
+            eligible_count=eligible_count,
+            skipped=skip_reasons,
+            corpus_id=options.corpus_id or None,
+        )
+        report["merged"] = False
+
     inflated = int(artifact.get("inflatedBytes") or 0)
     report["inflatedBytes"] = inflated
     report["builtAt"] = artifact.get("builtAt")
@@ -1456,15 +1507,17 @@ def _finalize_lexical_index(
             f"Lexical index inflated size {inflated} exceeds 50MB; revisit storage format if growth continues"
         )
     local_path = (os.environ.get("PAPYRUS_LEXICAL_INDEX_PATH") or "").strip()
+    allow_shrink = bool(options.force) and not scoped
     # Local lexical writes do not need embeddings; allow them during vector dry-runs.
     try:
         if local_path:
-            written = write_lexical_index(local_path, artifact)
+            written = write_lexical_index(local_path, artifact, allow_shrink=allow_shrink)
             clear_lexical_index_cache()
             report["status"] = "written_local"
             report["path"] = local_path
             report["bytes"] = written
         elif options.dry_run:
+            assert_lexical_promote_safe(existing, artifact, allow_shrink=allow_shrink)
             report["status"] = "prepared"
         else:
             bucket = _storage_bucket_for_services(services)
@@ -1472,9 +1525,15 @@ def _finalize_lexical_index(
                 report["status"] = "skipped_no_bucket"
                 stats["warnings"].append("Lexical index built but not written (no storage bucket or local path)")
                 return report
-            written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket)
+            written = write_lexical_artifact_to_s3(artifact, bucket_name=bucket, allow_shrink=allow_shrink)
             report["status"] = "written_s3"
             report.update(written)
+    except LexicalIndexShrinkError as exc:
+        report["status"] = "refused_shrink"
+        report["error"] = str(exc)
+        stats["warnings"].append(str(exc))
+        _progress(f"lexical promote refused: {exc}")
+        raise
     except Exception as exc:  # noqa: BLE001
         report["status"] = "write_failed"
         report["error"] = str(exc)
@@ -1483,11 +1542,13 @@ def _finalize_lexical_index(
 
     # Completeness check is part of the build output — do not leave it as a
     # separate step someone can forget to run against the artifact just written.
-    audit_ids = eligible_ids or {
+    audit_ids = {
         str(doc.get("referenceLineageId") or "")
         for doc in artifact.get("docs") or []
         if doc.get("referenceLineageId")
     }
+    if not scoped:
+        audit_ids |= eligible_ids
     audit_ids.discard("")
     audit = audit_lexical_artifact(artifact, audit_ids)
     report["audit"] = audit

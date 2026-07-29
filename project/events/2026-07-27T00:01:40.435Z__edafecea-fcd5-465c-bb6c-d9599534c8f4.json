@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "event_id": "edafecea-fcd5-465c-bb6c-d9599534c8f4",
+  "issue_id": "TI-71ce66be-6c57-46e0-9344-357599a8006a",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T00:01:40.435Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Expected\nAccessioned references carry publication/retrieval timestamps when known so vector metadata can write sourcePublishedAtDay / retrievedAtDay.\n\n## Observed\nAfter accession, four new refs had sourcePublishedAt=null, retrievedAt=null. Sidecar had retrieved_at but GraphQL did not. Force sync wrote retrievedAtDay from importedAt. sourcePublishedAtDay absent until manual update_record set arXiv 2025-05-19 from PDF header.\n\n## Impact\nkanbus-4b0aa6 Rebuild A only partially activated without publication dates.",
+    "issue_type": "bug",
+    "labels": [
+      "ingestion"
+    ],
+    "parent": "TI-c46828bd-f792-452f-9c49-9f22d06ea730",
+    "priority": 2,
+    "status": "open",
+    "title": "Accession leaves sourcePublishedAt/retrievedAt null so age-decay sourcePublishedAtDay cannot land"
+  }
+}

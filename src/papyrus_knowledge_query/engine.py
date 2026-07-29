@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import time
 import json
+import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import quote
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 from .services import KnowledgeQueryServices, NoopSemanticSearchProvider, normalize_anchor
 from .ranking import (
@@ -1154,6 +1155,11 @@ def _unique_semantic_match_source_count(structured: dict[str, Any]) -> int:
     return len(keys)
 
 
+def _require_lexical() -> bool:
+    """When set, lexical failure must not silently degrade to semantic-only (eval / ops)."""
+    return (os.environ.get("PAPYRUS_REQUIRE_LEXICAL") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _hybrid_semantic_search(
     *,
     request: dict[str, Any],
@@ -1167,6 +1173,7 @@ def _hybrid_semantic_search(
     limit = int(scope["topK"])
     semantic_matches: list[dict[str, Any]] = []
     lexical_matches: list[dict[str, Any]] = []
+    require_lexical = _require_lexical()
 
     def _run_semantic() -> list[dict[str, Any]]:
         return semantic_provider.search(query, scope, limit)
@@ -1176,6 +1183,12 @@ def _hybrid_semantic_search(
             raise FileNotFoundError("lexical provider not configured")
         # Overfetch so RRF has room after reference-level collapse.
         return lexical_provider.search(query, scope, max(limit, min(100, limit * 6)))
+
+    if lexical_provider is None:
+        msg = "Lexical provider not configured; semantic-only"
+        if require_lexical:
+            raise RuntimeError(f"{msg} (PAPYRUS_REQUIRE_LEXICAL is set)")
+        warnings.append(msg)
 
     futures = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -1190,6 +1203,8 @@ def _hybrid_semantic_search(
                 if label == "semantic":
                     warnings.append(f"Semantic search failed: {exc}")
                 else:
+                    if require_lexical:
+                        raise RuntimeError(f"Lexical search unavailable: {exc}") from exc
                     warnings.append(f"Lexical search unavailable: {exc}")
                 continue
             if label == "semantic":
@@ -1198,6 +1213,7 @@ def _hybrid_semantic_search(
                 lexical_matches = result or []
 
     if not lexical_matches:
+        # Empty BM25 results are fine; require_lexical only forbids load/search failures.
         return semantic_matches
     if not semantic_matches:
         return lexical_matches

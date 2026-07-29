@@ -1,0 +1,21 @@
+{
+  "id": "TI-4f25f668-b7ba-495d-950f-6a705fd4d2ff",
+  "title": "Checked-in fixture corpus for offline retrieval eval",
+  "description": "Follow-on from closed TI-5ed2f2. Scoring unit tests exist; no tiny checked-in corpus for offline E2E without AWS. Build only if CI needs it.",
+  "type": "story",
+  "status": "open",
+  "priority": 3,
+  "assignee": null,
+  "creator": null,
+  "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+  "labels": [
+    "eval",
+    "tooling"
+  ],
+  "dependencies": [],
+  "comments": [],
+  "created_at": "2026-07-28T21:37:43.411159Z",
+  "updated_at": "2026-07-28T21:37:43.411159Z",
+  "closed_at": null,
+  "custom": {}
+}

@@ -531,7 +531,8 @@ full re-embed.
    must manufacture one. Per-category scoring matters more than the aggregate: a
    change that improves paraphrase while destroying identifier lookup must be
    visible. The identifier category is expected to score poorly at baseline —
-   that failure is the business case for the next item.
+   that failure is the business case for the next item. **Pinned environments and
+   golden-set design rules:** `docs/retrieval-eval-environments.md` (**TI-5ed2f2**).
 
 Alongside it, and tracked on the board rather than here because it is an
 ingestion concern rather than a retrieval one: **archive raw source bytes for

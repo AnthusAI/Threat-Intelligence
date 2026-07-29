@@ -14,6 +14,11 @@ for prerequisites, CLI smoke commands, assignment-shaped queries, and
 troubleshooting. For multi-step `knowledge_search` inside Tactus research harnesses,
 see [`docs/agent-loop-patterns.md`](../../docs/agent-loop-patterns.md).
 
+For golden-query retrieval measurement, use the pinned environments in
+[`docs/retrieval-eval-environments.md`](../../docs/retrieval-eval-environments.md)
+and `procedures/newsroom/retrieval_eval.py` — do not ad-hoc copy production
+corpus data into a sandbox to run eval.
+
 The same Python engine powers both entrypoints:
 
 - AppSync custom query: `knowledgeQuery(input: AWSJSON!): AWSJSON`

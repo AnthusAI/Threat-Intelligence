@@ -28,6 +28,7 @@ from papyrus_knowledge_query.ranking import (
     quality_score_from_rating,
     quality_signal_from_relations,
     recency_score,
+    recency_signal_from_record,
     score_record,
     select_records_by_diversity,
 )
@@ -2062,6 +2063,62 @@ class KnowledgeQueryTests(unittest.TestCase):
         )
         self.assertFalse(missing["recencyKnown"])
         self.assertEqual(missing["recencyScore"], 0.5)
+
+    def test_old_publication_day_scores_old_despite_today_retrieved_day(self):
+        """TI-f1cc13: operational timestamps must not beat source publication dates."""
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        today = epoch_day_from_value("2026-07-27T00:00:00Z")
+        published_2019 = epoch_day_from_value("2019-06-01T00:00:00Z")
+        signal = recency_signal_from_record(
+            {
+                "metadata": {
+                    "sourcePublishedAtDay": published_2019,
+                    "retrievedAtDay": today,
+                },
+                "importedAt": "2026-07-27T12:00:00Z",
+                "retrievedAt": "2026-07-27T12:00:00Z",
+            },
+            now=now,
+        )
+        self.assertTrue(signal["recencyKnown"])
+        self.assertEqual(signal["recencySourceDay"], published_2019)
+        self.assertGreater(signal["recencyAgeDays"], 1800)
+        self.assertLess(signal["recencyScore"], 0.1)
+
+        ranking = score_record(
+            {
+                "lineageId": "reference-old-advisory",
+                "score": 0.8,
+                "sourcePublishedAtDay": published_2019,
+                "retrievedAtDay": today,
+                "importedAt": "2026-07-27T12:00:00Z",
+            },
+            ranking_config=normalize_ranking_config({}, []),
+            relevance_score=0.8,
+            now=now,
+        )
+        self.assertTrue(ranking["recencyKnown"])
+        self.assertLess(ranking["recencyScore"], 0.1)
+
+    def test_operational_timestamps_alone_stay_recency_unknown(self):
+        """Missing publication date must stay neutral — crawl time is not freshness."""
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        today = epoch_day_from_value("2026-07-27T00:00:00Z")
+        signal = recency_signal_from_record(
+            {
+                "metadata": {"retrievedAtDay": today},
+                "importedAt": "2026-07-27T12:00:00Z",
+                "retrievedAt": "2026-07-27T12:00:00Z",
+            },
+            now=now,
+        )
+        self.assertFalse(signal["recencyKnown"])
+        self.assertEqual(signal["recencyScore"], 0.5)
+        self.assertIsNone(signal["recencySourceDay"])
 
     def test_vector_date_metadata_survives_normalization_allowlist(self):
         """Guard: date keys must be allowlisted in _normalize_semantic_matches."""

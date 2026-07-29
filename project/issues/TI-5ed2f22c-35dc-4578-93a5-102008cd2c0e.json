@@ -3,9 +3,9 @@
   "title": "Document and implement repeatable retrieval evaluation environments",
   "description": "",
   "type": "epic",
-  "status": "open",
-  "priority": 2,
-  "assignee": null,
+  "status": "closed",
+  "priority": 1,
+  "assignee": "ryan",
   "creator": null,
   "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
   "labels": [
@@ -25,11 +25,29 @@
       "author": "ryan",
       "text": "Golden-set defect found during the age-decay epic (kanbus-bb12d3): the `freshness` category does not test what its name implies.\n\nFour of its five queries return the expected reference at rank 1, so there is no ordering for a recency signal to influence. The fifth (`q-fresh-4`) is `rank=-1` — not retrieved at all — so it is a recall failure a tie-breaker cannot reach.\n\nA category meant to test stale-vs-fresh preference needs cases where **both** a stale and a fresh reference are retrievable and relevant, and only their relative order is in question. As built, the category cannot validate any ranking-order change.\n\nThis is the second acceptance criterion in this initiative set against an instrument that could not observe the change (the first: passage scoring measured against a golden set that scores reference rank). When this epic is picked up, the general fix is worth stating: **a golden query is only useful for validating a change if the change can, in principle, alter its result.** Categories should be designed against the mechanism they test, not named after the intuition.",
       "created_at": "2026-07-26T20:52:57.196142Z"
+    },
+    {
+      "id": "46c73806-bfd8-45c2-931f-fab4a68c28b0",
+      "author": "ryan",
+      "text": "## In progress — `epic/repeatable-retrieval-eval`\n\nWorking in `/Users/ryan/Projects/Threat-Intelligence-ranking` (merged latest `develop`).\n\n### Done in this branch (not pushed)\n\n1. **Pinned eval environments**\n   - `procedures/newsroom/tests/fixtures/retrieval_eval_environments.json`\n   - Canonical profile: `papyrus-main-ai-ml-readonly` (Papyrus-main AppSync + vector ARN + media-bucket lexical artifact)\n   - Contract doc: `docs/retrieval-eval-environments.md`\n   - Skill + roadmap point at the doc\n\n2. **Harness hardening** (`procedures/newsroom/retrieval_eval.py`)\n   - Loads named env profile; fills missing env vars (never overwrites)\n   - Sets `PAPYRUS_REQUIRE_LEXICAL=1` for the canonical profile\n   - Lexical preflight: load artifact, enforce `min_docs` / `min_unique_references`, abort before scoring if thin/missing\n   - Provenance now records `environment`, storage bucket, lexical docs/refs, warning sample\n   - Aborts after scoring if any query warned `Lexical search unavailable` / provider missing\n\n3. **Engine: optional loud lexical failure**\n   - `PAPYRUS_REQUIRE_LEXICAL=1` → raise instead of semantic-only fallback\n   - Also warns when lexical provider is `None` (previously silent)\n   - Default production behavior unchanged (still warns + falls back)\n\n4. **Freshness golden redesign** (`prefer_order`)\n   - All five freshness queries are now stale/fresh **pairs**; score is ok / wrong_order / incomplete\n   - Unit tests in `procedures/newsroom/tests/test_retrieval_eval.py` (12 passed locally with related hybrid tests)\n\n### Still open on this epic\n\n- Seeded-sandbox profile (documented as not built — do not invent ad-hoc prod copies)\n- Checked-in fixture corpus for offline E2E (scoring unit tests only for now)\n- Live re-score with the new freshness metric + require_lexical against Papyrus-main (blocked in practice until **TI-b9f6da** explains why the lexical arm is not contributing at query time despite an intact S3 artifact)\n\n### Related board updates\n\n- Findings from the identifier 0/5 investigation → **TI-b9f6da**\n- Publication-date recency fix status → **TI-f1cc13**\n",
+      "created_at": "2026-07-27T23:07:58.559564Z"
+    },
+    {
+      "id": "913494b1-ac95-494a-8493-a6ef3fecb69f",
+      "author": "ryan",
+      "text": "## Cross-link: TI-b9f6da closed\n\nIdentifier 0/5 was **missing `PAPYRUS_STORAGE_BUCKET_NAME`** (lexical provider None), not a bad artifact. The pinned eval env + require_lexical path on this epic is what makes that failure mode refuse to produce a “valid” report.\n\nStill open here: seeded sandbox, offline fixture corpus, and freshness `prefer_order` pairs q-fresh-4/5 still `incomplete` (deferred Apprenticeship Learning not co-retrieved) — redesign those deferred partners next.\n",
+      "created_at": "2026-07-28T16:51:37.814749Z"
+    },
+    {
+      "id": "71081f9a-3b59-418b-8338-63a4b9a14dc9",
+      "author": "ryan",
+      "text": "## Closing — acceptance met\n\n### Delivered\n1. **Documented repeatable env:** `docs/retrieval-eval-environments.md` + `retrieval_eval_environments.json` (`papyrus-main-ai-ml-readonly`).\n2. **Harness:** profile load, lexical preflight/floors, `PAPYRUS_REQUIRE_LEXICAL`, provenance counts, abort on lexical-absent warnings.\n3. **Golden design:** freshness is `prefer_order` with co-retrieving pairs. Verification report `retrieval_post_5ed2f2_eval_env.json`: freshness statuses ok/ok/ok/ok/wrong_order — **zero incomplete**. q-fresh-5 wrong_order is the observable age-decay case.\n4. **Fail-loud path** that closed TI-b9f6da (missing storage bucket → silent semantic-only).\n\n### Explicitly deferred (child stories)\n- Seeded sandbox profile\n- Checked-in offline fixture corpus\n\nEpic asked for *a* known environment (sandbox **or** read-only prod **or** fixture). Read-only prod is done.\n",
+      "created_at": "2026-07-28T21:37:34.151296Z"
     }
   ],
   "created_at": "2026-07-25T22:45:45.158486Z",
-  "updated_at": "2026-07-26T20:52:57.196142Z",
-  "closed_at": null,
+  "updated_at": "2026-07-28T21:37:34.167Z",
+  "closed_at": "2026-07-28T21:37:34.167Z",
   "custom": {
     "project_label": "TI",
     "source": "shared"

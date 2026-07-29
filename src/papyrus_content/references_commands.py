@@ -135,12 +135,18 @@ def references_triage_plan(flags: list[str]) -> None:
     max_pending = normalize_non_negative_integer(options.get("max-pending"), "--max-pending")
     json_output = parse_boolean_option(options.get("json"), False, "--json")
     client, _ = create_authoring_client()
+    from .reference_url_text import hydrate_reference_metadata_from_model_attachments
+
+    # Reference.metadata is null by design (offloaded to ModelAttachment role=metadata).
+    # Hydrate so triage can read registration_note / ingestion provenance (TI-a9cb3a).
+    references = hydrate_reference_metadata_from_model_attachments(client, client.list_records("Reference"))
     plan = build_assisted_triage_plan(
         corpus_id=corpus_id,
-        references=client.list_records("Reference"),
+        references=references,
         attachments=client.list_records("ReferenceAttachment"),
         messages=client.list_records("Message"),
         relations=client.list_records("SemanticRelation"),
+        categories=client.list_records("Category"),
         max_pending=max_pending,
     )
     output_dir = normalize_string(options.get("output-dir"))

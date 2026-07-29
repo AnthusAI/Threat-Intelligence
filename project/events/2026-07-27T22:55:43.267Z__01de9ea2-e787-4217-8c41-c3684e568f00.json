@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "01de9ea2-e787-4217-8c41-c3684e568f00",
+  "issue_id": "TI-06361ae6-fd83-437c-a035-e35cfc1f6ac6",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-27T22:55:43.267Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "Age decay (`bb12d3`) is closed as delivered. It is installed but **unfed**: most accepted references carry no publication date, so the signal is a near-constant and changes nothing.\n\n## Measured 2026-07-27 (read-only, on `fix/recency-prefer-publication-date`)\n\n| Corpus | Accepted | with `sourcePublishedAt` or `sourceUpdatedAt` |\n|---|---:|---:|\n| ai-ml-research | 1376 | **316 (23.0%)** |\n| threat-intelligence | 13 | **1 (7.7%)** |\n\nCorroborating evidence: `retrieval_post_hybrid_a61c12` and `retrieval_post_recency_bb12d3` are identical to four decimals — `mrr_sum` included. Landing age decay moved literally nothing.\n\nBefore `TI-f1cc13`, recency read `max()` across six date keys including `retrievedAt`/`importedAt`, so ~all documents scored ~1.0 (maximally fresh). After the fix, the 77% / 92% without publication dates score a neutral 0.5. **The fix is correct** — 0.5 is honest where 1.0 was a lie — but honest-and-inert is still inert. Recency consumes 7% of the ranking weight budget and conveys nothing for most of the corpus.\n\n## Related, and closed too early\n\nBug `71ce66` — \"Accession leaves `sourcePublishedAt`/`retrievedAt` null so age-decay `sourcePublishedAtDay` cannot land\" — is **closed**. The coverage numbers above say the problem is still here. Either that fix only covered newly accessioned references and never backfilled the existing 1060, or it is not holding. Establish which before writing new code; do not assume.\n\n## Work\n\n1. **Extract publication dates at ingestion.** PDFs: GROBID/Biblicus already parse metadata — check whether a date is being extracted and dropped on the floor rather than absent. HTML: `<meta>` (`article:published_time`, `citation_publication_date`, `dcterms.date`), JSON-LD `datePublished`, and `<time datetime>`. Most threat-intel vendor posts and advisories carry at least one.\n2. **Backfill existing accepted references** from already-archived source bytes and `extracted_text`. No re-fetch — per the initiative, everything needed is already stored.\n3. **Re-run the golden set** and report whether recency now moves anything. If coverage rises substantially and rankings still do not change, that is a real finding: say so, and the 7% weight should be reconsidered rather than defended.\n\n## Constraints\n\n- **Never** let `retrievedAt` or `importedAt` back into the recency path. That was `TI-f1cc13`; a backfill that fills `sourcePublishedAt` *from* an ingestion timestamp reintroduces the same bug wearing a different field name. Absent is better than fabricated.\n- Where no date can be found, leave it null. `recencyKnown=false` exists precisely for this.\n- Report coverage before and after as counts, not just percentages.",
+    "issue_type": "epic",
+    "labels": [
+      "retrieval",
+      "ingestion"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 1,
+    "status": "open",
+    "title": "Publication dates missing for 77% of accepted references; age-decay signal is inert"
+  }
+}

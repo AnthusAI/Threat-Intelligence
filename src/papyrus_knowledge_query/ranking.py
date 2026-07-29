@@ -120,15 +120,21 @@ def recency_signal_from_record(
     half_life: float = DEFAULT_RECENCY_HALF_LIFE_DAYS,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Compute recency from epoch-day metadata or ISO reference date fields."""
+    """Compute recency from source publication/update dates only.
+
+    Prefer ``sourceUpdatedAt`` / ``sourcePublishedAt`` (and their epoch-day
+    forms). Operational timestamps (``retrievedAt``, ``importedAt``, and their
+    day fields) are provenance — they must not drive decay, or every freshly
+    ingested document scores maximally fresh regardless of source age.
+    """
     metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
     day_candidates: list[int] = []
     for container in (record, metadata):
-        for key in ("sourceUpdatedAtDay", "sourcePublishedAtDay", "retrievedAtDay"):
+        for key in ("sourceUpdatedAtDay", "sourcePublishedAtDay"):
             day = epoch_day_from_value(container.get(key))
             if day is not None:
                 day_candidates.append(day)
-        for key in ("sourceUpdatedAt", "sourcePublishedAt", "retrievedAt", "importedAt"):
+        for key in ("sourceUpdatedAt", "sourcePublishedAt"):
             day = epoch_day_from_value(container.get(key))
             if day is not None:
                 day_candidates.append(day)
@@ -414,12 +420,13 @@ def score_record(
     ranking_config: dict[str, Any],
     semantic_query: str = "",
     relevance_score: float | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     weights = ranking_config.get("weights") or DEFAULT_WEIGHTS
     quality = quality_signal_from_object(record, float(ranking_config.get("missingQuality", 0.5)))
     relevance = relevance_score if relevance_score is not None else relevance_score_from_record(record, semantic_query)
     half_life = float(ranking_config.get("recencyHalfLifeDays", DEFAULT_RECENCY_HALF_LIFE_DAYS))
-    recency = recency_signal_from_record(record, half_life=half_life)
+    recency = recency_signal_from_record(record, half_life=half_life, now=now)
     final_score = (
         float(weights.get("relevance", DEFAULT_WEIGHTS["relevance"])) * clamp01(relevance)
         + float(weights.get("quality", DEFAULT_WEIGHTS["quality"])) * clamp01(quality["qualityScore"])

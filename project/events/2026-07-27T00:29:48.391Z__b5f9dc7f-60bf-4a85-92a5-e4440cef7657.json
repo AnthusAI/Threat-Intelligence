@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "b5f9dc7f-60bf-4a85-92a5-e4440cef7657",
+  "issue_id": "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d",
+  "event_type": "state_transition",
+  "occurred_at": "2026-07-27T00:29:48.391Z",
+  "actor_id": "ryan",
+  "payload": {
+    "from_status": "open",
+    "to_status": "in_progress"
+  }
+}

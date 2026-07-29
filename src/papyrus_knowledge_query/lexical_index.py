@@ -24,6 +24,14 @@ DEFAULT_LEXICAL_INDEX_KEY = "corpora/knowledge-index/lexical/v1/index.json.gz"
 DEFAULT_LEXICAL_MANIFEST_KEY = "corpora/knowledge-index/lexical/v1/manifest.json"
 DEFAULT_K1 = 1.2
 DEFAULT_B = 0.75
+# Refuse to promote a candidate whose eligible/reference coverage collapses versus
+# the artifact it would replace (scoped --reference-id syncs used to do this silently).
+LEXICAL_SHRINK_GUARD_MIN_EXISTING = 10
+LEXICAL_SHRINK_GUARD_RATIO = 0.5
+
+
+class LexicalIndexShrinkError(ValueError):
+    """Raised when promoting a lexical artifact would destroy most of an existing index."""
 # Identifier extractors — patterns aligned with papyrus_content.reference_url_text
 # normalizers (_normalize_doi / _normalize_arxiv_id / _normalize_isbn / _normalize_pmid).
 DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE)
@@ -259,6 +267,183 @@ def lexical_manifest_from_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def assert_lexical_promote_safe(
+    existing: dict[str, Any] | None,
+    candidate: dict[str, Any],
+    *,
+    allow_shrink: bool = False,
+) -> None:
+    """Refuse a promote that would sharply shrink corpus coverage.
+
+    Compares ``eligibleCount`` (falling back to ``referenceCount``) on the
+    existing artifact vs the candidate. A scoped rebuild that drops a large
+    index to a handful of docs fails here instead of silently publishing.
+    """
+    if allow_shrink or not existing:
+        return
+    old = lexical_manifest_from_artifact(existing)
+    new = lexical_manifest_from_artifact(candidate)
+    old_eligible = int(old.get("eligibleCount") or old.get("referenceCount") or 0)
+    new_eligible = int(new.get("eligibleCount") or new.get("referenceCount") or 0)
+    old_refs = int(old.get("referenceCount") or 0)
+    new_refs = int(new.get("referenceCount") or 0)
+    old_chunks = int(old.get("chunkCount") or 0)
+    new_chunks = int(new.get("chunkCount") or 0)
+
+    def _too_small(old_value: int, new_value: int) -> bool:
+        return old_value >= LEXICAL_SHRINK_GUARD_MIN_EXISTING and new_value < int(
+            old_value * LEXICAL_SHRINK_GUARD_RATIO
+        )
+
+    if _too_small(old_eligible, new_eligible) or _too_small(old_refs, new_refs) or _too_small(old_chunks, new_chunks):
+        raise LexicalIndexShrinkError(
+            "Refusing to promote lexical artifact that would shrink coverage sharply: "
+            f"eligible {old_eligible}->{new_eligible}, references {old_refs}->{new_refs}, "
+            f"chunks {old_chunks}->{new_chunks}. "
+            "Scoped --reference-id syncs must merge into the existing index; "
+            "pass allow_shrink/force only for intentional full rebuilds."
+        )
+
+
+def merge_lexical_index(
+    existing: dict[str, Any] | None,
+    documents: Iterable[dict[str, Any]],
+    *,
+    replace_lineage_ids: Iterable[str] | None = None,
+    k1: float = DEFAULT_K1,
+    b: float = DEFAULT_B,
+    source_commit: str | None = None,
+    eligible_count: int | None = None,
+    skipped: dict[str, int] | None = None,
+    corpus_id: str | None = None,
+) -> dict[str, Any]:
+    """Build from ``documents``, replacing matching lineages inside ``existing``.
+
+    Stored artifacts omit passage text, so survivors are kept by remapping
+    postings rather than re-tokenizing. Incoming documents must include text.
+    When ``existing`` is None this is equivalent to ``build_lexical_index``.
+    """
+    incoming = list(documents)
+    if existing is None:
+        return build_lexical_index(
+            incoming,
+            k1=k1,
+            b=b,
+            source_commit=source_commit,
+            eligible_count=eligible_count,
+            skipped=skipped,
+            corpus_id=corpus_id,
+        )
+
+    replace = {
+        str(value).strip()
+        for value in (replace_lineage_ids or ())
+        if str(value).strip()
+    }
+    for raw in incoming:
+        lineage = str(raw.get("referenceLineageId") or raw.get("lineageId") or "").strip()
+        if lineage:
+            replace.add(lineage)
+    incoming_keys = {str(raw.get("key") or "").strip() for raw in incoming if raw.get("key")}
+
+    old_docs = [doc for doc in (existing.get("docs") or []) if isinstance(doc, dict)]
+    keep_old_indices = [
+        index
+        for index, doc in enumerate(old_docs)
+        if str(doc.get("referenceLineageId") or "").strip() not in replace
+        and str(doc.get("key") or "").strip() not in incoming_keys
+    ]
+    kept_docs = [dict(old_docs[index]) for index in keep_old_indices]
+    old_to_new = {old_index: new_index for new_index, old_index in enumerate(keep_old_indices)}
+
+    merged_postings: dict[str, list[list[int]]] = {}
+    for term, postings in (existing.get("postings") or {}).items():
+        remapped: list[list[int]] = []
+        for entry in postings or []:
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                continue
+            old_idx = int(entry[0])
+            if old_idx not in old_to_new:
+                continue
+            remapped.append([old_to_new[old_idx], int(entry[1])])
+        if remapped:
+            merged_postings[str(term)] = remapped
+
+    incoming_artifact = build_lexical_index(
+        incoming,
+        k1=k1,
+        b=b,
+        source_commit=source_commit,
+        eligible_count=len({str(doc.get("referenceLineageId") or "") for doc in incoming if doc.get("referenceLineageId")}),
+        skipped=None,
+        corpus_id=corpus_id,
+    )
+    offset = len(kept_docs)
+    for doc in incoming_artifact.get("docs") or []:
+        kept_docs.append(dict(doc))
+    for term, postings in (incoming_artifact.get("postings") or {}).items():
+        bucket = merged_postings.setdefault(str(term), [])
+        for entry in postings or []:
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                continue
+            bucket.append([int(entry[0]) + offset, int(entry[1])])
+
+    df = {term: len(postings) for term, postings in merged_postings.items()}
+    total_dl = sum(int(doc.get("dl") or 0) for doc in kept_docs)
+    avgdl = (total_dl / len(kept_docs)) if kept_docs else 0.0
+    existing_manifest = lexical_manifest_from_artifact(existing)
+    resolved_skipped = {
+        str(reason): int(count)
+        for reason, count in (
+            skipped
+            if skipped is not None
+            else (existing_manifest.get("skipped") if isinstance(existing_manifest.get("skipped"), dict) else {})
+        ).items()
+        if int(count or 0) > 0
+    }
+    reference_ids = {
+        str(doc.get("referenceLineageId") or "")
+        for doc in kept_docs
+        if doc.get("referenceLineageId")
+    }
+    reference_ids.discard("")
+    resolved_eligible = (
+        int(eligible_count)
+        if eligible_count is not None
+        else int(existing_manifest.get("eligibleCount") or (len(reference_ids) + sum(resolved_skipped.values())))
+    )
+    built_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    commit = (source_commit if source_commit is not None else _git_source_commit()).strip()
+    resolved_corpus = (corpus_id or existing_manifest.get("corpusId") or "").strip() or None
+    manifest = {
+        "version": LEXICAL_INDEX_VERSION,
+        "referenceCount": len(reference_ids),
+        "eligibleCount": resolved_eligible,
+        "skippedTotal": sum(resolved_skipped.values()),
+        "skipped": resolved_skipped,
+        "chunkCount": len(kept_docs),
+        "builtAt": built_at,
+        "sourceCommit": commit,
+        "corpusId": resolved_corpus,
+    }
+    artifact = {
+        "version": LEXICAL_INDEX_VERSION,
+        "builtAt": built_at,
+        "sourceCommit": commit,
+        "manifest": manifest,
+        "k1": float(incoming_artifact.get("k1") or existing.get("k1") or k1),
+        "b": float(incoming_artifact.get("b") or existing.get("b") or b),
+        "avgdl": float(avgdl),
+        "docs": kept_docs,
+        "df": df,
+        "postings": merged_postings,
+    }
+    inflated = len(json.dumps(artifact, separators=(",", ":")))
+    artifact["inflatedBytes"] = inflated
+    manifest["inflatedBytes"] = inflated
+    return artifact
+
+
 def build_lexical_index(
     documents: Iterable[dict[str, Any]],
     *,
@@ -375,10 +560,17 @@ def loads_lexical_index(raw: bytes) -> dict[str, Any]:
     return artifact
 
 
-def write_lexical_index(path: str | Path, artifact: dict[str, Any]) -> int:
+def write_lexical_index(
+    path: str | Path,
+    artifact: dict[str, Any],
+    *,
+    allow_shrink: bool = False,
+) -> int:
     """Atomically write the gzipped index and a sibling manifest.json."""
-    data = dumps_lexical_index(artifact)
     destination = Path(path)
+    if destination.exists():
+        assert_lexical_promote_safe(read_lexical_index(destination), artifact, allow_shrink=allow_shrink)
+    data = dumps_lexical_index(artifact)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -569,15 +761,23 @@ def write_lexical_artifact_to_s3(
     bucket_name: str,
     s3_key: str | None = None,
     region_name: str | None = None,
+    allow_shrink: bool = False,
 ) -> dict[str, Any]:
     """Write index+manifest via a temp key, then promote — never leave a partial canonical object."""
     key = (s3_key or lexical_index_s3_key()).strip()
     manifest_key = lexical_manifest_s3_key(key)
-    data = dumps_lexical_index(artifact)
-    manifest_data = dumps_lexical_manifest(artifact)
     import boto3  # type: ignore
 
     client = boto3.client("s3", region_name=region_name or os.environ.get("AWS_REGION") or "us-east-1")
+    existing: dict[str, Any] | None = None
+    try:
+        existing = loads_lexical_index(client.get_object(Bucket=bucket_name, Key=key)["Body"].read())
+    except Exception as exc:  # noqa: BLE001 — missing object surfaces as botocore ClientError
+        if "NoSuchKey" not in type(exc).__name__ and "NoSuchKey" not in str(exc) and "404" not in str(exc):
+            raise
+    assert_lexical_promote_safe(existing, artifact, allow_shrink=allow_shrink)
+    data = dumps_lexical_index(artifact)
+    manifest_data = dumps_lexical_manifest(artifact)
     staging_key = f"{key}.building.{uuid.uuid4().hex}"
     try:
         client.put_object(Bucket=bucket_name, Key=staging_key, Body=data, ContentType="application/gzip")
