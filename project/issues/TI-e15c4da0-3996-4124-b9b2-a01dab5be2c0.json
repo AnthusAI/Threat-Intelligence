@@ -3,7 +3,7 @@
   "title": "Land fail-loud retrieval-eval guard on develop",
   "description": "## Gate for TI-06361a\n\nBefore the ingestion agent applies **TI-06361a** (publication-date extraction + backfill) and re-measures the golden set, the ranking-lane fail-loud eval harness must be on `develop`.\n\nWithout it, a missing `PAPYRUS_STORAGE_BUCKET_NAME` (or missing lexical provider) silently scores semantic-only and can report false MRR / identifier collapses — the TI-b9f6da failure mode. Re-measure after a date backfill must not be able to lie that way.\n\n## What must land\n\nBranch `epic/repeatable-retrieval-eval` in the ranking worktree (tip includes `fec178d` and prefer-pubdate `bfc2f33`):\n\n- `papyrus-main-ai-ml-readonly` env profile + lexical preflight floors\n- `PAPYRUS_REQUIRE_LEXICAL` (engine + `build_environment_services`)\n- Harness abort on lexical-unavailable warnings\n- Provenance fields: lexical docs / unique refs / accepted count\n- Freshness `prefer_order` goldens (so age-decay can be observed)\n\n## Done when\n\n- Merged to `develop` (and available to the ingestion agent's checkout)\n- `poetry run python3 procedures/newsroom/retrieval_eval.py --env papyrus-main-ai-ml-readonly` refuses to score if lexical cannot load\n\nThis story blocks **TI-06361a**. Ingestion agent: do not start TI-06361a apply until this is closed.",
   "type": "story",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 0,
   "assignee": "ryan",
   "creator": null,
@@ -31,10 +31,16 @@
       "author": "ryan",
       "text": "## PR\n\nhttps://github.com/AnthusAI/Threat-Intelligence/pull/7 → `develop`\n\nOnce merged, close this story; ingestion agent may then apply **TI-06361a**.\n",
       "created_at": "2026-07-29T00:12:12.923614Z"
+    },
+    {
+      "id": "4979c476-bce1-4484-8277-f4a135d8286d",
+      "author": "ryan",
+      "text": "## Landed\n\nMerged https://github.com/AnthusAI/Threat-Intelligence/pull/7 into `develop`.\n\nIngestion agent: **TI-06361a** is unblocked. Pull `develop`, then apply publication-date extraction/backfill and re-measure with `PAPYRUS_RETRIEVAL_EVAL_ENV=papyrus-main-ai-ml-readonly` (harness will refuse to silently score without lexical).\n",
+      "created_at": "2026-07-29T00:12:23.561316Z"
     }
   ],
   "created_at": "2026-07-29T00:10:46.411741Z",
-  "updated_at": "2026-07-29T00:12:12.923614Z",
-  "closed_at": null,
+  "updated_at": "2026-07-29T00:12:23.570406Z",
+  "closed_at": "2026-07-29T00:12:23.570406Z",
   "custom": {}
 }

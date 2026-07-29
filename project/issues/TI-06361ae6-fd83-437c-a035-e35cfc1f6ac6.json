@@ -12,12 +12,7 @@
     "retrieval",
     "ingestion"
   ],
-  "dependencies": [
-    {
-      "target": "TI-e15c4d",
-      "type": "blocked-by"
-    }
-  ],
+  "dependencies": [],
   "comments": [
     {
       "id": "d3ca144e-0e69-4536-810b-b3e6d2e40cec",
@@ -42,10 +37,16 @@
       "author": "ryan",
       "text": "## Guard landing in flight\n\nFail-loud eval guard is in PR https://github.com/AnthusAI/Threat-Intelligence/pull/7 (**TI-e15c4d**). Do not apply this epic until that PR merges and TI-e15c4d is closed.\n",
       "created_at": "2026-07-29T00:12:12.935898Z"
+    },
+    {
+      "id": "a5226e50-4d1e-4800-9e6e-81e2934263f4",
+      "author": "ryan",
+      "text": "## Unblocked — ready for ingestion agent\n\nGate **TI-e15c4d** closed; fail-loud eval guard is on `develop` via PR #7.\n\n**Ingestion agent: apply this epic now.**\n\n1. Pull latest `develop`\n2. Extract/backfill publication dates (never from retrievedAt/importedAt)\n3. Re-measure: `PAPYRUS_RETRIEVAL_EVAL_ENV=papyrus-main-ai-ml-readonly`\n4. Report coverage counts before/after and freshness `prefer_order` movement (q-fresh-5 baseline was wrong_order)\n",
+      "created_at": "2026-07-29T00:12:23.591568Z"
     }
   ],
   "created_at": "2026-07-27T22:55:43.267756Z",
-  "updated_at": "2026-07-29T00:12:12.935898Z",
+  "updated_at": "2026-07-29T00:12:23.591568Z",
   "closed_at": null,
   "custom": {}
 }
