@@ -19,10 +19,22 @@
       "author": "ryan",
       "text": "## Claiming — ranking lane\n\nCode is on `epic/repeatable-retrieval-eval` (`fec178d`) in `/Users/ryan/Projects/Threat-Intelligence-ranking`. Not yet on `develop`. Landing this unblocks ingestion on TI-06361a.\n",
       "created_at": "2026-07-29T00:10:54.099916Z"
+    },
+    {
+      "id": "7fc022cf-0631-452e-96b6-3e45ff39df20",
+      "author": "ryan",
+      "text": "## PR opened\n\nhttps://github.com/AnthusAI/Threat-Intelligence/pull/new/epic/repeatable-retrieval-eval\n\nBranch `epic/repeatable-retrieval-eval` pushed. Opening/landing the develop PR unblocks TI-06361a for the ingestion agent.\n\nIf `gh pr create` succeeded, use that URL; otherwise open from the GitHub link above (`base=develop`).\n",
+      "created_at": "2026-07-29T00:11:45.650162Z"
+    },
+    {
+      "id": "aded248f-c130-4e45-bf6e-b13bb5a3fa46",
+      "author": "ryan",
+      "text": "## PR\n\nhttps://github.com/AnthusAI/Threat-Intelligence/pull/7 → `develop`\n\nOnce merged, close this story; ingestion agent may then apply **TI-06361a**.\n",
+      "created_at": "2026-07-29T00:12:12.923614Z"
     }
   ],
   "created_at": "2026-07-29T00:10:46.411741Z",
-  "updated_at": "2026-07-29T00:10:54.099916Z",
+  "updated_at": "2026-07-29T00:12:12.923614Z",
   "closed_at": null,
   "custom": {}
 }
