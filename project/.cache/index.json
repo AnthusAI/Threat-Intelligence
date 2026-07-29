@@ -1,61 +1,54 @@
 {
-  "built_at": "2026-07-27T23:07:58Z",
+  "built_at": "2026-07-27T23:03:27Z",
   "file_mtimes": {
-    "TI-06361ae6-fd83-437c-a035-e35cfc1f6ac6.json": 1785193678.592632,
-    "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4.json": 1785176689.022661,
-    "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d.json": 1785176689.022975,
-    "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e.json": 1785098779.711991,
-    "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e.json": 1785193678.559658,
-    "TI-70c76bb6-29d1-4f83-abce-a2cc1b4690d0.json": 1785193426.495577,
-    "TI-71ce66be-6c57-46e0-9344-357599a8006a.json": 1785176689.023564,
-    "TI-95ddf12f-ab9b-4857-a2dd-2ecdb5e6d8a6.json": 1785098779.71267,
-    "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48.json": 1785176689.023948,
-    "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9.json": 1785176689.024365,
-    "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393.json": 1785176689.024672,
-    "TI-b55c369e-3bb5-4470-9379-46da7faffa67.json": 1785176689.025028,
-    "TI-b9f6dac0-db9d-4f8c-b489-52d4abb13862.json": 1785193678.570496,
-    "TI-c21d2816-dcb5-4d63-981a-7f191c87fe97.json": 1785193426.496257,
-    "TI-c46828bd-f792-452f-9c49-9f22d06ea730.json": 1785111975.953388,
-    "TI-db8f79f0-0a20-4ade-89bd-ffc5d8d4ddbc.json": 1785176689.025826,
-    "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1.json": 1785176689.02606,
-    "TI-f1cc1347-1255-484b-b483-3a347016e2a3.json": 1785193678.581576,
-    "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a.json": 1785098779.713306,
-    "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d.json": 1785193426.497117,
-    "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d.json": 1785098779.714215,
-    "kanbus-31b5c612-7650-4e9f-9521-0f2bfc390294.json": 1785080524.80211,
-    "kanbus-4b0aa611-6ded-4427-a9e1-1241f55613ac.json": 1785111975.954058,
-    "kanbus-4d5390aa-7481-4e9a-a144-c0ee9cc7988f.json": 1785098779.714721,
-    "kanbus-51975c24-841b-4456-bb70-5dfe2a960548.json": 1785080524.802788,
-    "kanbus-5c7cde82-0e6d-4616-8e9c-7e69020e7a6c.json": 1785098779.714979,
-    "kanbus-5cbc538f-bac6-49c3-b0a5-7be6ded1a77f.json": 1785080524.803353,
-    "kanbus-6ea1d5ac-5483-44c0-9408-9f6cc9ba5311.json": 1785080524.803695,
-    "kanbus-7053038d-d569-4c20-9eb5-2ada186ae384.json": 1785080524.803847,
-    "kanbus-7311e1cf-789e-4dc1-9402-b301dd5d5b00.json": 1785080524.804075,
-    "kanbus-88ab2a7c-7b95-4a80-bf4a-d57731b65243.json": 1785098779.715706,
-    "kanbus-8e325221-e1e7-46cc-97ab-a30acd728db5.json": 1785098779.716299,
-    "kanbus-99235354-91be-46b9-933d-481618344229.json": 1785080524.804856,
-    "kanbus-a61c1227-e181-48fa-a38c-d379622950a7.json": 1785098779.716721,
-    "kanbus-bb12d39b-89a3-4c76-ad1f-a39206627911.json": 1785109584.394023,
-    "kanbus-ca0de004-7432-4563-958d-ed111970d891.json": 1785098779.717541,
-    "kanbus-d72d6773-2c48-49f4-9af1-5f63cffc0b29.json": 1785080524.805864,
-    "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac.json": 1785098779.717723,
-    "kanbus-ea1686cc-ef82-4864-97ec-31cfc87da971.json": 1785080524.806366,
-    "kanbus-ec55555e-f1ef-456f-b2b6-8c5e3519e431.json": 1785176689.026517,
-    "kanbus-ef313421-ceec-4372-9855-5080dc15b733.json": 1785080524.806961,
-    "kanbus-ef3b35aa-00cc-4876-ac2c-df23816fadbe.json": 1785080524.807166
+    "TI-06361ae6-fd83-437c-a035-e35cfc1f6ac6.json": 1785193044.368677,
+    "TI-1ad2f44b-e5fe-4ffb-8b04-4bd4da2a3dd4.json": 1785111688.501623,
+    "TI-4db70dd3-787e-49f4-9d39-f3ea0b3bcd9d.json": 1785118694.395033,
+    "TI-5eaa8956-a468-4adb-8c94-0f8f982ca73e.json": 1785095078.117206,
+    "TI-5ed2f22c-35dc-4578-93a5-102008cd2c0e.json": 1785192955.574814,
+    "TI-70c76bb6-29d1-4f83-abce-a2cc1b4690d0.json": 1785193044.354974,
+    "TI-71ce66be-6c57-46e0-9344-357599a8006a.json": 1785111688.389802,
+    "TI-95ddf12f-ab9b-4857-a2dd-2ecdb5e6d8a6.json": 1785086274.129901,
+    "TI-9b697146-81d4-4c47-8b92-8ce46beb2b48.json": 1785111688.37464,
+    "TI-a9cb3a69-e6bb-4244-b2c5-e14f2f8b79a9.json": 1785111688.487995,
+    "TI-b23f9e2e-cf1f-47c3-8051-2677d7020393.json": 1785111688.418031,
+    "TI-b55c369e-3bb5-4470-9379-46da7faffa67.json": 1785111688.474523,
+    "TI-b9f6dac0-db9d-4f8c-b489-52d4abb13862.json": 1785192943.25543,
+    "TI-c21d2816-dcb5-4d63-981a-7f191c87fe97.json": 1785193033.869084,
+    "TI-c46828bd-f792-452f-9c49-9f22d06ea730.json": 1785111645.131827,
+    "TI-db8f79f0-0a20-4ade-89bd-ffc5d8d4ddbc.json": 1785111688.404406,
+    "TI-e5d8df2d-ca38-4c69-9454-c99c6d7517c1.json": 1785111688.432006,
+    "TI-f1cc1347-1255-484b-b483-3a347016e2a3.json": 1785193033.858077,
+    "kanbus-02dced12-e2e3-4863-9978-5064b649dc3a.json": 1785080351.573473,
+    "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d.json": 1785193012.89099,
+    "kanbus-1f97c7b3-edfa-49e6-9b73-ca0c3fd9358d.json": 1785080524.607249,
+    "kanbus-31b5c612-7650-4e9f-9521-0f2bfc390294.json": 1784992421.378339,
+    "kanbus-4b0aa611-6ded-4427-a9e1-1241f55613ac.json": 1785111645.133204,
+    "kanbus-4d5390aa-7481-4e9a-a144-c0ee9cc7988f.json": 1785080351.574162,
+    "kanbus-51975c24-841b-4456-bb70-5dfe2a960548.json": 1784992421.379813,
+    "kanbus-5c7cde82-0e6d-4616-8e9c-7e69020e7a6c.json": 1785094074.965727,
+    "kanbus-5cbc538f-bac6-49c3-b0a5-7be6ded1a77f.json": 1784989594.924928,
+    "kanbus-6ea1d5ac-5483-44c0-9408-9f6cc9ba5311.json": 1784995366.330171,
+    "kanbus-7053038d-d569-4c20-9eb5-2ada186ae384.json": 1784989594.923058,
+    "kanbus-7311e1cf-789e-4dc1-9402-b301dd5d5b00.json": 1784992421.380013,
+    "kanbus-88ab2a7c-7b95-4a80-bf4a-d57731b65243.json": 1784998883.098388,
+    "kanbus-8e325221-e1e7-46cc-97ab-a30acd728db5.json": 1785026291.196759,
+    "kanbus-99235354-91be-46b9-933d-481618344229.json": 1784995479.705871,
+    "kanbus-a61c1227-e181-48fa-a38c-d379622950a7.json": 1785095045.071051,
+    "kanbus-bb12d39b-89a3-4c76-ad1f-a39206627911.json": 1785099236.059992,
+    "kanbus-ca0de004-7432-4563-958d-ed111970d891.json": 1785082096.885397,
+    "kanbus-d72d6773-2c48-49f4-9af1-5f63cffc0b29.json": 1784996244.994504,
+    "kanbus-e1aad3b2-802d-41b6-bc7f-039da6a2baac.json": 1785094075.004522,
+    "kanbus-ea1686cc-ef82-4864-97ec-31cfc87da971.json": 1784998334.997491,
+    "kanbus-ec55555e-f1ef-456f-b2b6-8c5e3519e431.json": 1785118694.395584,
+    "kanbus-ef313421-ceec-4372-9855-5080dc15b733.json": 1784991272.477976,
+    "kanbus-ef3b35aa-00cc-4876-ac2c-df23816fadbe.json": 1784989594.923294
   },
   "issues": [
     {
       "assignee": null,
       "closed_at": null,
-      "comments": [
-        {
-          "author": "ryan",
-          "created_at": "2026-07-27T23:07:58.592519Z",
-          "id": "d3ca144e-0e69-4536-810b-b3e6d2e40cec",
-          "text": "## Cross-link from ranking work\n\nMeasured while verifying TI-f1cc13 (read-only GraphQL):\n\n| Corpus | Accepted | either pub/updated | % |\n|---|---:|---:|---:|\n| `knowledge-corpus-ai-ml-research` | 1376 | 316 | **23.0%** |\n| `knowledge-corpus-threat-intelligence` | 13 | 1 | **7.7%** |\n\nAfter prefer-publication-date, most refs get neutral recency (0.5) instead of false-fresh from ingestion time. Signal is honest but still mostly inert until ingestion extracts publication dates (and vectors carry them). Freshness goldens are being redesigned to `prefer_order` pairs under **TI-5ed2f2** so age-decay can be observed when coverage improves.\n"
-        }
-      ],
+      "comments": [],
       "created_at": "2026-07-27T22:55:43.267756Z",
       "creator": null,
       "custom": {},
@@ -76,7 +69,7 @@
       "status": "open",
       "title": "Publication dates missing for 77% of accepted references; age-decay signal is inert",
       "type": "epic",
-      "updated_at": "2026-07-27T23:07:58.592519Z"
+      "updated_at": "2026-07-27T22:55:43.267756Z"
     },
     {
       "assignee": null,
@@ -168,7 +161,7 @@
       "updated_at": "2026-07-26T19:44:38.117012Z"
     },
     {
-      "assignee": "ryan",
+      "assignee": null,
       "closed_at": null,
       "comments": [
         {
@@ -182,12 +175,6 @@
           "created_at": "2026-07-26T20:52:57.196142Z",
           "id": "5841e272-04b0-419c-a2d1-ded4f25ef050",
           "text": "Golden-set defect found during the age-decay epic (kanbus-bb12d3): the `freshness` category does not test what its name implies.\n\nFour of its five queries return the expected reference at rank 1, so there is no ordering for a recency signal to influence. The fifth (`q-fresh-4`) is `rank=-1` — not retrieved at all — so it is a recall failure a tie-breaker cannot reach.\n\nA category meant to test stale-vs-fresh preference needs cases where **both** a stale and a fresh reference are retrievable and relevant, and only their relative order is in question. As built, the category cannot validate any ranking-order change.\n\nThis is the second acceptance criterion in this initiative set against an instrument that could not observe the change (the first: passage scoring measured against a golden set that scores reference rank). When this epic is picked up, the general fix is worth stating: **a golden query is only useful for validating a change if the change can, in principle, alter its result.** Categories should be designed against the mechanism they test, not named after the intuition."
-        },
-        {
-          "author": "ryan",
-          "created_at": "2026-07-27T23:07:58.559564Z",
-          "id": "46c73806-bfd8-45c2-931f-fab4a68c28b0",
-          "text": "## In progress — `epic/repeatable-retrieval-eval`\n\nWorking in `/Users/ryan/Projects/Threat-Intelligence-ranking` (merged latest `develop`).\n\n### Done in this branch (not pushed)\n\n1. **Pinned eval environments**\n   - `procedures/newsroom/tests/fixtures/retrieval_eval_environments.json`\n   - Canonical profile: `papyrus-main-ai-ml-readonly` (Papyrus-main AppSync + vector ARN + media-bucket lexical artifact)\n   - Contract doc: `docs/retrieval-eval-environments.md`\n   - Skill + roadmap point at the doc\n\n2. **Harness hardening** (`procedures/newsroom/retrieval_eval.py`)\n   - Loads named env profile; fills missing env vars (never overwrites)\n   - Sets `PAPYRUS_REQUIRE_LEXICAL=1` for the canonical profile\n   - Lexical preflight: load artifact, enforce `min_docs` / `min_unique_references`, abort before scoring if thin/missing\n   - Provenance now records `environment`, storage bucket, lexical docs/refs, warning sample\n   - Aborts after scoring if any query warned `Lexical search unavailable` / provider missing\n\n3. **Engine: optional loud lexical failure**\n   - `PAPYRUS_REQUIRE_LEXICAL=1` → raise instead of semantic-only fallback\n   - Also warns when lexical provider is `None` (previously silent)\n   - Default production behavior unchanged (still warns + falls back)\n\n4. **Freshness golden redesign** (`prefer_order`)\n   - All five freshness queries are now stale/fresh **pairs**; score is ok / wrong_order / incomplete\n   - Unit tests in `procedures/newsroom/tests/test_retrieval_eval.py` (12 passed locally with related hybrid tests)\n\n### Still open on this epic\n\n- Seeded-sandbox profile (documented as not built — do not invent ad-hoc prod copies)\n- Checked-in fixture corpus for offline E2E (scoring unit tests only for now)\n- Live re-score with the new freshness metric + require_lexical against Papyrus-main (blocked in practice until **TI-b9f6da** explains why the lexical arm is not contributing at query time despite an intact S3 artifact)\n\n### Related board updates\n\n- Findings from the identifier 0/5 investigation → **TI-b9f6da**\n- Publication-date recency fix status → **TI-f1cc13**\n"
         }
       ],
       "created_at": "2026-07-25T22:45:45.158486Z",
@@ -205,10 +192,10 @@
       ],
       "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
       "priority": 1,
-      "status": "in_progress",
+      "status": "open",
       "title": "Document and implement repeatable retrieval evaluation environments",
       "type": "epic",
-      "updated_at": "2026-07-27T23:07:58.559564Z"
+      "updated_at": "2026-07-27T22:55:55.574382Z"
     },
     {
       "assignee": null,
@@ -410,14 +397,7 @@
     {
       "assignee": null,
       "closed_at": null,
-      "comments": [
-        {
-          "author": "ryan",
-          "created_at": "2026-07-27T23:07:58.570404Z",
-          "id": "e75e33c4-314e-41f7-9e06-55d7ebf78719",
-          "text": "## Investigation update (2026-07-27) — do not rebuild yet\n\nChecked live artifact first (per acceptance: broken state is evidence).\n\n### Lexical artifact is intact (hypothesis 1 rejected for current object)\n\n`s3://amplify-dbsyytcm9drqa-mai-papyrusmediabucket0dab24-4hstaautjdqo/corpora/knowledge-index/lexical/v1/index.json.gz`\n(last modified 2026-07-26T19:39:26Z):\n\n| Field | Value |\n|---|---:|\n| docs/chunks | **5658** |\n| unique referenceLineageId | **1321** |\n| eligibleCount | **1376** |\n| skipped missing_extracted_text | **55** |\n\nBM25 against this file ranks all 5 golden identifier queries at **rank 1**. Eval retrieved lists for those queries match **pre-hybrid / semantic-only** order. So the arm is not reading trash — it is **not contributing at query time**.\n\n### Loader vs hybrid path\n\n- `load_lexical_artifact`: fails loudly (missing path/bucket / S3 errors propagate).\n- `_hybrid_semantic_search`: catches lexical exceptions, appends `Lexical search unavailable: …`, returns semantic-only. **That silent fallback matches the observed signature** (identifier 0/5, MRR 0.6533).\n- Additional gap: if `lexical_provider` is `None` (no bucket / no `PAPYRUS_STORAGE_BUCKET_NAME` / no amplify_outputs bucket), the lexical future is **never submitted** and previously produced **no warning at all**.\n\n### Next checks (still open)\n\nWhy the eval/process did not get lexical hits: bucket/env for `BM25LexicalProvider`, swallowed exception in warnings, or provider `None`. Do **not** rebuild the artifact until that is recorded.\n\n### Related work in flight on TI-5ed2f2\n\nEval harness will set `PAPYRUS_REQUIRE_LEXICAL=1` and preflight lexical floors so this failure mode cannot produce a “valid” golden report. Engine raises under that flag; default runtime still falls back with a warning (now also when provider is missing).\n"
-        }
-      ],
+      "comments": [],
       "created_at": "2026-07-27T22:55:43.255246Z",
       "creator": null,
       "custom": {},
@@ -433,7 +413,7 @@
       "status": "open",
       "title": "Hybrid lexical arm contributes nothing on develop: identifier retrieval regressed 5/5 to 0/5",
       "type": "bug",
-      "updated_at": "2026-07-27T23:07:58.570404Z"
+      "updated_at": "2026-07-27T22:55:43.255246Z"
     },
     {
       "assignee": null,
@@ -584,18 +564,6 @@
           "created_at": "2026-07-27T22:57:13.857952Z",
           "id": "eb798955-9023-4260-8c5e-d95fdf8eaffd",
           "text": "Done pending merge. Branch `fix/recency-prefer-publication-date`: `bfc2f33` (fix + regression test) and `5571596` (golden-set run + coverage measurement). Reviewed and correct — the neutral-0.5 / recencyKnown=false choice for unknown dates is right, and retrievedAtDay is correctly retained as provenance only.\n\nTwo findings came out of the verification run, both filed separately:\n- Identifier retrieval is 0/5 on develop, unrelated to this fix — TI-b9f6da (P0). The MRR delta in the post-pubdate report is entirely that regression, not this change.\n- Publication-date coverage is 23% / 7.7%, so the recency signal is honest but inert — TI-06361a (P1).\n\nThis branch is safe to merge. Its measured effect on the four categories the instrument can attribute to ranking is bit-identical."
-        },
-        {
-          "author": "ryan",
-          "created_at": "2026-07-27T22:51:27.212648Z",
-          "id": "001d3075-d17c-427b-ba2a-b698ffd487a9",
-          "text": "## Golden-set + publication-date coverage (pre-merge)\n\nBranch `fix/recency-prefer-publication-date` @ `bfc2f33`. Report:\n`procedures/newsroom/tests/fixtures/reports/retrieval_post_pubdate_bfc2f3.json`\ncompared to `retrieval_post_recency_bb12d3.json` (same golden set / Papyrus main / ai-ml-research).\n\n### Golden set\n\n| | post-recency (bb12d3) | prefer-pubdate (bfc2f3) | Δ |\n|---|---:|---:|---:|\n| MRR | 0.8533 | 0.6533 | −0.2000 |\n| Hit@5 | 0.96 | 0.76 | −0.20 |\n| paraphrase / freshness / quality_tie / multi_hop MRR | — | **identical to 4 decimals** | 0 |\n| identifier MRR | 1.0 | 0.0 | −1.0 (5/5 MISS) |\n\n**Attribution:** identifier collapse is **not** from this fix. Control on parent `beab60a` under the same env also MISS all 5 identifier queries. Environmental/lexical drift since the post-recency baseline. On every category the instrument can attribute to ranking, the change is **near-neutral** (exactly flat).\n\nFreshness staying flat is consistent with low publication-date coverage (below): most candidates still get neutral `recencyScore=0.5`.\n\n### Publication-date coverage (accepted, GraphQL, read-only)\n\n| Corpus | Accepted | `sourcePublishedAt` | `sourceUpdatedAt` | either | % |\n|---|---:|---:|---:|---:|---:|\n| `knowledge-corpus-ai-ml-research` (golden-set) | 1376 | 316 | 241 | **316** | **23.0%** |\n| `knowledge-corpus-threat-intelligence` (TI prod) | 13 | 1 | 0 | **1** | **7.7%** |\n\nSo for ~77% of golden-set accepted refs (and ~92% of TI accepted), recency was a near-constant **1.0** under the old ingestion-time path and is a near-constant **0.5** after this fix — the signal still barely differentiates. The code fix is still correct. The real follow-on is **extracting publication dates at ingestion** (and syncing into vectors) so age decay has something to work on.\n\nNo records written; no backfill.\n"
-        },
-        {
-          "author": "ryan",
-          "created_at": "2026-07-27T23:07:58.581465Z",
-          "id": "7de6c78d-a93f-4ee7-abaa-a3d6c6b36db6",
-          "text": "## Status\n\nCode fix landed on branch `fix/recency-prefer-publication-date`:\n- `bfc2f33` — prefer `sourceUpdated*` / `sourcePublished*` only; operational timestamps → neutral 0.5 / `recencyKnown=false`\n- `5571596` — golden measurement note + publication-date coverage\n- Merged latest `develop` into that line; continuing related eval-env work on `epic/repeatable-retrieval-eval`\n\nReviewer note already on the issue: safe to merge; measured ranking categories bit-identical; identifier collapse is **TI-b9f6da**, coverage gap is **TI-06361a**.\n\nNot closing until the branch is on `develop`.\n"
         }
       ],
       "created_at": "2026-07-27T02:18:46.468715Z",
@@ -612,7 +580,7 @@
       "status": "open",
       "title": "Recency uses ingestion date, not publication date",
       "type": "bug",
-      "updated_at": "2026-07-27T23:07:58.581465Z"
+      "updated_at": "2026-07-27T22:57:13.857952Z"
     },
     {
       "assignee": null,
