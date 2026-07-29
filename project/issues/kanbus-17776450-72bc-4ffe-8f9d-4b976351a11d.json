@@ -25,10 +25,16 @@
       "author": "ryan",
       "text": "## Ranking lane update\n\n- **Closed:** TI-b9f6da (lexical provider missing bucket), TI-5ed2f2 (repeatable eval env + freshness prefer_order), TI-f1cc13 (prefer publication dates).\n- **Still open:** TI-06361a (publication-date coverage).\n- Branch: `epic/repeatable-retrieval-eval` in ranking worktree — commit/merge pending operator.\n",
       "created_at": "2026-07-28T21:37:34.241883Z"
+    },
+    {
+      "id": "8598f2d5-98f9-4712-94aa-e7584fe8423a",
+      "author": "ryan",
+      "text": "## Sequencing\n\n1. **TI-e15c4d** (P0) — land fail-loud retrieval-eval guard on `develop` (ranking lane).\n2. **Then** ingestion agent applies **TI-06361a** (publication-date coverage + re-measure). Currently `blocked` on TI-e15c4d.\n\nDo not let ingestion re-measure against a harness that can silently drop the lexical arm.\n",
+      "created_at": "2026-07-29T00:10:54.111582Z"
     }
   ],
   "created_at": "2026-07-19T19:00:04.777161Z",
-  "updated_at": "2026-07-28T21:37:34.241883Z",
+  "updated_at": "2026-07-29T00:10:54.111582Z",
   "closed_at": null,
   "custom": {
     "project_label": "kanbus",

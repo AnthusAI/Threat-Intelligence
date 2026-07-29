@@ -14,7 +14,7 @@
   ],
   "dependencies": [
     {
-      "target": "TI-b9f6da",
+      "target": "TI-e15c4d",
       "type": "blocked-by"
     }
   ],
@@ -30,10 +30,16 @@
       "author": "ryan",
       "text": "## Still open — not owned by ranking eval work\n\nTI-f1cc13 (date *policy*) is closed. This epic remains the ingestion/coverage work so age-decay has real publication dates (>23% today on ai-ml). Freshness prefer_order goldens can now observe order flips when coverage improves (see q-fresh-5 wrong_order baseline on TI-5ed2f2 report).\n",
       "created_at": "2026-07-28T21:37:34.226787Z"
+    },
+    {
+      "id": "c645b5aa-b4aa-42de-bb6d-e260a209cca5",
+      "author": "ryan",
+      "text": "## Handoff — ingestion agent (do not start yet)\n\n**Assignee lane:** ingestion agent applies this epic (extract publication dates, backfill from archived bytes, re-measure).\n\n**Hard gate:** blocked by **TI-e15c4d** — fail-loud retrieval-eval guard must land on `develop` first.\n\nWhy: step 3 of this epic re-runs the golden set. Without `PAPYRUS_REQUIRE_LEXICAL` + lexical preflight on the harness, a missing storage bucket silently scores semantic-only (TI-b9f6da). Post-backfill MRR would be untrustworthy.\n\nWhen TI-e15c4d closes:\n1. Pull `develop`\n2. Apply date extraction + backfill (never fabricate from retrievedAt/importedAt — TI-f1cc13)\n3. Re-measure with `PAPYRUS_RETRIEVAL_EVAL_ENV=papyrus-main-ai-ml-readonly`\n4. Report coverage counts before/after and whether freshness `prefer_order` moved (baseline: q-fresh-5 was wrong_order)\n",
+      "created_at": "2026-07-29T00:10:54.090016Z"
     }
   ],
   "created_at": "2026-07-27T22:55:43.267756Z",
-  "updated_at": "2026-07-28T21:37:34.226787Z",
+  "updated_at": "2026-07-29T00:10:54.090016Z",
   "closed_at": null,
   "custom": {}
 }

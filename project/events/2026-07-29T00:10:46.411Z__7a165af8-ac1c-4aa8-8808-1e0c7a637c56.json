@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "7a165af8-ac1c-4aa8-8808-1e0c7a637c56",
+  "issue_id": "TI-e15c4da0-3996-4124-b9b2-a01dab5be2c0",
+  "event_type": "issue_created",
+  "occurred_at": "2026-07-29T00:10:46.411Z",
+  "actor_id": "ryan",
+  "payload": {
+    "assignee": null,
+    "description": "## Gate for TI-06361a\n\nBefore the ingestion agent applies **TI-06361a** (publication-date extraction + backfill) and re-measures the golden set, the ranking-lane fail-loud eval harness must be on `develop`.\n\nWithout it, a missing `PAPYRUS_STORAGE_BUCKET_NAME` (or missing lexical provider) silently scores semantic-only and can report false MRR / identifier collapses — the TI-b9f6da failure mode. Re-measure after a date backfill must not be able to lie that way.\n\n## What must land\n\nBranch `epic/repeatable-retrieval-eval` in the ranking worktree (tip includes `fec178d` and prefer-pubdate `bfc2f33`):\n\n- `papyrus-main-ai-ml-readonly` env profile + lexical preflight floors\n- `PAPYRUS_REQUIRE_LEXICAL` (engine + `build_environment_services`)\n- Harness abort on lexical-unavailable warnings\n- Provenance fields: lexical docs / unique refs / accepted count\n- Freshness `prefer_order` goldens (so age-decay can be observed)\n\n## Done when\n\n- Merged to `develop` (and available to the ingestion agent's checkout)\n- `poetry run python3 procedures/newsroom/retrieval_eval.py --env papyrus-main-ai-ml-readonly` refuses to score if lexical cannot load\n\nThis story blocks **TI-06361a**. Ingestion agent: do not start TI-06361a apply until this is closed.",
+    "issue_type": "story",
+    "labels": [
+      "eval",
+      "retrieval"
+    ],
+    "parent": "kanbus-17776450-72bc-4ffe-8f9d-4b976351a11d",
+    "priority": 0,
+    "status": "open",
+    "title": "Land fail-loud retrieval-eval guard on develop"
+  }
+}
