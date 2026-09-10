@@ -33,6 +33,17 @@ rendering contracts.
   landed in `develop`, whether a `develop -> main` PR exists, and whether it has
   merged.
 
+## Project management with Kanbus
+
+Use Kanbus for task management.
+Why: Kanbus task management is MANDATORY here; every task must live in Kanbus.
+When: Create/update the Kanbus task before coding; close it only after the change lands.
+How: See CONTRIBUTING_AGENT.md for the Kanbus workflow, hierarchy, status rules, priorities, command examples, agent provenance (Kanbus #264), and the mistakes to avoid. Never inspect project/ or issue JSON directly (including with cat or jq); use Kanbus commands only.
+Performance: Prefer kbs (Rust) when available; kanbus (Python) is equivalent but slower.
+Warning: Editing project/ directly violates The Way. Do not read or write anything in project/; work only through Kanbus.
+
+Git commits, pushes, and pull requests follow the rules in this file (Core Rules and Repository hygiene below), not CONTRIBUTING_AGENT.md. Do not commit or push unless the user explicitly asks. Open feature pull requests into **`develop`**.
+
 ## Core Rules
 
 - Before running any AWS-, Amplify-, sandbox-, or deployment-related command,
