@@ -181,20 +181,26 @@ kbs comment <id> "Deep review done" \
 
 All work is structured.
 
-Project key prefix: {{ project_key }}.
+Project key prefix: TI.
 
-Hierarchy: {{ hierarchy_order }}.
+Hierarchy: initiative -> epic -> task -> sub-task.
 
-Non-hierarchical types: {{ non_hierarchical_types | join(", ") if non_hierarchical_types else "none" }}.
+Non-hierarchical types: bug, story, chore.
 
 Only hierarchy types may be parents.
 
 Permitted relationships are fixed and not to be altered.
 
 Allowed parent-child relationships:
-{% for rule in parent_child_rules %}
-- {{ rule }}
-{% endfor %}
+
+- epic can have parent initiative.
+
+- task can have parent epic.
+
+- sub-task can have parent task.
+
+- bug, story, chore can have parent initiative, epic, task.
+
 
 Structure is not bureaucracy. Structure is memory.
 
@@ -239,9 +245,17 @@ Chores maintain the ground on which behavior stands.
 Every story must contain a Gherkin form.
 
 Minimum structure:
-{% for line in gherkin_example %}
-{{ line }}
-{% endfor %}
+
+Feature:
+
+Scenario:
+
+Given
+
+When
+
+Then
+
 
 This is required.
 
@@ -277,27 +291,53 @@ Green is peace. Red is unfinished.
 
 Statuses and workflows are fixed. They exist to maintain order.
 
-Initial status: {{ initial_status }}.
+Initial status: open.
 Status changes must follow the workflow transitions below.
 Workflow selection: use a workflow named after the issue type when present; otherwise use the default workflow.
 
-{% for workflow in workflows %}
-{{ workflow.name }} workflow:
-{% if workflow.statuses %}
-{% for status in workflow.statuses %}
-- {{ status.name }} -> {{ status.transitions | join(", ") if status.transitions else "none" }}
-{% endfor %}
-{% else %}
-- No statuses defined.
-{% endif %}
 
-{% endfor %}
+default workflow:
+
+
+- backlog -> Start discovery (Discovery), Drop (Done)
+
+- blocked -> Unblock (In Progress), Drop (Done)
+
+- closed -> Reopen (Discovery)
+
+- in_progress -> Pause (Discovery), Block (Blocked), Complete (Done)
+
+- open -> Start work (In Progress), Drop (Done), Back to backlog (Backlog)
+
+
+
+
+epic workflow:
+
+
+- closed -> Reopen (Discovery)
+
+- in_progress -> Pause (Discovery), Complete (Done)
+
+- open -> Start (In Progress), Complete (Done)
+
+
+
+
 Priorities are:
 
-{% for priority in priorities %}
-- {{ priority.value }} -- {{ priority.name }}
-{% endfor %}
-Default is {{ default_priority_value }} ({{ default_priority_name }}).
+
+- 0 -- critical
+
+- 1 -- high
+
+- 2 -- medium
+
+- 3 -- low
+
+- 4 -- trivial
+
+Default is 2 (medium).
 
 Severity is not emotion. It is signal.
 
@@ -317,9 +357,25 @@ Cache behavior:
 
 ## Command examples
 
-{% for command in command_examples %}
-{{ command }}
-{% endfor %}
+
+kanbus create "Plan the roadmap" --type initiative
+
+kanbus create "Release v1" --type epic --parent <initiative-id>
+
+kanbus create "Implement feature" --type task --parent <epic-id>
+
+kanbus create "Fix crash on launch" --type bug --priority 0 --parent <epic-id>
+
+kanbus update <id> --status in_progress --assignee "you@example.com"
+
+kanbus update <id> --status blocked
+
+kanbus comment <id> "Progress note"
+
+kanbus list --status open
+
+kanbus close <id> --comment "Summary of the change"
+
 
 ## Console UI Control: Real-Time Collaboration
 
@@ -446,9 +502,13 @@ Check `kbs show tskl-m59` for current implementation status.
 
 Issue types map directly to release categories.
 
-{% for mapping in semantic_release_mapping %}
-- {{ mapping.type }} -> {{ mapping.category }}
-{% endfor %}
+
+- bug -> fix
+
+- story -> feat
+
+- chore -> chore
+
 
 Release notes are a record, not commentary.
 
