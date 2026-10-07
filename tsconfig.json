@@ -2,12 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "es2022"
-    ],
+    "lib": ["dom", "dom.iterable", "es2022"],
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
@@ -19,26 +14,14 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "papyrus-site": ["./papyrus.config.ts"],
+      "papyrus-site-theme": ["./publication/theme.css"],
+      "papyrus-amplify-outputs": ["./amplify_outputs.json"]
     }
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/dev/types/**/*.ts",
-    ".next/types/**/*.ts",
-    "next-env.d.ts",
-    ".next-3001/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", "papyrus-modules.d.ts", ".next/types/**/*.ts", "next-env.d.ts"],
+  "exclude": ["node_modules", "infra", "cdk.out", ".amplify"]
 }

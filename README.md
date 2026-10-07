@@ -4,13 +4,10 @@ Practical AI/ML security analysis for teams defending systems, data, and operati
 
 This is not a vulnerability feed. The pattern is trend, failure mode, defensive lesson, then checks you can actually run. Masthead: practical advice for staying secure as the threat landscape shifts.
 
-This repository is the publication. It is currently a fork of [Papyrus](https://github.com/AnthusAI/Papyrus), the Anthus newsroom CMS. Papyrus is becoming a core dependency. The application will live there. The beat, the corpus, the doctrine, and the published content stay here. This repo survives that split.
-
-Until then, the app in this tree is still the inherited Papyrus application. Commands still say `papyrus`. That is expected.
-
-Publication-specific brand, seed, theme, and docs live in [`publications/threat_intelligence/`](publications/threat_intelligence/). For the shared newsroom engine, use the [Papyrus README](https://github.com/AnthusAI/Papyrus).
+This repository is the publication. The application is the published [`@anthusai/papyrus`](https://www.npmjs.com/package/@anthusai/papyrus) package, pinned in `package.json`. The beat, the corpus, the doctrine, the brand, and the theme stay here. See [`AGENTS.md`](AGENTS.md) for the layout and the workflow.
 
 ```bash
+npm ci
 npm run dev
 ```
 
