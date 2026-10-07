@@ -10,6 +10,8 @@ export default defineSite({
       cognitoDomainPrefix: "papyrus-threat-intelligence",
       applyCognitoDomainPrefix: true,
       redirectUrls: [
+        "https://main.dzefa11i80jyq.amplifyapp.com/newsroom",
+        "https://main.dzefa11i80jyq.amplifyapp.com/",
         "http://localhost:3001/",
         "https://threat-intelligence.anth.us/",
         "https://threat-intelligence-staging.anth.us/",
