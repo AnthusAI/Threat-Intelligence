@@ -1,1 +1,0 @@
-from papyrus_knowledge_query.lambda_handler import handler

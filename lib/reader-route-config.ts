@@ -1,1 +1,0 @@
-export const READER_REVALIDATE_SECONDS = 3600;
