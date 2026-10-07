@@ -1,3 +1,0 @@
-# Intentionally empty for deploy stability in Amplify Hosting CI.
-# The knowledge-query engine falls back to regex token accounting when tiktoken
-# is unavailable.

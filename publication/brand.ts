@@ -1,0 +1,66 @@
+import type { SiteBrand } from "@anthusai/papyrus/lib/site-brand";
+import { DEFAULT_THEME_PACK_TOKENS } from "@anthusai/papyrus/lib/site-stack";
+import { BlogPageBackground } from "./blog-defense/page-background";
+import { PictogramFigure } from "./pictograms/figure";
+
+export const threatIntelligenceBrand: SiteBrand = {
+  id: "threat-intelligence",
+  appTitle: "Threat Intelligence",
+  appDescription: "ANTHUS THREAT INTELLIGENCE from Anthus AI Solutions.",
+  mastheadTitle: "THREAT INTELLIGENCE",
+  mastheadSubtitle: "from Anthus AI Solutions",
+  mastheadEyebrow: "Anthus AI Solutions",
+  mastheadTagline: "Practical advice for staying secure as the threat landscape shifts.",
+  mastheadTaglineLines: [
+    { emphasis: "Practical advice", tail: " for" },
+    { emphasis: "staying secure", tail: " as the" },
+    { emphasis: "threat landscape", tail: " shifts" },
+  ],
+  backToHomeLabel: "Back to Threat Intelligence",
+  articleTitleSuffix: "Threat Intelligence",
+  placeholderByline: "Anthus AI Solutions",
+  defaultPresentation: "blog",
+  forcedPresentation: "blog",
+  blogLayout: "rhythm",
+  videoPlayer: "framed",
+  fonts: [
+    {
+      family: "Inter",
+      cssVariable: "--font-masthead",
+      fallback: "sans-serif",
+      google: { weights: [400, 600, 700, 900] },
+    },
+    {
+      family: "IBM Plex Serif",
+      cssVariable: "--font-body",
+      fallback: 'Georgia, "Times New Roman", serif',
+      google: { weights: [400, 600], italics: true },
+    },
+  ],
+  textFont: '"IBM Plex Serif", Georgia, "Times New Roman", serif',
+  footerTitle: "ANTHUS THREAT INTELLIGENCE",
+  footerSubtitleOverride: "",
+  mastheadWordSplit: true,
+  mastheadDateFormat: "formatted",
+  mastheadSource: "brand",
+  sectionLinkStrategy: "anchor",
+  defaultVideoCredit: "Anthus Threat Intelligence video",
+  themePack: "threat-intelligence",
+  themeTokens: {
+    ...DEFAULT_THEME_PACK_TOKENS,
+    paper: "#f5f0e6",
+    moss: "#1c1917",
+    ochre: "#ea580c",
+    ink: "#44403c",
+  },
+  renderer: { kind: "pretext" },
+  hosting: { kind: "amplify-ssr" },
+  opsChrome: "app",
+  corpusKey: "threat-intelligence",
+  steeringConfigPath: "corpora/papyrus-steering.yml",
+  newsroomSectionsConfigPath: "corpora/papyrus-newsroom-sections.yml",
+  analysisProfilesPath: "corpora/papyrus-analysis-profiles.yml",
+  publicationName: "Anthus Threat Intelligence",
+  components: { PictogramFigure, BlogPageBackground },
+  video: { bundleEntry: "publication/videoml/browser-bundle.tsx" },
+};
