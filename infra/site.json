@@ -5,7 +5,7 @@
   "brand": "threat-intelligence",
   "frontend": "pretext",
   "hostedZoneId": "Z02552332GG6AM25SFP73",
-  "papyrusVersion": "1.0.0-next.22",
+  "papyrusVersion": "1.0.0-next.27",
   "cms": {
     "domainName": "anth.us",
     "domainPrefix": "threat-intelligence",
