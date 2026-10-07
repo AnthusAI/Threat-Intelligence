@@ -13,7 +13,7 @@
     "test:video-script": "node publication/tests/test-video-script.cjs"
   },
   "dependencies": {
-    "@anthusai/papyrus": "1.0.0-next.21",
+    "@anthusai/papyrus": "1.0.0-next.22",
     "@aws-amplify/backend": "^1.22.0",
     "@aws-amplify/backend-cli": "^1.8.2",
     "@aws-amplify/seed": "^1.1.2",
