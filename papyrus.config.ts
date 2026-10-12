@@ -30,10 +30,13 @@ export const resolvedAuthConfiguration = {
     : legacyRedirectUrls,
 };
 
+const revalidateSecretParameterIsConfigured = (process.env.PAPYRUS_REVALIDATE_SECRET_PARAMETER ?? "").trim().startsWith("/");
+
 export default defineSite({
   brands: [threatIntelligenceBrand],
   defaultBrand: "threat-intelligence",
   backend: {
+    revalidateBaseUrl: revalidateSecretParameterIsConfigured ? "https://threat-intelligence.anth.us" : undefined,
     brandId: "threat-intelligence",
     auth: resolvedAuthConfiguration,
     features: {
