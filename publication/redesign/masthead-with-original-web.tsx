@@ -34,8 +34,16 @@ function useMastheadTextObstacles(mastheadReference: RefObject<HTMLElement | nul
           height: textRect.height + OBSTACLE_CLEARANCE_PIXELS * 2,
         };
       });
+      const mastheadRect = mastheadElement.getBoundingClientRect();
+      const contentColumnBelowMasthead = {
+        x: 0,
+        y: mastheadRect.bottom - webLayerRect.top,
+        width: mastheadRect.right - webLayerRect.left,
+        height: webLayerRect.height,
+      };
+      const allObstacles = [...measuredObstacles, contentColumnBelowMasthead];
       setTextObstacles((previousObstacles) =>
-        JSON.stringify(previousObstacles) === JSON.stringify(measuredObstacles) ? previousObstacles : measuredObstacles,
+        JSON.stringify(previousObstacles) === JSON.stringify(allObstacles) ? previousObstacles : allObstacles,
       );
     };
     measureTextObstacles();

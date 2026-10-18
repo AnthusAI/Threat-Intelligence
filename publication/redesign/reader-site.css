@@ -336,18 +336,23 @@
 /* Masthead with the original web */
 
 .ti-masthead {
+  --masthead-web-width: min(620px, max(50vw, 300px));
   border-bottom: 1px solid var(--rule);
   display: flex;
   align-items: flex-end;
-  min-height: clamp(220px, 27vw, 420px);
-  padding: clamp(16px, 2.5vw, 28px) 0 clamp(16px, 2vw, 24px);
+  min-height: calc(var(--masthead-web-width) * 0.36 + 24px);
+  padding: clamp(20px, 2.5vw, 32px) 0 clamp(16px, 2vw, 24px);
   position: relative;
 }
 
+/* The web's right arm runs down the page margin below the masthead, so the layer is taller than the masthead and reaches into the gutter. */
 .ti-masthead__web {
-  inset: 0;
+  height: max(calc(var(--masthead-web-width) * 0.78), 340px);
   pointer-events: none;
   position: absolute;
+  right: calc(-1 * var(--gutter));
+  top: 0;
+  width: calc(var(--masthead-web-width) + var(--gutter));
   z-index: 0;
 }
 
@@ -1515,4 +1520,10 @@
   color: var(--text-3);
   font-size: 15px;
   line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .ti-masthead__wordmark {
+    width: min-content;
+  }
 }
