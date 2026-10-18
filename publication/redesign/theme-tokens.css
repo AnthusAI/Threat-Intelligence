@@ -34,8 +34,8 @@
   --radius-card: 16px;
   --radius-tile: 14px;
   --radius-band: 20px;
-  --content-max: 1600px;
-  --gutter: clamp(16px, 4vw, 56px);
+  --content-max: 3840px;
+  --gutter: clamp(16px, 4vw, 112px);
   --section-gap: clamp(64px, 8vw, 112px);
 
   --motion-loop: 4200ms;
