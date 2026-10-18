@@ -20,7 +20,10 @@ const START_DELAY_MS = 40;
 const COMPROMISE_TRANSITION_S = COMPROMISE_MS / 1000;
 const THROB_TRANSITION_S = 0.21;
 const BREACH_RING_DURATION_S = 2.4;
-const COMPROMISED_NODE_RADIUS_MULTIPLIER = 1.2;
+const COMPROMISED_NODE_RADIUS_MULTIPLIER = 1.6;
+const COMPROMISED_EDGE_WIDTH_MULTIPLIER = 2.6;
+const COMPROMISED_NODE_HALO_RADIUS_MULTIPLIER = 3;
+const COMPROMISED_NODE_HALO_OPACITY = 0.2;
 
 type PictogramColors = {
   edge: string;
@@ -291,6 +294,7 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
               const isCompromised = compromisedEdges.has(edge.id);
               const isThrobbing = throbbingStep?.kind === "edge" && throbbingStep.edgeId === edge.id;
               const baseStrokeWidth = Math.max(1.4, graphLayout.scale * 1.2);
+              const strokeWidth = isCompromised ? baseStrokeWidth * COMPROMISED_EDGE_WIDTH_MULTIPLIER : baseStrokeWidth;
               return (
                 <motion.line
                   animate={{
@@ -299,14 +303,14 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
                       : isThrobbing
                         ? [colors.edge, colors.throb, colors.edge]
                         : colors.edge,
-                    strokeWidth: baseStrokeWidth,
+                    strokeWidth,
                   }}
                   data-blog-edge-id={edge.id}
                   initial={false}
                   key={edge.id}
                   stroke={isCompromised ? colors.compromised : colors.edge}
                   strokeLinecap="round"
-                  strokeWidth={baseStrokeWidth}
+                  strokeWidth={strokeWidth}
                   transition={
                     isThrobbing
                       ? { duration: THROB_TRANSITION_S, ease: "easeInOut", repeat: 1 }
@@ -329,6 +333,21 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
               scale={graphLayout.scale}
             />
           ) : null}
+          <g className="blog-page-background__compromised-halos">
+            {graphLayout.nodes
+              .filter((node) => compromisedNodes.has(node.id))
+              .map((node) => (
+                <motion.circle
+                  animate={{ r: node.radius * COMPROMISED_NODE_HALO_RADIUS_MULTIPLIER, opacity: COMPROMISED_NODE_HALO_OPACITY }}
+                  cx={node.x}
+                  cy={node.y}
+                  fill={colors.compromised}
+                  initial={{ r: node.radius, opacity: 0 }}
+                  key={node.id}
+                  transition={{ duration: COMPROMISE_TRANSITION_S * 2.5, ease: "easeOut" }}
+                />
+              ))}
+          </g>
           <g className="blog-page-background__nodes">
             {graphLayout.nodes.map((node) => {
               const isCompromised = compromisedNodes.has(node.id);
@@ -351,6 +370,8 @@ export function BlogPageBackground({ headerObstacles = [], pageRef, rhythm }: Bl
                   initial={false}
                   key={node.id}
                   r={compromisedRadius}
+                  stroke={isCompromised ? colors.compromisedStroke : "none"}
+                  strokeWidth={isCompromised ? 1.5 : 0}
                   transition={
                     isThrobbing
                       ? { duration: THROB_TRANSITION_S, ease: "easeInOut", repeat: 1 }
