@@ -701,68 +701,6 @@
   letter-spacing: 1.5px;
 }
 
-.figure-balance__beam,
-.figure-balance__many-attempts-pan,
-.figure-balance__rare-adversary-pan,
-.figure-balance__attempts {
-  transform-box: view-box;
-}
-
-.figure-balance__beam {
-  animation: figure-balance-beam-tilt var(--motion-loop) var(--motion-travel-ease) infinite;
-  transform-origin: 360px 250px;
-}
-
-.figure-balance__many-attempts-pan {
-  animation: figure-balance-many-attempts-drop var(--motion-loop) var(--motion-travel-ease) infinite;
-}
-
-.figure-balance__rare-adversary-pan {
-  animation: figure-balance-rare-adversary-rise var(--motion-loop) var(--motion-travel-ease) infinite;
-}
-
-.figure-balance__attempts {
-  animation: figure-balance-attempts-gather var(--motion-loop) ease-out infinite;
-}
-
-.figure-offscreen :is(.figure-balance__beam, .figure-balance__many-attempts-pan, .figure-balance__rare-adversary-pan, .figure-balance__attempts) {
-  animation-play-state: paused;
-}
-
-@keyframes figure-balance-beam-tilt {
-  0%, 22% { transform: rotate(7.86deg); }
-  42%, 88% { transform: rotate(0deg); }
-  100% { transform: rotate(7.86deg); }
-}
-
-@keyframes figure-balance-many-attempts-drop {
-  0%, 22% { transform: translateY(-29px); }
-  42%, 88% { transform: translateY(0); }
-  100% { transform: translateY(-29px); }
-}
-
-@keyframes figure-balance-rare-adversary-rise {
-  0%, 22% { transform: translateY(29px); }
-  42%, 88% { transform: translateY(0); }
-  100% { transform: translateY(29px); }
-}
-
-@keyframes figure-balance-attempts-gather {
-  0%, 4% { opacity: 0.15; }
-  24%, 88% { opacity: 1; }
-  100% { opacity: 0.15; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .figure-balance__beam,
-  .figure-balance__many-attempts-pan,
-  .figure-balance__rare-adversary-pan,
-  .figure-balance__attempts {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-}
 
 /* In this edition */
 
