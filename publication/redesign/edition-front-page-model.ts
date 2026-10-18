@@ -4,6 +4,8 @@ export type FrontPageSourceArticle = {
   section: string;
   headline: string;
   deck: string;
+  excerpt?: string;
+  body?: string[];
   image?: { alt: string; caption?: string; src?: string };
   video?: { src?: string } | null;
 };
@@ -44,6 +46,7 @@ export type FrontPageArticle = {
   slug: string;
   headline: string;
   deck: string;
+  openingParagraph?: string;
   deskName: string;
   numberLabel: string;
   isDeskLead: boolean;
@@ -157,6 +160,11 @@ function isFrontPageSourceArticle(item: FrontPageSourceItem): item is FrontPageS
   return item.type === "article";
 }
 
+export function selectOpeningParagraph(article: Pick<FrontPageSourceArticle, "body" | "excerpt">): string | undefined {
+  const firstBodyParagraph = article.body?.find((paragraph) => typeof paragraph === "string" && paragraph.trim().length > 0);
+  return firstBodyParagraph?.trim() ?? article.excerpt?.trim() ?? undefined;
+}
+
 function createFrontPageArticle(
   article: FrontPageSourceArticle,
   deskName: string,
@@ -168,6 +176,7 @@ function createFrontPageArticle(
     slug: article.slug,
     headline: article.headline,
     deck: article.deck,
+    openingParagraph: selectOpeningParagraph(article),
     deskName,
     numberLabel: `${deskNumber}.${positionWithinDesk + 1}`,
     isDeskLead: positionWithinDesk === 0,

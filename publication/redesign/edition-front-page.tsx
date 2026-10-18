@@ -55,78 +55,6 @@ function LatestPostsStrip({ posts }: { posts: FrontPagePost[] }) {
   );
 }
 
-function EditionHero({ model }: { model: EditionFrontPageModel }) {
-  const leadArticle = model.editionLeadArticle;
-  const leadDesk = model.editionLeadDesk;
-  if (!leadArticle || !leadDesk) return null;
-  return (
-    <section aria-labelledby="ti-edition-hero-headline" className="ti-edition-hero" id="edition-lead">
-      <div className="ti-edition-hero__copy">
-        <p className="ti-kicker">
-          <span className="ti-kicker__signal">Edition · {model.longEditionDateLabel}</span>
-          <span>
-            {leadDesk.numberLabel} {leadDesk.name} · Lead article
-          </span>
-        </p>
-        <h2 className="ti-edition-hero__headline" id="ti-edition-hero-headline">
-          <Link href={leadArticle.href}>{leadArticle.headline}</Link>
-        </h2>
-        <p className="ti-edition-hero__dek">{leadArticle.deck}</p>
-        <div className="ti-edition-hero__actions">
-          <Link className="ti-primary-button" href={leadArticle.href}>
-            Read the article
-            <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 16 16" width="16">
-              <path d="M3 8h9.5M9 4.5 12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </Link>
-          {model.editionHasVideo ? (
-            <Link className="ti-secondary-button" href={`${leadArticle.href}#video-edition`}>
-              <PlayIcon />
-              Watch the video edition
-            </Link>
-          ) : null}
-        </div>
-      </div>
-      <AnimatedPictogramFigure
-        accessibleDescription={leadArticle.figure.alt}
-        caption={leadArticle.figure.caption}
-        className="ti-edition-hero__figure"
-        fallbackImageSource={leadArticle.figure.src}
-        figureNumberLabel={leadDesk.numberLabel}
-        pictogramSlug={leadArticle.figure.pictogramSlug}
-        priority
-      />
-    </section>
-  );
-}
-
-function InThisEdition({ model }: { model: EditionFrontPageModel }) {
-  if (model.desks.length === 0) return null;
-  return (
-    <section aria-labelledby="ti-in-this-edition" className="ti-in-this-edition">
-      <h2 className="ti-section-label" id="ti-in-this-edition">
-        In this edition · {model.editionSummaryLabel}
-      </h2>
-      <ul className="ti-desk-tiles">
-        {model.desks.map((desk) => (
-          <li key={desk.key}>
-            <Link
-              className="ti-desk-tile"
-              href={desk.containsEditionLead && desk.articlesAfterLead.length === 0 ? "#edition-lead" : `#${desk.anchorId}`}
-            >
-              <span className="ti-desk-tile__meta">
-                <span className="ti-desk-tile__number">{desk.numberLabel}</span>
-                <span className="ti-desk-tile__name">{desk.name}</span>
-              </span>
-              <span className="ti-desk-tile__headline">{desk.leadArticle.headline}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function PostMetaLine({ post, compact = false }: { post: FrontPagePost; compact?: boolean }) {
   return (
     <p className="ti-post-meta">
@@ -149,27 +77,26 @@ function PostImage({ post, shape }: { post: FrontPagePost; shape: "post-image" |
   );
 }
 
-function LatestPostsBand({ posts }: { posts: FrontPagePost[] }) {
+function LatestPostsRail({ posts }: { posts: FrontPagePost[] }) {
   if (posts.length === 0) return null;
   return (
-    <section aria-labelledby="ti-latest-posts" className="ti-latest-posts">
-      <div className="ti-band-heading">
-        <h2 className="ti-band-heading__title" id="ti-latest-posts">
-          <span aria-hidden="true" className="ti-signal-dot" />
-          Latest posts
-        </h2>
-        <Link className="ti-text-link" href="/posts">
+    <section aria-labelledby="ti-latest-posts" className="ti-front-lead__rail">
+      <h2 className="ti-column-heading" id="ti-latest-posts">
+        <span aria-hidden="true" className="ti-signal-dot" />
+        <span className="ti-column-heading__name">Latest posts</span>
+        <Link className="ti-column-heading__link" href="/posts">
           All posts <ArrowIcon />
         </Link>
-      </div>
-      <ul className="ti-post-cards">
+      </h2>
+      <ul className="ti-rail-posts">
         {posts.map((post) => (
           <li key={post.slug}>
-            <Link className="ti-post-card" href={post.href}>
-              <PostImage post={post} shape="post-image" />
-              <span className="ti-post-card__body">
+            <Link className="ti-rail-post" href={post.href}>
+              <PostImage post={post} shape="thumbnail" />
+              <span className="ti-rail-post__copy">
                 <PostMetaLine post={post} />
-                <span className="ti-post-card__headline">{post.headline}</span>
+                <span className="ti-rail-post__headline">{post.headline}</span>
+                {post.summary ? <span className="ti-rail-post__summary">{post.summary}</span> : null}
               </span>
             </Link>
           </li>
@@ -179,95 +106,125 @@ function LatestPostsBand({ posts }: { posts: FrontPagePost[] }) {
   );
 }
 
-function ArticleCard({ article }: { article: FrontPageArticle }) {
+function EditionFrontLead({ model }: { model: EditionFrontPageModel }) {
+  const leadArticle = model.editionLeadArticle;
+  const leadDesk = model.editionLeadDesk;
+  if (!leadArticle || !leadDesk) return <LatestPostsRail posts={model.latestBandPosts} />;
+  return (
+    <div className={model.latestBandPosts.length > 0 ? "ti-front-lead ti-front-lead--with-rail" : "ti-front-lead"}>
+      <article aria-labelledby="ti-edition-lead-headline" className="ti-front-lead__story" id="edition-lead">
+        <p className="ti-kicker">
+          <span className="ti-kicker__signal">Edition · {model.longEditionDateLabel}</span>
+          <span>
+            {leadDesk.numberLabel} {leadDesk.name} · Lead article
+          </span>
+        </p>
+        <h2 className="ti-front-lead__headline" id="ti-edition-lead-headline">
+          <Link href={leadArticle.href}>{leadArticle.headline}</Link>
+        </h2>
+        <p className="ti-front-lead__dek">{leadArticle.deck}</p>
+        {leadArticle.openingParagraph ? <p className="ti-front-lead__opening">{leadArticle.openingParagraph}</p> : null}
+        <p className="ti-front-lead__actions">
+          <Link className="ti-text-link ti-text-link--strong" href={leadArticle.href}>
+            Read the article <ArrowIcon />
+          </Link>
+          {model.editionHasVideo ? (
+            <Link className="ti-text-link" href={`${leadArticle.href}#video-edition`}>
+              <PlayIcon />
+              Watch the video edition
+            </Link>
+          ) : null}
+        </p>
+      </article>
+      <AnimatedPictogramFigure
+        accessibleDescription={leadArticle.figure.alt}
+        caption={leadArticle.figure.caption}
+        className="ti-front-lead__figure"
+        fallbackImageSource={leadArticle.figure.src}
+        figureNumberLabel={leadDesk.numberLabel}
+        pictogramSlug={leadArticle.figure.pictogramSlug}
+        priority
+      />
+      <LatestPostsRail posts={model.latestBandPosts} />
+    </div>
+  );
+}
+
+function DeskStoryListItem({ article }: { article: FrontPageArticle }) {
   return (
     <li>
-      <article className="ti-article-card">
-        <p className="ti-article-card__number">{article.numberLabel} · Article</p>
-        <h4 className="ti-article-card__headline">
+      <article className="ti-desk-story">
+        <p className="ti-desk-story__number">{article.numberLabel}</p>
+        <h4 className="ti-desk-story__headline">
           <Link href={article.href}>{article.headline}</Link>
         </h4>
-        <p className="ti-article-card__dek">{article.deck}</p>
-        <Link aria-label={`Read article: ${article.headline}`} className="ti-text-link ti-article-card__read" href={article.href}>
-          Read article <ArrowIcon />
-        </Link>
+        <p className="ti-desk-story__dek">{article.deck}</p>
       </article>
     </li>
   );
 }
 
-function DeskSection({ desk }: { desk: FrontPageDesk }) {
+function DeskColumn({ desk }: { desk: FrontPageDesk }) {
   const showsLeadArticle = !desk.containsEditionLead;
-  const cardArticles = desk.articlesAfterLead;
-  if (!showsLeadArticle && cardArticles.length === 0) return null;
+  const listedArticles = desk.articlesAfterLead;
+  if (!showsLeadArticle && listedArticles.length === 0) return null;
   return (
-    <section aria-labelledby={`${desk.anchorId}-title`} className="ti-desk-section" id={desk.anchorId}>
-      <div className="ti-desk-section__label">
-        <p className="ti-desk-section__number">{desk.numberLabel}</p>
-        <h3 className="ti-desk-section__name" id={`${desk.anchorId}-title`}>
-          {desk.name}
-        </h3>
-        <p className="ti-desk-section__count">{desk.containsEditionLead ? "Also from this desk" : desk.articleCountLabel}</p>
-      </div>
-      <div className="ti-desk-section__content">
-        {showsLeadArticle ? (
-          <div className="ti-desk-lead">
-            <AnimatedPictogramFigure
-              accessibleDescription={desk.leadArticle.figure.alt}
-              caption={desk.leadArticle.figure.caption}
-              className="ti-desk-lead__figure"
-              fallbackImageSource={desk.leadArticle.figure.src}
-              figureNumberLabel={desk.numberLabel}
-              pictogramSlug={desk.leadArticle.figure.pictogramSlug}
-            />
-            <div className="ti-desk-lead__copy">
-              <p className="ti-article-card__number">{desk.leadArticle.numberLabel} · Lead article</p>
-              <h4 className="ti-desk-lead__headline">
-                <Link href={desk.leadArticle.href}>{desk.leadArticle.headline}</Link>
-              </h4>
-              <p className="ti-desk-lead__dek">{desk.leadArticle.deck}</p>
-              <Link aria-label={`Read article: ${desk.leadArticle.headline}`} className="ti-text-link" href={desk.leadArticle.href}>
-                Read article <ArrowIcon />
-              </Link>
-            </div>
-          </div>
-        ) : null}
-        {cardArticles.length > 0 ? (
-          <ul className="ti-article-cards">
-            {cardArticles.map((article) => (
-              <ArticleCard article={article} key={article.slug} />
-            ))}
-          </ul>
-        ) : null}
-      </div>
+    <section aria-labelledby={`${desk.anchorId}-title`} className="ti-desk-column" id={desk.anchorId}>
+      <h3 className="ti-column-heading" id={`${desk.anchorId}-title`}>
+        <span className="ti-column-heading__number">{desk.numberLabel}</span>
+        <span className="ti-column-heading__name">{desk.name}</span>
+        <span className="ti-column-heading__count">{desk.containsEditionLead ? "Also from this desk" : desk.articleCountLabel}</span>
+      </h3>
+      {showsLeadArticle ? (
+        <article className="ti-desk-column__lead">
+          <AnimatedPictogramFigure
+            accessibleDescription={desk.leadArticle.figure.alt}
+            className="ti-desk-column__figure"
+            fallbackImageSource={desk.leadArticle.figure.src}
+            pictogramSlug={desk.leadArticle.figure.pictogramSlug}
+          />
+          <h4 className="ti-desk-column__headline">
+            <Link href={desk.leadArticle.href}>{desk.leadArticle.headline}</Link>
+          </h4>
+          <p className="ti-desk-column__dek">{desk.leadArticle.deck}</p>
+          {desk.leadArticle.openingParagraph ? <p className="ti-desk-column__opening">{desk.leadArticle.openingParagraph}</p> : null}
+        </article>
+      ) : null}
+      {listedArticles.length > 0 ? (
+        <ul className="ti-desk-column__stories">
+          {listedArticles.map((article) => (
+            <DeskStoryListItem article={article} key={article.slug} />
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }
 
-function PostInset({ inset }: { inset: FrontPagePostInset }) {
+function PostColumn({ inset }: { inset: FrontPagePostInset }) {
   const featuredPost = inset.featuredPost;
   return (
-    <aside aria-label="Posts between desks" className="ti-post-inset">
-      <Link className="ti-post-inset__featured" href={featuredPost.href}>
+    <aside aria-label="Posts" className="ti-desk-column ti-post-column">
+      <p className="ti-column-heading">
+        <span aria-hidden="true" className="ti-signal-dot" />
+        <span className="ti-column-heading__name">Posts</span>
+        <span className="ti-column-heading__count">Between editions</span>
+      </p>
+      <Link className="ti-post-column__featured" href={featuredPost.href}>
         <PostImage post={featuredPost} shape="post-image" />
-        <span className="ti-post-inset__featured-copy">
-          <PostMetaLine post={featuredPost} />
-          <span className="ti-post-inset__headline">{featuredPost.headline}</span>
-          {featuredPost.summary ? <span className="ti-post-inset__summary">{featuredPost.summary}</span> : null}
-          <span className="ti-text-link">
-            Read post <ArrowIcon />
-          </span>
-        </span>
+        <PostMetaLine post={featuredPost} />
+        <span className="ti-desk-column__headline">{featuredPost.headline}</span>
+        {featuredPost.summary ? <span className="ti-desk-column__dek">{featuredPost.summary}</span> : null}
       </Link>
       {inset.thumbnailPosts.length > 0 ? (
-        <ul className="ti-post-inset__thumbnails">
+        <ul className="ti-rail-posts">
           {inset.thumbnailPosts.map((post) => (
             <li key={post.slug}>
-              <Link className="ti-post-thumbnail-row" href={post.href}>
+              <Link className="ti-rail-post" href={post.href}>
                 <PostImage post={post} shape="thumbnail" />
-                <span className="ti-post-thumbnail-row__copy">
+                <span className="ti-rail-post__copy">
                   <PostMetaLine compact post={post} />
-                  <span className="ti-post-thumbnail-row__headline">{post.headline}</span>
+                  <span className="ti-rail-post__headline">{post.headline}</span>
                 </span>
               </Link>
             </li>
@@ -301,17 +258,13 @@ export function DatedPostList({ posts }: { posts: FrontPagePost[] }) {
 function MorePosts({ posts }: { posts: FrontPagePost[] }) {
   if (posts.length === 0) return null;
   return (
-    <section aria-labelledby="ti-more-posts" className="ti-desk-section ti-more-posts">
-      <div className="ti-desk-section__label">
+    <section aria-labelledby="ti-more-posts" className="ti-more-posts">
+      <h2 className="ti-column-heading" id="ti-more-posts">
         <span aria-hidden="true" className="ti-signal-dot" />
-        <h2 className="ti-desk-section__name" id="ti-more-posts">
-          More posts
-        </h2>
-        <p className="ti-desk-section__count">Between editions</p>
-      </div>
-      <div className="ti-desk-section__content">
-        <DatedPostList posts={posts} />
-      </div>
+        <span className="ti-column-heading__name">More posts</span>
+        <span className="ti-column-heading__count">Between editions</span>
+      </h2>
+      <DatedPostList posts={posts} />
     </section>
   );
 }
@@ -321,16 +274,16 @@ export function EditionFrontPage({ model }: { model: EditionFrontPageModel }) {
     <>
       <MastheadWithOriginalWeb />
       <LatestPostsStrip posts={model.latestStripPosts} />
-      <EditionHero model={model} />
-      <InThisEdition model={model} />
-      <LatestPostsBand posts={model.latestBandPosts} />
-      {model.deskBlocks.map((block) =>
-        block.kind === "desk" ? (
-          <DeskSection desk={block.desk} key={block.desk.key} />
-        ) : (
-          <PostInset inset={block.inset} key={block.key} />
-        ),
-      )}
+      <EditionFrontLead model={model} />
+      <div className="ti-desk-columns">
+        {model.deskBlocks.map((block) =>
+          block.kind === "desk" ? (
+            <DeskColumn desk={block.desk} key={block.desk.key} />
+          ) : (
+            <PostColumn inset={block.inset} key={block.key} />
+          ),
+        )}
+      </div>
       <MorePosts posts={model.morePosts} />
     </>
   );

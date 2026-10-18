@@ -24,7 +24,7 @@ function createSeedEdition(deskCount) {
     for (let articleIndex = 0; articleIndex < 3; articleIndex += 1) {
       const slug = `desk-${deskIndex}-article-${articleIndex}`;
       itemIds.push(slug);
-      items.push({ type: "article", slug, section: `desk-${deskIndex}`, headline: slug, deck: "Deck" });
+      items.push({ type: "article", slug, section: `desk-${deskIndex}`, headline: slug, deck: "Deck", body: ["", `Opening of ${slug}.`, "Second."] });
     }
     sections.push({ key: `desk-${deskIndex}`, label: `Desk ${deskIndex}`, itemIds });
   }
@@ -88,4 +88,11 @@ test("every post placement is empty when there are no posts", () => {
 test("post relative times read like a ticker", () => {
   const now = new Date(Date.UTC(2026, 9, 18, 12));
   assert.equal(frontPageModel.formatPostRelativeTimeLabel(new Date(Date.UTC(2026, 9, 18, 9)).toISOString(), now), "3h ago");
+});
+
+test("each article carries its first non-empty paragraph as the front-page opening", () => {
+  const model = buildModel({ deskCount: 1, postCount: 0 });
+  assert.equal(model.editionLeadArticle.openingParagraph, "Opening of desk-0-article-0.");
+  assert.equal(frontPageModel.selectOpeningParagraph({ excerpt: " Excerpt only. " }), "Excerpt only.");
+  assert.equal(frontPageModel.selectOpeningParagraph({}), undefined);
 });
