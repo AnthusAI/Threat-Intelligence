@@ -402,11 +402,11 @@
 
 .ti-masthead__wordmark {
   align-self: flex-start;
-  color: var(--text-strong);
-  font-size: clamp(40px, 6.4vw, 100px);
-  font-weight: 600;
-  letter-spacing: -0.045em;
-  line-height: 0.92;
+  color: var(--masthead-wordmark);
+  font-size: clamp(44px, 8.6vw, 136px);
+  font-weight: 700;
+  letter-spacing: -0.055em;
+  line-height: 0.88;
 }
 
 .ti-masthead__tagline {
