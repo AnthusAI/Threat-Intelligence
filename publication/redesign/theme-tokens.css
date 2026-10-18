@@ -36,7 +36,7 @@
   --radius-band: 20px;
   --content-max: 3840px;
   --gutter: clamp(16px, 4vw, 112px);
-  --section-gap: clamp(64px, 8vw, 112px);
+  --section-gap: clamp(40px, 4vw, 64px);
 
   --motion-loop: 4200ms;
   --motion-travel-ease: cubic-bezier(.2, .7, .2, 1);
