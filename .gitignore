@@ -17,15 +17,20 @@ npm-debug.log*
 public/seed-art/threat-intelligence/videos/*.mp4
 # >>> papyrus-app sync (generated route shims)
 /app/%5F_preview/[[...path]]/route.ts
-/app/[year]/[month]/[day]/[articleSlug]/page.tsx
-/app/[year]/[month]/[day]/page.tsx
 /app/[year]/[month]/[day]/page/[pageNumber]/page.tsx
-/app/[year]/[month]/[day]/section/[sectionKey]/page.tsx
 /app/api/archive/editions/route.ts
+/app/api/auth/prospectus/callback/route.ts
+/app/api/auth/prospectus/selection/route.ts
+/app/api/auth/prospectus/session/route.ts
+/app/api/auth/prospectus/sign-in/route.ts
+/app/api/auth/prospectus/sign-out/route.ts
+/app/api/cyclotron/priming-proof/route.ts
+/app/api/local-preview/derive/route.ts
+/app/api/local-preview/media/route.ts
 /app/api/media/[...path]/route.ts
 /app/api/revalidate/route.ts
-/app/archive/page.tsx
 /app/articles/[slug]/page.tsx
+/app/cyclotron/page.tsx
 /app/layout.tsx
 /app/newsroom/[section]/[...selection]/page.tsx
 /app/newsroom/[section]/page.tsx
@@ -37,11 +42,21 @@ public/seed-art/threat-intelligence/videos/*.mp4
 /app/newsroom/layout.tsx
 /app/newsroom/page.tsx
 /app/newsroom/sections/[sectionId]/page.tsx
+/app/newsroom/settings/page.tsx
 /app/page.tsx
-/app/settings/page.tsx
+/app/robots.ts
 /middleware.ts
 /.papyrus/
 # <<< papyrus-app sync
 
-# Generated shims whose paths contain glob characters (papyrus-app sync does not escape them); this repo has no site-owned app/ files
-/app/
+# papyrus-app sync writes generated shims under app/ and lists them above unescaped, so bracketed route paths
+# never match. Ignore app/ wholesale and re-include only the routes this publication owns.
+/app/*
+!/app/posts/
+!/app/archive/
+!/app/settings/
+!/app/\[year\]/
+/app/\[year\]/\[month\]/\[day\]/*
+!/app/\[year\]/\[month\]/\[day\]/page.tsx
+!/app/\[year\]/\[month\]/\[day\]/\[articleSlug\]/
+!/app/\[year\]/\[month\]/\[day\]/section/

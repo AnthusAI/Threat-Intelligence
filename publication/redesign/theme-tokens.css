@@ -1,0 +1,153 @@
+/* Anthus Threat Intelligence theme tokens, from the redesign handoff.
+   Light is the base. Dark applies when data-theme="dark", or when data-theme="system" and the OS prefers dark.
+   The tokens attach to the root only on pages that render the redesigned reader (.ti-site), so the newsroom CMS
+   served from the same app keeps its own palette. */
+
+
+:root:has(.ti-site) {
+  --font-sans: 'Geist', 'Helvetica Neue', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  --bg: #F6F7F9;
+  --surface: #FFFFFF;
+  --plate: #EEF0F3;
+  --dot: #CDD2D9;
+  --fill: #FFFFFF;
+  --rule: #DFE2E7;
+  --rule-soft: #EAECEF;
+  --text-strong: #0A0C0F;
+  --text: #14171C;
+  --text-2: #3F454E;
+  --text-3: #5D646E;
+  --line: #1F242B;
+  --line-muted: #6B727D;
+  --ghost: #B4BAC3;
+  --ghost-label: #8A9099;
+  --boundary: #959BA4;
+  --signal: #E2461F;
+  --signal-text: #B93716;
+  --signal-soft: rgba(226, 70, 31, .14);
+  --on-signal: #0A0C0F;
+  --hero-word: #E3E6EA;
+
+  --radius-card: 16px;
+  --radius-tile: 14px;
+  --radius-band: 20px;
+  --content-max: 1600px;
+  --gutter: clamp(16px, 4vw, 56px);
+  --section-gap: clamp(64px, 8vw, 112px);
+
+  --motion-loop: 4200ms;
+  --motion-travel-ease: cubic-bezier(.2, .7, .2, 1);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"]:has(.ti-site) {
+  --bg: #0C0E12;
+  --surface: #111419;
+  --plate: #101318;
+  --dot: #252A32;
+  --fill: #14181E;
+  --rule: #232830;
+  --rule-soft: #1C2027;
+  --text-strong: #F5F6F8;
+  --text: #ECEEF1;
+  --text-2: #B8BDC5;
+  --text-3: #8C929B;
+  --line: #D5D9DF;
+  --line-muted: #8C929B;
+  --ghost: #4A505A;
+  --ghost-label: #6B727D;
+  --boundary: #5A616C;
+  --signal: #FF5A36;
+  --signal-text: #FF6A47;
+  --signal-soft: rgba(255, 90, 54, .18);
+  --on-signal: #0C0E12;
+  --hero-word: #1A1E25;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"]:has(.ti-site),
+  :root:not([data-theme]):has(.ti-site) {
+    --bg: #0C0E12;
+    --surface: #111419;
+    --plate: #101318;
+    --dot: #252A32;
+    --fill: #14181E;
+    --rule: #232830;
+    --rule-soft: #1C2027;
+    --text-strong: #F5F6F8;
+    --text: #ECEEF1;
+    --text-2: #B8BDC5;
+    --text-3: #8C929B;
+    --line: #D5D9DF;
+    --line-muted: #8C929B;
+    --ghost: #4A505A;
+    --ghost-label: #6B727D;
+    --boundary: #5A616C;
+    --signal: #FF5A36;
+    --signal-text: #FF6A47;
+    --signal-soft: rgba(255, 90, 54, .18);
+    --on-signal: #0C0E12;
+    --hero-word: #1A1E25;
+    color-scheme: dark;
+  }
+}
+
+/* Figure plate: the dot-grid ground every pictogram sits on. */
+.figure-plate {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background-color: var(--plate);
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Pictogram color roles. SVG marks use these classes, never raw hex, so figures follow the theme. */
+.s-line { stroke: var(--line); }
+.s-muted { stroke: var(--line-muted); }
+.s-ghost { stroke: var(--ghost); }
+.s-boundary { stroke: var(--boundary); }
+.s-signal { stroke: var(--signal); }
+.f-fill { fill: var(--fill); }
+.f-line { fill: var(--line); }
+.f-text { fill: var(--text); }
+.f-muted { fill: var(--text-3); }
+.f-ghost { fill: var(--ghost-label); }
+.f-signal { fill: var(--signal); }
+.f-signal-soft { fill: var(--signal-soft); }
+.f-on { fill: var(--on-signal); }
+.f-none { fill: none; }
+.f-node { fill: var(--line-muted); }
+
+/* Pictogram motion: establish → travel → resolve → hold, one 4.2s loop. Pause off-screen with IntersectionObserver. */
+.motion-travel { stroke-dasharray: 100; stroke-dashoffset: 100; animation: motion-travel var(--motion-loop) var(--motion-travel-ease) infinite; }
+.motion-arrive { opacity: 0; animation: motion-arrive var(--motion-loop) ease-out infinite; }
+.motion-lit { fill-opacity: .15; animation: motion-lit var(--motion-loop) ease-out infinite; }
+.motion-march { animation: motion-march 1.1s linear infinite; }
+.figure-offscreen .motion-travel,
+.figure-offscreen .motion-arrive,
+.figure-offscreen .motion-lit,
+.figure-offscreen .motion-march { animation-play-state: paused; }
+
+@keyframes motion-travel { 0%, 10% { stroke-dashoffset: 100; opacity: 1 } 40% { stroke-dashoffset: 0 } 88% { stroke-dashoffset: 0; opacity: 1 } 100% { stroke-dashoffset: 0; opacity: 0 } }
+@keyframes motion-arrive { 0%, 38% { opacity: 0 } 44%, 88% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes motion-lit { 0%, 38% { fill-opacity: .15 } 46%, 88% { fill-opacity: 1 } 100% { fill-opacity: .15 } }
+@keyframes motion-march { to { stroke-dashoffset: -18 } }
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-travel, .motion-arrive, .motion-lit, .motion-march { animation: none; stroke-dashoffset: 0; opacity: 1; fill-opacity: 1; }
+}
+
+/* Papyrus sets its own --font-sans on <body> through next/font; the reader re-declares the type tokens on its root. */
+.ti-site {
+  --font-sans: 'Geist', 'Helvetica Neue', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+}
+
+:root:has(.ti-site) body {
+  background: var(--bg);
+  color: var(--text);
+}
