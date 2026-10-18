@@ -336,7 +336,7 @@
 /* Masthead with the original web */
 
 .ti-masthead {
-  --masthead-web-width: min(620px, max(50vw, 300px));
+  --masthead-web-width: min(max(620px, 30vw), max(50vw, 300px));
   border-bottom: 1px solid var(--rule);
   display: flex;
   align-items: flex-end;
@@ -403,7 +403,7 @@
 .ti-masthead__wordmark {
   align-self: flex-start;
   color: var(--masthead-wordmark);
-  font-size: clamp(38px, 6.9vw, 112px);
+  font-size: clamp(38px, 6.9vw, 200px);
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 0.9;
@@ -1176,11 +1176,12 @@
 }
 
 .ti-site-footer__wordmark {
-  color: var(--hero-word);
-  font-size: clamp(44px, 10.5vw, 168px);
-  font-weight: 600;
-  letter-spacing: -0.055em;
+  color: var(--masthead-wordmark);
+  font-size: clamp(38px, 6.9vw, 200px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
   line-height: 0.9;
+  text-transform: uppercase;
   overflow-wrap: break-word;
   user-select: none;
 }
@@ -1200,6 +1201,7 @@
 /* Article and post reading pages */
 
 .ti-article {
+  --article-wide-column-width: clamp(1040px, 54vw, 1640px);
   display: flex;
   flex-direction: column;
   gap: clamp(28px, 4vw, 48px);
@@ -1211,7 +1213,7 @@
   flex-direction: column;
   gap: 20px;
   margin: 0 auto;
-  max-width: 1040px;
+  max-width: var(--article-wide-column-width);
   width: 100%;
 }
 
@@ -1248,7 +1250,7 @@
 .ti-article__video,
 .ti-article__figure {
   margin: 0 auto;
-  max-width: 1040px;
+  max-width: var(--article-wide-column-width);
   scroll-margin-top: 24px;
   width: 100%;
 }
@@ -1462,7 +1464,117 @@
 }
 
 @media (max-width: 560px) {
-  .ti-masthead__wordmark {
+  .ti-masthead__wordmark,
+  .ti-site-footer__wordmark {
     width: min-content;
+  }
+}
+
+/*
+ * Wide monitors: past 1600px the page keeps growing instead of stopping at a fixed column. Each desk sets its lead
+ * story beside its other articles rather than above them, and the fixed-size type steps up so cards stay in proportion.
+ */
+
+@media (min-width: 1600px) {
+  .ti-edition-hero__headline {
+    font-size: min(calc(4.4vw + 22px), 140px);
+  }
+
+  .ti-edition-hero__dek {
+    font-size: min(calc(0.6vw + 12.4px), 28px);
+  }
+
+  .ti-desk-lead__headline {
+    font-size: min(calc(1.6vw + 16.4px), 60px);
+  }
+
+  .ti-article__headline {
+    font-size: min(calc(3vw + 28px), 110px);
+  }
+
+  .ti-post__headline {
+    font-size: min(calc(2vw + 24px), 80px);
+  }
+
+  .ti-article__dek {
+    font-size: min(calc(0.6vw + 13.4px), 28px);
+  }
+
+  .ti-article__body {
+    font-size: min(calc(0.27vw + 14.7px), 23px);
+    max-width: 37em;
+  }
+
+  .ti-page-intro__title {
+    font-size: min(calc(4.4vw + 17.6px), 136px);
+  }
+}
+
+@media (min-width: 1920px) {
+  .ti-desk-section__content:has(> .ti-desk-lead) {
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 48px;
+  }
+
+  .ti-desk-section__content > .ti-desk-lead {
+    flex: 3 1 0;
+  }
+
+  .ti-desk-lead + .ti-article-cards {
+    flex: 2 1 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ti-desk-section__label {
+    flex-basis: 240px;
+  }
+
+  .ti-desk-section__name {
+    font-size: 34px;
+  }
+
+  .ti-desk-lead__dek {
+    font-size: 21px;
+  }
+
+  .ti-desk-tile__headline {
+    font-size: 18px;
+  }
+
+  .ti-band-heading__title {
+    font-size: 26px;
+  }
+
+  .ti-post-cards {
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  }
+
+  .ti-post-card__headline {
+    font-size: 21px;
+  }
+
+  .ti-article-card__headline {
+    font-size: 30px;
+  }
+
+  .ti-article-card__dek {
+    font-size: 18px;
+  }
+
+  .ti-post-inset__summary {
+    font-size: 18px;
+  }
+
+  .ti-post-thumbnail-row__headline {
+    font-size: 17px;
+  }
+
+  .ti-dated-post__headline {
+    font-size: 18px;
+  }
+
+  .ti-latest-strip__link {
+    font-size: 15px;
   }
 }
