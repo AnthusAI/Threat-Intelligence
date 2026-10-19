@@ -7,7 +7,7 @@ import { projectBodyIr } from "@anthusai/papyrus/lib/markus-body";
 import { resolveReaderStorageUrl } from "@anthusai/papyrus/lib/reader-storage-url";
 import { withRateLimitRetry } from "@anthusai/papyrus/lib/rate-limit-retry";
 import { tenantIdFromEnvironment, tenantScopedValue } from "@anthusai/papyrus/lib/tenant-keys";
-import type { PublishedPostImage, PublishedPostSummary } from "../edition-front-page-model";
+import type { PublishedPostImage, PublishedPostSummary } from "./post-feed-model";
 
 export const POST_ITEM_TYPE = "post";
 export const POSTS_CACHE_TAG = "posts";

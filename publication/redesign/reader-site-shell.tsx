@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { SiteFooter } from "./site-footer";
-import { SiteHeader, type SiteNavigationLink } from "./site-header";
+import { SiteHeader } from "./site-header";
 import { APPLY_STORED_THEME_PREFERENCE_BEFORE_FIRST_PAINT_SCRIPT } from "./theme-preference";
 import "./theme-tokens.css";
 import "./reader-site.css";
@@ -9,16 +9,10 @@ const GEIST_FONT_STYLESHEET_HREF =
   "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap";
 
 export function ReaderSiteShell({
-  deskLinks,
   homeHref = "/",
-  editionLineLeft,
-  editionLineRight,
   children,
 }: {
-  deskLinks: SiteNavigationLink[];
   homeHref?: string;
-  editionLineLeft?: string;
-  editionLineRight?: string;
   children: ReactNode;
 }) {
   return (
@@ -31,9 +25,9 @@ export function ReaderSiteShell({
         Skip to content
       </a>
       <div className="ti-container">
-        <SiteHeader deskLinks={deskLinks} homeHref={homeHref} />
+        <SiteHeader homeHref={homeHref} />
         <main id="main-content">{children}</main>
-        <SiteFooter deskLinks={deskLinks} editionLineLeft={editionLineLeft} editionLineRight={editionLineRight} />
+        <SiteFooter />
       </div>
     </div>
   );
