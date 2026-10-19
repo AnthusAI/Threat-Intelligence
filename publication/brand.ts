@@ -56,7 +56,6 @@ export const threatIntelligenceBrand: SiteBrand = {
   renderer: { kind: "pretext" },
   hosting: { kind: "amplify-ssr" },
   opsChrome: "app",
-  newsroomLayout: "organizer",
   corpusKey: "threat-intelligence",
   steeringConfigPath: "corpora/papyrus-steering.yml",
   newsroomSectionsConfigPath: "corpora/papyrus-newsroom-sections.yml",
