@@ -14,7 +14,7 @@
     "test:edition-front-page-model": "node publication/tests/test-edition-front-page-model.cjs"
   },
   "dependencies": {
-    "@anthusai/papyrus": "^1.14.0",
+    "@anthusai/papyrus": "^1.15.0",
     "@aws-amplify/backend": "^1.22.0",
     "@aws-amplify/backend-cli": "^1.8.2",
     "@aws-amplify/seed": "^1.1.2",
