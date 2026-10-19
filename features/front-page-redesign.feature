@@ -16,8 +16,9 @@ Feature: Theme-aware front page redesign
     Then the header, masthead and original spiderweb mark come first
     And a strip of the four newest posts sits directly under the masthead
     And the edition hero shows the lead article with its animated pictogram
-    And the edition lead shows its opening paragraph beside its animated pictogram and a rail of the newest posts
-    And desks flow as newspaper columns without cards, each lead story with an animated pictogram, dek and opening paragraph
+    And the edition lead is a full-width hero with a giant headline, its animated pictogram and its opening paragraph
+    And the newest posts follow as large pictogram stories
+    And every desk is its own hero band whose lead story has a giant headline, animated pictogram, dek and opening paragraph
 
   Scenario: Posts break up the edition without repeating
     Given a published edition with more desks than three

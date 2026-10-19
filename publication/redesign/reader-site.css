@@ -452,7 +452,7 @@
   align-items: center;
   color: var(--text);
   display: flex;
-  font-size: 14px;
+  font-size: clamp(15px, 1.3vw, 20px);
   font-weight: 500;
   gap: 10px;
   min-height: 48px;
@@ -665,279 +665,268 @@
 }
 
 /*
- * Front page as a newspaper: stories sit directly on the page in flowing columns separated by hairline rules,
- * with no cards, so headlines, decks and opening paragraphs take most of the viewport.
+ * Front page as a run of heroes: every story is set big, one after another, so the page scrolls long and each
+ * headline, deck and opening paragraph reads at a glance on a tablet.
  */
 
-.ti-text-link--strong {
-  color: var(--text-strong);
-  font-weight: 600;
+.ti-hero-band {
+  border-top: 4px solid var(--text-strong);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(32px, 5vw, 72px);
+  margin-top: var(--section-gap);
+  padding-top: clamp(16px, 2vw, 24px);
+  scroll-margin-top: 24px;
 }
 
-.ti-column-heading {
+.ti-hero-band__heading {
   align-items: baseline;
-  border-top: 2px solid var(--text-strong);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  padding-top: 10px;
+  gap: 8px 18px;
 }
 
-.ti-column-heading .ti-signal-dot {
+.ti-hero-band__heading .ti-signal-dot {
   align-self: center;
+  height: 14px;
+  width: 14px;
 }
 
-.ti-column-heading__number {
+.ti-hero-band__number {
   color: var(--signal-text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: clamp(18px, 2vw, 32px);
 }
 
-.ti-column-heading__name {
+.ti-hero-band__name {
   color: var(--text-strong);
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: clamp(36px, 5.4vw, 112px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.ti-column-heading__count,
-.ti-column-heading__link {
+.ti-hero-band__count,
+.ti-hero-band__link {
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: clamp(13px, 1.2vw, 20px);
   font-weight: 400;
   letter-spacing: 0.06em;
   margin-left: auto;
   text-transform: uppercase;
 }
 
-.ti-column-heading__link {
+.ti-hero-band__link {
   align-items: center;
   color: var(--text-2);
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
 }
 
-.ti-front-lead {
-  border-bottom: 1px solid var(--rule);
+.ti-hero-story {
   display: grid;
-  gap: 24px 40px;
+  gap: clamp(24px, 3vw, 48px);
   grid-template-columns: minmax(0, 1fr);
-  padding: clamp(24px, 3vw, 40px) 0 clamp(28px, 3vw, 44px);
 }
 
-.ti-front-lead__story {
+.ti-hero-story--edition-lead {
+  padding-top: clamp(32px, 5vw, 80px);
+}
+
+.ti-hero-story__heading {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: clamp(16px, 2vw, 28px);
   min-width: 0;
 }
 
-.ti-front-lead__headline {
+.ti-hero-story .ti-kicker {
+  font-size: clamp(13px, 1.2vw, 18px);
+}
+
+.ti-hero-story__headline {
   color: var(--text-strong);
-  font-size: clamp(36px, 4.6vw, 150px);
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-size: clamp(46px, 8vw, 176px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
   overflow-wrap: break-word;
   text-wrap: balance;
 }
 
-.ti-front-lead__dek {
+.ti-hero-story--edition-lead .ti-hero-story__headline {
+  font-size: clamp(52px, 10vw, 220px);
+}
+
+.ti-hero-story__dek {
   color: var(--text-2);
-  font-size: clamp(18px, 1.3vw, 28px);
+  font-size: clamp(22px, 2.8vw, 48px);
   font-weight: 500;
-  line-height: 1.42;
+  line-height: 1.3;
+  max-width: 30em;
   text-wrap: pretty;
 }
 
-.ti-front-lead__opening {
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 8;
+.ti-hero-story__figure {
+  min-width: 0;
+}
+
+.ti-hero-story__figure .pictogram-figure-block__caption {
+  font-size: clamp(14px, 1.2vw, 18px);
+}
+
+.ti-hero-story__reading {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.ti-hero-story__opening {
   color: var(--text);
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: clamp(16px, calc(0.55vw + 9px), 22px);
-  line-height: 1.6;
+  font-size: clamp(20px, 1.9vw, 32px);
+  line-height: 1.55;
+  max-width: 36em;
   text-wrap: pretty;
 }
 
-.ti-front-lead__actions {
+.ti-hero-story__actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 0 24px;
+  gap: 12px 32px;
 }
 
-.ti-front-lead__figure {
-  align-self: start;
-  min-width: 0;
-}
-
-.ti-front-lead__rail {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-@media (min-width: 900px) {
-  .ti-front-lead {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  }
-
-  .ti-front-lead__rail {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (min-width: 1280px) {
-  .ti-front-lead--with-rail {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr) minmax(280px, 3fr);
-  }
-
-  .ti-front-lead--with-rail .ti-front-lead__rail {
-    grid-column: auto;
-  }
-}
-
-.ti-rail-posts li + li {
-  border-top: 1px solid var(--rule-soft);
-}
-
-.ti-rail-post {
-  align-items: flex-start;
-  color: var(--text);
-  display: flex;
-  gap: 12px;
-  padding: 10px 0;
-}
-
-.ti-rail-post > .pictogram-plate {
-  background-size: 10px 10px;
-  border-radius: 6px;
-  flex: 0 0 88px;
-  width: 88px;
-}
-
-.ti-rail-post__copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.ti-rail-post__headline {
-  color: var(--text-strong);
-  font-size: 15.5px;
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.ti-rail-post__summary {
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  color: var(--text-2);
-  display: -webkit-box;
-  font-size: 14px;
-  line-height: 1.45;
-  overflow: hidden;
-}
-
-.ti-desk-columns {
-  column-gap: 40px;
-  column-rule: 1px solid var(--rule-soft);
-  column-width: 340px;
-  padding-top: clamp(24px, 3vw, 40px);
-}
-
-.ti-desk-column {
-  break-inside: avoid;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 36px;
-  scroll-margin-top: 24px;
-}
-
-.ti-desk-column__lead,
-.ti-post-column__featured {
-  display: flex;
-  flex-direction: column;
+.ti-hero-story__read,
+.ti-hero-story__secondary {
+  align-items: center;
+  display: inline-flex;
+  font-size: clamp(18px, 1.6vw, 26px);
   gap: 10px;
+  min-height: 48px;
 }
 
-.ti-post-column__featured {
-  color: var(--text);
-}
-
-.ti-post-column__featured > .pictogram-plate {
-  border-radius: 10px;
-}
-
-.ti-desk-column__headline {
+.ti-hero-story__read {
   color: var(--text-strong);
-  font-size: clamp(22px, calc(1.2vw + 6px), 36px);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.12;
+  font-weight: 700;
+}
+
+.ti-hero-story__secondary {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.ti-hero-story__read .ti-arrow-icon,
+.ti-hero-story__secondary svg {
+  height: 0.9em;
+  width: 0.9em;
+}
+
+@media (min-width: 1200px) {
+  .ti-hero-story {
+    column-gap: clamp(32px, 3vw, 64px);
+    grid-template-areas:
+      "heading heading"
+      "figure reading";
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+
+  .ti-hero-story__heading {
+    grid-area: heading;
+  }
+
+  .ti-hero-story__figure {
+    grid-area: figure;
+  }
+
+  .ti-hero-story__reading {
+    align-self: start;
+    grid-area: reading;
+  }
+}
+
+.ti-following-stories {
+  display: grid;
+  gap: clamp(32px, 4vw, 64px) clamp(32px, 4vw, 72px);
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+}
+
+.ti-following-story {
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 20px;
+}
+
+.ti-following-story__number {
+  color: var(--signal-text);
+  font-family: var(--font-mono);
+  font-size: clamp(14px, 1.2vw, 20px);
+}
+
+.ti-following-story__headline {
+  color: var(--text-strong);
+  font-size: clamp(32px, 4.2vw, 88px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
   text-wrap: balance;
 }
 
-.ti-desk-column__dek {
+.ti-following-story__dek {
   color: var(--text-2);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: clamp(19px, 1.8vw, 30px);
   line-height: 1.45;
   text-wrap: pretty;
 }
 
-.ti-desk-column__opening {
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 7;
+.ti-showcase-posts {
+  display: grid;
+  gap: clamp(32px, 4vw, 64px) clamp(24px, 3vw, 48px);
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
+}
+
+.ti-showcase-post {
   color: var(--text);
-  display: -webkit-box;
-  font-size: 15.5px;
-  line-height: 1.55;
-  overflow: hidden;
-}
-
-.ti-desk-column__stories li {
-  border-top: 1px solid var(--rule-soft);
-}
-
-.ti-desk-story {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 0;
+  gap: 12px;
 }
 
-.ti-desk-story__number {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 11px;
+.ti-showcase-post > .pictogram-plate {
+  border-radius: 14px;
 }
 
-.ti-desk-story__headline {
+.ti-showcase-post .ti-post-meta {
+  font-size: clamp(12px, 1vw, 16px);
+}
+
+.ti-showcase-post__headline {
   color: var(--text-strong);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.22;
+  font-size: clamp(30px, 3vw, 56px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
   text-wrap: balance;
 }
 
-.ti-desk-story__dek {
+.ti-showcase-post__summary {
   color: var(--text-2);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: clamp(19px, 1.6vw, 26px);
+  line-height: 1.45;
   text-wrap: pretty;
 }
 
-.ti-more-posts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.ti-more-posts .ti-dated-post__headline {
+  font-size: clamp(19px, 1.8vw, 30px);
+}
+
+.ti-more-posts .ti-dated-post__date,
+.ti-more-posts .ti-dated-post__desk {
+  font-size: clamp(12px, 1vw, 16px);
 }
 
 /* Desk sections */
@@ -1445,8 +1434,8 @@
 }
 
 /*
- * Wide monitors: past 1600px the page keeps growing instead of stopping at a fixed column, the front page flows into
- * more newspaper columns, and the fixed-size type steps up so columns stay in proportion.
+ * Wide monitors: past 1600px the page keeps growing instead of stopping at a fixed column, and the reading-page
+ * type keeps growing with it.
  */
 
 @media (min-width: 1600px) {
@@ -1469,54 +1458,5 @@
 
   .ti-page-intro__title {
     font-size: min(calc(4.4vw + 17.6px), 136px);
-  }
-}
-
-
-@media (min-width: 1920px) {
-  .ti-desk-columns {
-    column-width: 400px;
-    column-gap: 48px;
-  }
-
-  .ti-column-heading__name {
-    font-size: 24px;
-  }
-
-  .ti-desk-column__dek {
-    font-size: 18px;
-  }
-
-  .ti-desk-column__opening {
-    font-size: 17px;
-  }
-
-  .ti-desk-story__headline {
-    font-size: 21px;
-  }
-
-  .ti-desk-story__dek {
-    font-size: 16.5px;
-  }
-
-  .ti-rail-post__headline {
-    font-size: 17px;
-  }
-
-  .ti-rail-post__summary {
-    font-size: 15.5px;
-  }
-
-  .ti-rail-post > .pictogram-plate {
-    flex-basis: 112px;
-    width: 112px;
-  }
-
-  .ti-dated-post__headline {
-    font-size: 18px;
-  }
-
-  .ti-latest-strip__link {
-    font-size: 15px;
   }
 }
