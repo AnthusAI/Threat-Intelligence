@@ -64,9 +64,6 @@ export function MastheadWithOriginalWeb() {
         <BlogPageBackground headerObstacles={textObstacles} pageRef={mastheadReference} />
       </div>
       <div className="ti-masthead__copy">
-        <p className="ti-masthead__kicker" data-masthead-obstacle="">
-          Anthus AI Solutions
-        </p>
         <h1 className="ti-masthead__wordmark" data-masthead-obstacle="" id="ti-masthead-wordmark">
           Threat Intelligence
         </h1>
