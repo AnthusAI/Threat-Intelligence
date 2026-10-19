@@ -1,4 +1,4 @@
-import { SETTINGS_METADATA, SettingsRoute } from "@/publication/redesign/routes/archive-and-settings-routes";
+import { SETTINGS_METADATA, SettingsRoute } from "@/publication/redesign/routes/settings-routes";
 
 export const dynamic = "force-dynamic";
 

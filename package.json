@@ -7,14 +7,14 @@
     "build": "papyrus-app sync && next build",
     "start": "next start",
     "typecheck": "papyrus-app sync && tsc --noEmit",
-    "test": "npm run test:blog-defense-graph && npm run test:threat-intelligence-pictograms && npm run test:video-script && npm run test:edition-front-page-model",
+    "test": "npm run test:blog-defense-graph && npm run test:threat-intelligence-pictograms && npm run test:video-script && npm run test:post-feed-model",
     "test:blog-defense-graph": "node publication/tests/test-blog-defense-graph.cjs",
     "test:threat-intelligence-pictograms": "node publication/tests/test-pictograms.cjs",
     "test:video-script": "node publication/tests/test-video-script.cjs",
-    "test:edition-front-page-model": "node publication/tests/test-edition-front-page-model.cjs"
+    "test:post-feed-model": "node publication/tests/test-post-feed-model.cjs"
   },
   "dependencies": {
-    "@anthusai/papyrus": "^1.16.0",
+    "@anthusai/papyrus": "^1.17.0",
     "@aws-amplify/backend": "^1.22.0",
     "@aws-amplify/backend-cli": "^1.8.2",
     "@aws-amplify/seed": "^1.1.2",

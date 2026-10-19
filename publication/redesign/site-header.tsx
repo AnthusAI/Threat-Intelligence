@@ -5,13 +5,10 @@ import { ThemeSwitch } from "./theme-switch";
 
 export type SiteNavigationLink = { label: string; href: string };
 
-export const PUBLICATION_UTILITY_LINKS: SiteNavigationLink[] = [
-  { label: "Posts", href: "/posts" },
-  { label: "Archive", href: "/archive" },
-];
+export const PUBLICATION_UTILITY_LINKS: SiteNavigationLink[] = [{ label: "Posts", href: "/" }];
 
-export function SiteHeader({ deskLinks, homeHref = "/" }: { deskLinks: SiteNavigationLink[]; homeHref?: string }) {
-  const primaryLinks = [...deskLinks, ...PUBLICATION_UTILITY_LINKS];
+export function SiteHeader({ homeHref = "/" }: { homeHref?: string }) {
+  const primaryLinks = PUBLICATION_UTILITY_LINKS;
   return (
     <header className="ti-site-header">
       <Link aria-label="Anthus AI Solutions, Threat Intelligence home" className="ti-site-header__brand" href={homeHref}>
