@@ -19,6 +19,12 @@ Feature: Theme-aware posts feed home
     And older posts follow as a dated list
     And no post appears twice on the page
 
+  Scenario: The feed lists the publication's published articles
+    Given the publication's published items are of type "article"
+    When a reader opens the home page
+    Then every published article appears in the feed
+    And opening one shows its own page
+
   Scenario: The feed is empty before any post is published
     Given no published posts
     When a reader opens the home page

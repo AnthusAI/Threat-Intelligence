@@ -9,7 +9,7 @@ import { withRateLimitRetry } from "@anthusai/papyrus/lib/rate-limit-retry";
 import { tenantIdFromEnvironment, tenantScopedValue } from "@anthusai/papyrus/lib/tenant-keys";
 import type { PublishedPostImage, PublishedPostSummary } from "./post-feed-model";
 
-export const POST_ITEM_TYPE = "post";
+export const POST_ITEM_TYPE = "article";
 export const POSTS_CACHE_TAG = "posts";
 const PUBLISHED_STATUS = "published";
 const POSTS_REVALIDATE_SECONDS = 60;
