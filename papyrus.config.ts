@@ -39,7 +39,6 @@ export default defineSite({
     revalidateBaseUrl: revalidateSecretParameterIsConfigured ? "https://threat-intelligence.anth.us" : undefined,
     brandId: "threat-intelligence",
     auth: resolvedAuthConfiguration,
-    plugins: ["editorial-checks"],
     features: {
       consoleResponder: false,
       inboundEmail: false,
