@@ -45,6 +45,7 @@ export const threatIntelligenceBrand: SiteBrand = {
   mastheadSource: "brand",
   sectionLinkStrategy: "anchor",
   defaultVideoCredit: "Anthus Threat Intelligence video",
+  kanbusTheme: "night-desk",
   themePack: "threat-intelligence",
   themeTokens: {
     ...DEFAULT_THEME_PACK_TOKENS,
