@@ -85,7 +85,7 @@
     "breadcrumbs": false
   },
   "pageActions": {
-    "enabled": false
+    "enabled": true
   },
   "redirects": {
     "exact": {
@@ -104,5 +104,10 @@
     ],
     "title_template": "{title} | {site}"
   },
-  "hooks": "hooks.py"
+  "hooks": "hooks.py",
+  "agents": {
+    "markdown": true,
+    "llmsTxt": true,
+    "llmsFull": true
+  }
 }
