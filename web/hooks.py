@@ -181,7 +181,7 @@ def _post(page) -> str:
     dek = f'<p class="ti-article__dek">{escape(entry.summary_text)}</p>' if entry.summary_text else ""
     figure = f'<div class="ti-article__figure ti-post__image">{_plate(entry)}</div>' if _plate(entry) else ""
     return (
-        '<article class="ti-article ti-post"><header class="ti-article__header">'
+        f'{page.page_actions}<article class="ti-article ti-post"><header class="ti-article__header">'
         f'<p class="ti-kicker"><a class="ti-kicker__signal" href="/">Post</a>{desk}<time datetime="{escape(_published(entry))}">{escape(_date_label(entry))}</time></p>'
         f'<h1 class="ti-article__headline ti-post__headline">{escape(entry.title)}</h1>{dek}</header>'
         f'{figure}<div class="ti-article__body">{article_body(page.fragment)}</div></article>'

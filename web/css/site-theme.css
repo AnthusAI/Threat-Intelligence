@@ -1619,3 +1619,19 @@
     font-size: min(calc(4.4vw + 17.6px), 136px);
   }
 }
+
+/* Page actions (Copy Markdown, View as Markdown, Open in ...) above a post. */
+.markus-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 40px; margin: 0 0 20px; position: relative; font-family: var(--font-sans); font-size: 14px; }
+.markus-page-actions :is(button, a) { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--surface); color: var(--foreground); text-decoration: none; cursor: pointer; }
+.markus-page-actions :is(button, a):hover { border-color: var(--signal); }
+.markus-page-actions :is(button, a):focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.markus-page-actions .markus-copy-md { visibility: hidden; }
+.markus-actions-js .markus-copy-md { visibility: visible; }
+.markus-actions-links { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.markus-actions-menu { position: relative; }
+.markus-actions-menu [role="menu"] { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 14rem; margin: 0; padding: 4px; list-style: none; background: var(--surface); color: var(--foreground); border: 1px solid var(--line); border-radius: var(--radius-tile); }
+.markus-actions-menu [role="menu"][hidden] { display: none; }
+.markus-actions-menu [role="menuitem"] { display: block; width: 100%; text-align: left; border: 0; }
+.markus-actions-menu [role="menuitem"]:is(:hover, :focus-visible) { background: var(--line); }
+.markus-actions-status { min-width: 6rem; font-size: 13px; color: var(--muted-foreground); }
+.markus-actions-fallback { width: 100%; min-height: 6rem; }
