@@ -39,6 +39,12 @@ export default defineSite({
     revalidateBaseUrl: revalidateSecretParameterIsConfigured ? "https://threat-intelligence.anth.us" : undefined,
     brandId: "threat-intelligence",
     auth: resolvedAuthConfiguration,
+    publication: {
+      kind: "s3-projection",
+      staticDir: "web",
+      reprojectOnDeploy: true,
+      edgeDistributionArn: "arn:aws:cloudfront::712236451410:distribution/E20NJAIXZ1WKWD",
+    },
     features: {
       consoleResponder: false,
       inboundEmail: false,
