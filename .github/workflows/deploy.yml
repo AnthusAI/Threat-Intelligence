@@ -1,0 +1,45 @@
+# Merge to main deploys: CI runs here (this repository is public, so Actions minutes are free);
+# a green push to main starts the Amplify job for that exact commit through GitHub OIDC.
+# No AWS keys are stored: the role trusts repo:AnthusAI/Threat-Intelligence:ref:refs/heads/main only and may only
+# start and read jobs on this app's main branch. Amplify's own auto-build is off on main.
+# Defined by the Papyrus app shell (docs/site-hosting.md, "Deploy on merge to main").
+name: CI and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # amplify_outputs.json is generated per deployment and git-ignored; the typecheck only needs
+      # the module to resolve, so an empty stub stands in. No secrets.
+      - run: echo '{}' > amplify_outputs.json
+      - run: npx papyrus-app sync
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  deploy:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+    uses: AnthusAI/Papyrus/.github/workflows/amplify-deploy.yml@main
+    with:
+      app-id: d12wnrx15qbcc2
+      role-to-assume: arn:aws:iam::712236451410:role/threat-intelligence-github-deploy

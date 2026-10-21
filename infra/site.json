@@ -5,7 +5,7 @@
   "brand": "threat-intelligence",
   "frontend": "pretext",
   "hostedZoneId": "Z02552332GG6AM25SFP73",
-  "papyrusVersion": "5.12.0",
+  "papyrusVersion": "5.13.0",
   "cms": {
     "domainName": "anth.us",
     "domainPrefix": "threat-intelligence",
@@ -23,6 +23,8 @@
   "github": {
     "owner": "AnthusAI",
     "repo": "Threat-Intelligence",
-    "ciCanDeployInfra": false
+    "ciCanDeployInfra": false,
+    "ownerId": 152415604,
+    "repoId": 1282263864
   }
 }
