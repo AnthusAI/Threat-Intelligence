@@ -86,6 +86,7 @@
   },
   "pageActions": {
     "enabled": true,
+    "types": ["AI", "AWS", "Azure", "Gaming", "Mission", "Newsroom"],
     "ai": ["chatgpt", "claude", "perplexity"]
   },
   "redirects": {
