@@ -1,0 +1,47 @@
+# LeftBlock overrides: each entry approves one finding (one rule on one exact
+# line content in one file). Changing that line re-blocks it. `kind` is the
+# rule's category, shown for reviewers; it is not part of matching.
+version: 1
+allow:
+  - id: "b8760c7fc3835db6"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence-amplify-origin.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "25aa596cb046f5f4"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence-amplify-origin.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "90d8c46731e5084c"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "bb1ecdbdc9b04190"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "ec226ebe9160268d"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "d2df40131b983832"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21
+  - id: "e3e36f42cfdc5521"
+    rule: "leftblock-session-uuid"
+    file: "infra/edge/threat-intelligence.yaml"
+    kind: "Bare UUID (potential session/agent identifier)"
+    reason: "AWS managed CloudFront cache and origin request policy ids in the edge templates; public constants, not identifiers of a session"
+    added: 2026-10-21

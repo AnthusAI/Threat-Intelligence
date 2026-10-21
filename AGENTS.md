@@ -1,6 +1,6 @@
 # Threat Intelligence publication
 
-This repository holds only what is specific to Anthus Threat Intelligence. The newsroom application, the Pretext reader, the Amplify Gen 2 backend and the deployment constructs come from the pinned `@anthusai/papyrus` package. Do not copy Papyrus application code (`app/`, `lib/`, `components/`, `amplify/functions/`) into this repository. Fix Papyrus in the Papyrus repository and bump the pin.
+This repository holds only what is specific to Anthus Threat Intelligence. The newsroom application, the Pretext newsroom, the Amplify Gen 2 backend and the deployment constructs come from the pinned `@anthusai/papyrus` package. Do not copy Papyrus application code (`app/`, `lib/`, `components/`, `amplify/functions/`) into this repository. Fix Papyrus in the Papyrus repository and bump the pin.
 
 ## Layout
 
@@ -11,6 +11,9 @@ This repository holds only what is specific to Anthus Threat Intelligence. The n
 - `publication/videoml/`: TI video scene components. Videos do not play on this stack until the video-script loader port lands.
 - `publication/seed/`: seed edition content (reference data; the database is the authority).
 - `publication/tests/`: TI static and unit tests (`npm test`).
+- `web/`: the public site on the standard Papyrus front end (S3 projection): `projection.json` (settings), `css/site-theme.css` (the look), `hooks.py` (chrome, front page, post page), `pictograms.py` (static figures), `assets/`. See `docs/static-reader.md`.
+- `bin/front_matter_migration.py`: the one-time data migration that gave each post front matter.
+- `infra/edge/`: the CloudFront edge stack `papyrus-edge-threat-intelligence` (S3 default origin; `/newsroom*`, `/_next/*`, `/api/*` to Amplify) and the previous Amplify-origin template kept as the rollback.
 - `amplify/backend.ts`, `amplify/data/resource.ts`: one-line re-exports from the package.
 - `infra/site.json`: the CDK app shell description (`papyrus-infra synth --site infra/site.json`).
 - `corpora/`, `skills/`, `docs/`, `public/`: beat configuration, agent skills, runbooks and brand assets.
