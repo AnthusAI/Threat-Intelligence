@@ -85,7 +85,8 @@
     "breadcrumbs": false
   },
   "pageActions": {
-    "enabled": true
+    "enabled": true,
+    "ai": ["chatgpt", "claude", "perplexity"]
   },
   "redirects": {
     "exact": {
