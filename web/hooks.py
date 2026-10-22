@@ -97,6 +97,7 @@ def _footer() -> str:
         f'<p class="ti-site-footer__description">{escape(TAGLINE)}<br/>Published by Anthus AI Solutions.</p></div>'
         '<nav aria-label="Footer" class="ti-site-footer__links"><ul class="ti-site-footer__utility-links">'
         '<li><a href="/">Posts</a></li><li><a href="/feed.xml">RSS feed</a></li><li><a class="ti-text-button" href="/newsroom">Log in</a></li>'
+        '<li><a href="https://anth.us/privacy/">Privacy</a></li><li><a href="#cookie-settings">Cookie settings</a></li>'
         '</ul></nav></div>'
         f'<p aria-hidden="true" class="ti-site-footer__wordmark">{NAME}</p></footer>'
     )
