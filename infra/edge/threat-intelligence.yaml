@@ -125,6 +125,82 @@ Resources:
           }
           return request;
         }
+  NotFoundPageRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com, edgelambda.amazonaws.com]
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  NotFoundPageFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Origin-response function of the default behavior only. Turns an S3 miss (403 or 404) into the site's own 404.html with status 404.
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt NotFoundPageRole.Arn
+      Timeout: 5
+      MemorySize: 128
+      Code:
+        ZipFile: |
+          const https = require("https");
+
+          const ERROR_PAGE_PATH = "/404.html";
+
+          function fetchErrorPage(host) {
+            return new Promise((resolve, reject) => {
+              const request = https.get(
+                { host, path: ERROR_PAGE_PATH, headers: { accept: "text/html", "accept-encoding": "identity" }, timeout: 4000 },
+                (response) => {
+                  const chunks = [];
+                  response.on("data", (chunk) => chunks.push(chunk));
+                  response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+                },
+              );
+              request.on("timeout", () => request.destroy(new Error("timeout")));
+              request.on("error", reject);
+            });
+          }
+
+          function notFound(response, contentType, body) {
+            response.status = "404";
+            response.statusDescription = "Not Found";
+            response.headers["content-type"] = [{ key: "Content-Type", value: contentType }];
+            response.bodyEncoding = "text";
+            response.body = body;
+            return response;
+          }
+
+          exports.handler = async (event) => {
+            const { request, response, config } = event.Records[0].cf;
+            if (response.status !== "403" && response.status !== "404") {
+              return response;
+            }
+            if (request.uri === ERROR_PAGE_PATH) {
+              return notFound(response, "text/plain", "Not found");
+            }
+            try {
+              const page = await fetchErrorPage(config.distributionDomainName);
+              if (page.status === 200) {
+                return notFound(response, "text/html", page.body);
+              }
+            } catch (error) {
+              return notFound(response, "text/plain", "Not found");
+            }
+            return notFound(response, "text/plain", "Not found");
+          };
+  NotFoundPageVersion:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref NotFoundPageFunction
+      Description: 'revision 2: change this text whenever the function code changes, so a new immutable version is published'
   SiteBucketOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -166,6 +242,9 @@ Resources:
           FunctionAssociations:
             - EventType: viewer-request
               FunctionARN: !GetAtt SiteViewerRequestFunction.FunctionARN
+          LambdaFunctionAssociations:
+            - EventType: origin-response
+              LambdaFunctionARN: !Ref NotFoundPageVersion
         CacheBehaviors:
           - PathPattern: '/newsroom*'
             TargetOriginId: amplify
@@ -207,15 +286,6 @@ Resources:
             FunctionAssociations:
               - EventType: viewer-request
                 FunctionARN: !GetAtt ForwardHostFunction.FunctionARN
-        CustomErrorResponses:
-          - ErrorCode: 404
-            ResponseCode: 404
-            ResponsePagePath: /404.html
-            ErrorCachingMinTTL: 10
-          - ErrorCode: 403
-            ResponseCode: 404
-            ResponsePagePath: /404.html
-            ErrorCachingMinTTL: 10
   CmsStagingDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
