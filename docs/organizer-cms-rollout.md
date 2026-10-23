@@ -8,9 +8,9 @@ backend permissions. Board projects native records and links to their existing
 mutation workspaces. No synthetic gateway or classifier is activated.
 
 The checked-in Amplify build spec retains the existing frontend commands and
-runtime-output handling. It generates main backend outputs instead of deploying
-backend changes, preserving the working Cognito domain, callbacks, roles and
-content. The app-ID guard excludes retired legacy applications. Publication
+runtime-output handling. Its backend phase deploys the backend with
+`npx ampx pipeline-deploy`, after a guard that fails the build unless
+`AWS_APP_ID` is `d12wnrx15qbcc2`, so a retired legacy application cannot build. Publication
 unit tests run before the actual Next build in the hosted pipeline. The public
 reader configuration and site-owned content remain unchanged.
 

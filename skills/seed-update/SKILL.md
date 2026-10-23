@@ -6,7 +6,7 @@ description: >-
   backend. Use when seeding TI editions, refreshing GraphQL after seed JSON or
   pictogram changes, uploading seed videos to S3, targeting threat-intelligence.anth.us,
   or when agents confuse Papyrus main (dbsyytcm9drqa) with TI reader production
-  (d3on1y5vlrxmam).
+  (d12wnrx15qbcc2).
 ---
 
 # Threat Intelligence Seed Update
@@ -27,7 +27,7 @@ branding, pictogram policy, and render details, read
 
 | Role | Amplify app | AppSync (example host prefix) | S3 media bucket pattern | Notes |
 |------|-------------|-------------------------------|-------------------------|-------|
-| **Reader production** (`threat-intelligence.anth.us`) | `d3on1y5vlrxmam` ("Threat Intelligence") | `ur2anu47d5f67eq7sjzoqpyuze` | `amplify-d3on1y5vlrxmam-ma-papyrusmediabucket0dab24-vq9lqoedok0k` | **THIS is live TI production** |
+| **Reader production** (`threat-intelligence.anth.us`) | `d12wnrx15qbcc2` ("threat-intelligence-cms") | `2neu5y2cjrbnbkord2mdaetysi` | `amplify-d12wnrx15qbcc2-ma-papyrusmediabucket0dab24-qr8gvsc26b09` | **THIS is live TI production** |
 | Papyrus main (often mislabeled "production") | `dbsyytcm9drqa` | `64hviw44q5cq5nwjcigmasowlq` | different bucket | Do **not** assume this is TI reader production |
 | Ryan sandbox | papyrus ryan-sandbox | `nkqutxchyzf3rkk6d5knpicdoi` / api id `b44efjcruvarvmkkfxgjopet4m` | `amplify-papyrus-ryan-sand-papyrusmediabucket0dab24-dncrpdxqhvwa` | Local `.env` usually points here |
 
@@ -39,19 +39,14 @@ endpoint in the reader JS bundle) before writing.
 `skills/category-steering/SKILL.md` and some Papyrus docs treat
 `dbsyytcm9drqa` / `64hviw44q5cq5nwjcigmasowlq` as "production authoring." That
 is **Papyrus main**, not the Threat Intelligence reader. TI reader production is
-`d3on1y5vlrxmam` / `ur2anu47d5f67eq7sjzoqpyuze`. Bootstrap JWT path for TI:
-
-```text
-PAPYRUS_JWT_SECRET_SSM_PARAM=/amplify/d3on1y5vlrxmam/main-branch-aeb7dfa526/PAPYRUS_JWT_SECRET
-```
-
-(Confirm the branch suffix from the authorizer Lambda `AMPLIFY_SSM_ENV_CONFIG`
-if the path drifts.)
+`d12wnrx15qbcc2` / `2neu5y2cjrbnbkord2mdaetysi`. The TI CMS app has no
+`PAPYRUS_JWT_SECRET` parameter in SSM (the retired app's path no longer exists;
+only its Google client parameters live under
+`/amplify/d12wnrx15qbcc2/main-branch-426d85d3fe/`), so there is no CLI JWT to mint for it.
 
 `auth refresh-jwt` auto-picks the Papyrus-main secret only when the GraphQL
 endpoint host is `64hviw44q5cq5nwjcigmasowlq`; otherwise it defaults to the
-**ryan-sandbox** secret. For TI production you **must** set
-`PAPYRUS_JWT_SECRET_SSM_PARAM` (or pass `--ssm-param`) explicitly.
+**ryan-sandbox** secret. Neither applies to TI production.
 
 ## Local source of truth
 
@@ -189,23 +184,17 @@ even when claims match). Cognito seed bypasses the Lambda authorizer.
    PAPYRUS_SEED_VIDEOS=1 npm run seed:amplify
    ```
 
-### D. Production TI reader (`d3on1y5vlrxmam`)
+### D. Production TI CMS (`d12wnrx15qbcc2`)
 
-1. Point `PAPYRUS_GRAPHQL_ENDPOINT` at TI production AppSync
-   (`https://ur2anu47d5f67eq7sjzoqpyuze.appsync-api.us-east-1.amazonaws.com/graphql`).
-2. Point `PAPYRUS_JWT_SECRET_SSM_PARAM` at that app's JWT secret SSM path
-   (discover from authorizer Lambda `AMPLIFY_SSM_ENV_CONFIG` if needed).
-3. Mint JWT to `.env.local`:
-
-   ```bash
-   export PAPYRUS_JWT_SECRET_SSM_PARAM=/amplify/d3on1y5vlrxmam/main-branch-aeb7dfa526/PAPYRUS_JWT_SECRET
-   poetry run papyrus auth refresh-jwt --write-env .env.local
-   # ensure .env.local also has PAPYRUS_GRAPHQL_ENDPOINT for TI production
-   ```
-
-4. Prefer `--upload-media false` if MP4s were already uploaded via `aws s3 cp`.
-5. Never assume `dbsyytcm9drqa` is the TI reader.
-6. Restore `.env.local` (remove production endpoint/JWT) so local defaults stay sandbox.
+1. Point `PAPYRUS_GRAPHQL_ENDPOINT` at the TI AppSync endpoint
+   (`https://2neu5y2cjrbnbkord2mdaetysi.appsync-api.us-east-1.amazonaws.com/graphql`).
+2. Authentication: the app has no CLI JWT secret in SSM (see above), so the
+   `auth refresh-jwt` flow of the old app does not work; confirm the current
+   auth path before writing.
+3. Prefer `--upload-media false` if MP4s were already uploaded via `aws s3 cp`
+   (media bucket `amplify-d12wnrx15qbcc2-ma-papyrusmediabucket0dab24-qr8gvsc26b09`).
+4. Never assume `dbsyytcm9drqa` is the TI reader.
+5. Restore `.env.local` (remove the production endpoint) so local defaults stay sandbox.
 
 ## Sandbox JWT authorizer caveat
 
