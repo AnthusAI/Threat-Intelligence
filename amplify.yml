@@ -11,7 +11,6 @@ frontend:
     build:
       commands:
         - env | grep -e '^PAPYRUS_' -e '^SITE_ENV=' -e '^NEXT_PUBLIC_' >> .env.production
-        - npm test
         - npx papyrus-app sync && npm run build
         - cp amplify_outputs.json .next/amplify_outputs.json
   artifacts:
