@@ -4,14 +4,14 @@
 
 ## What the site owns
 
-- `web/projection.json`: settings. Six desks (`AI`, `AWS`, `Azure`, `Gaming`, `Mission`, `Newsroom`) are sections at `/<desk>/`; the Newsroom desk is at `/inside-the-newsroom/` because `/newsroom` is the CMS.
+- `web/projection.json`: settings. Six sections (`AI`, `AWS`, `Azure`, `Gaming`, `Mission`, `Newsroom`) are sections at `/<section>/`; the Newsroom section is at `/inside-the-newsroom/` because `/newsroom` is the CMS.
 - `web/css/site-theme.css`: the look (theme tokens and layout from the redesign handoff; light, dark, system).
-- `web/hooks.py`: header, masthead, footer, front page, post page, desk pages and 404 body. `web/pictograms.py` holds the static copies of each post's pictogram plate (keyed by slug) and the masthead web. A new post without an entry has no figure.
+- `web/hooks.py`: header, masthead, footer, front page, post page, section pages and 404 body. `web/pictograms.py` holds the static copies of each post's pictogram plate (keyed by slug) and the masthead web. A new post without an entry has no figure.
 - Editorial values (title, description, date, aliases) are item front matter in the CMS. `bin/front_matter_migration.py` wrote them from the legacy headline and deck columns on 2026-10-21 (columns kept, so the Amplify reader still renders).
 
 ## URL shapes
 
-Posts moved from `/posts/<slug>` to `/<desk>/<slug>/`. Each old `/posts/<slug>` and `/articles/<slug>` (with and without the trailing slash) is a 301 through the redirects key-value store (an alias on each item). `/settings` redirects to `/`; `/icon.png` and `/icon-light.png` redirect to `/assets/`.
+Posts moved from `/posts/<slug>` to `/<section>/<slug>/`. Each old `/posts/<slug>` and `/articles/<slug>` (with and without the trailing slash) is a 301 through the redirects key-value store (an alias on each item). `/settings` redirects to `/`; `/icon.png` and `/icon-light.png` redirect to `/assets/`.
 
 ## Dropped on purpose
 
