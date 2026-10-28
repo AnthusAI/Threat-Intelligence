@@ -93,7 +93,7 @@ A backend deploy re-projects by itself (`reprojectOnDeploy`). Read [site-hosting
 ## Current state (2026-10-23)
 
 - Live: `https://threat-intelligence.anth.us/` returns 200 (static projection, CloudFront `E20NJAIXZ1WKWD`); `/newsroom`, `/llms.txt` and `/feed.xml` return 200; GA4 and the consent banner are in the page.
-- Pinned to Papyrus `5.52.0`.
+- Pinned to Papyrus `5.53.0`.
 - The staging host `threat-intelligence-staging.anth.us` is plain Amplify SSR and redirects when signed out.
 - Planned or open: videos do not play on this stack until the video-script loader port lands. `docs/organizer-cms-rollout.md` is a historical rollout note; its statement that `amplify.yml` does not deploy the backend is out of date (it runs `ampx pipeline-deploy` today). `docs/bootstrap.md` still describes older CLI and SSM details; check it against `papyrus --help` before relying on it.
 - The `develop` branch on GitHub is stale. Work from `main`.

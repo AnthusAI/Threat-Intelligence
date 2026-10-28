@@ -48,7 +48,7 @@ echo '{}' > amplify_outputs.json
 npx papyrus-app sync && npx tsc --noEmit && npm test
 ```
 
-The pinned engine is `@anthusai/papyrus` `5.52.0`, set in `package.json` and in `infra/site.json` (`papyrusVersion`). The two must agree with `package-lock.json`.
+The pinned engine is `@anthusai/papyrus` `5.53.0`, set in `package.json` and in `infra/site.json` (`papyrusVersion`). The two must agree with `package-lock.json`.
 
 ## How a change reaches production
 
