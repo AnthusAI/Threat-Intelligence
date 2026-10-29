@@ -14,7 +14,7 @@
     "test:post-feed-model": "node publication/tests/test-post-feed-model.cjs"
   },
   "dependencies": {
-    "@anthusai/papyrus": "5.53.1",
+    "@anthusai/papyrus": "5.54.0",
     "@aws-amplify/backend": "^1.22.0",
     "@aws-amplify/backend-cli": "^1.8.2",
     "@aws-amplify/seed": "^1.1.2",
