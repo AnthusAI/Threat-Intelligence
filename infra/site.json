@@ -6,7 +6,7 @@
   "frontend": "pretext",
   "aws": { "profile": "papyrus-production", "accountId": "712236451410", "region": "us-east-1" },
   "hostedZoneId": "Z02552332GG6AM25SFP73",
-  "papyrusVersion": "5.54.0",
+  "papyrusVersion": "5.55.0",
   "cms": {
     "domainName": "anth.us",
     "domainPrefix": "threat-intelligence",
