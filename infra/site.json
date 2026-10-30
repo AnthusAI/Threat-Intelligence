@@ -4,7 +4,11 @@
   "repository": "https://github.com/AnthusAI/Threat-Intelligence",
   "brand": "threat-intelligence",
   "frontend": "pretext",
-  "aws": { "profile": "papyrus-production", "accountId": "712236451410", "region": "us-east-1" },
+  "aws": {
+    "profile": "papyrus-production",
+    "accountId": "712236451410",
+    "region": "us-east-1"
+  },
   "hostedZoneId": "Z02552332GG6AM25SFP73",
   "papyrusVersion": "5.62.0",
   "cms": {
@@ -19,7 +23,8 @@
       "PAPYRUS_ENABLE_INBOUND_EMAIL": "false",
       "PAPYRUS_ENABLE_STORAGE_BACKUPS": "false",
       "PAPYRUS_OAUTH_REDIRECT_URLS": "https://main.dzefa11i80jyq.amplifyapp.com/newsroom,https://main.dzefa11i80jyq.amplifyapp.com/,http://localhost:3001/,https://threat-intelligence.anth.us/,https://threat-intelligence-staging.anth.us/"
-    }
+    },
+    "cliRemoteLogin": true
   },
   "github": {
     "owner": "AnthusAI",
