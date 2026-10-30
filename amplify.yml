@@ -11,7 +11,7 @@ frontend:
     build:
       commands:
         - env | grep -e '^PAPYRUS_' -e '^SITE_ENV=' -e '^NEXT_PUBLIC_' >> .env.production
-        - npx papyrus-app sync && npm run build
+        - NODE_OPTIONS=--max-old-space-size=6144 npx papyrus-app sync && NODE_OPTIONS=--max-old-space-size=6144 npm run build
         - cp amplify_outputs.json .next/amplify_outputs.json
   artifacts:
     baseDirectory: .next
