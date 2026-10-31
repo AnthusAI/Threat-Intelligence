@@ -10,7 +10,7 @@
     "region": "us-east-1"
   },
   "hostedZoneId": "Z02552332GG6AM25SFP73",
-  "papyrusVersion": "5.62.1",
+  "papyrusVersion": "5.63.0",
   "cms": {
     "domainName": "anth.us",
     "domainPrefix": "threat-intelligence",
