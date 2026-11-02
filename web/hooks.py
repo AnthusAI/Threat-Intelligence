@@ -20,7 +20,7 @@ SHOWCASE_COUNT = 6
 THEME_STORAGE_KEY = "anthus-threat-intelligence-theme"
 
 # What each page depends on: a post page reads only itself; every other page reads the desks.
-DEPENDS_ON = {"item": [], "*": ["AI", "AWS", "Azure", "Gaming", "Mission", "Newsroom"]}
+DEPENDS_ON = {"item": [], "*": ["ai", "aws", "azure", "gaming", "mission", "newsroom"]}
 
 PRE_PAINT_THEME_SCRIPT = (
     "(function(){try{var s=window.localStorage.getItem(%r);"

@@ -12,29 +12,35 @@
   "urls": {
     "style": "directory",
     "sections": {
-      "AI": {
+      "ai": {
         "base": "ai",
-        "label": "AI"
+        "label": "AI",
+        "aliases": ["AI"]
       },
-      "AWS": {
+      "aws": {
         "base": "aws",
-        "label": "AWS"
+        "label": "AWS",
+        "aliases": ["AWS"]
       },
-      "Azure": {
+      "azure": {
         "base": "azure",
-        "label": "Azure"
+        "label": "Azure",
+        "aliases": ["Azure"]
       },
-      "Gaming": {
+      "gaming": {
         "base": "gaming",
-        "label": "Gaming"
+        "label": "Gaming",
+        "aliases": ["Gaming"]
       },
-      "Mission": {
+      "mission": {
         "base": "mission",
-        "label": "Mission"
+        "label": "Mission",
+        "aliases": ["Mission"]
       },
-      "Newsroom": {
+      "newsroom": {
         "base": "inside-the-newsroom",
-        "label": "Newsroom"
+        "label": "Newsroom",
+        "aliases": ["Newsroom"]
       }
     }
   },
@@ -49,12 +55,12 @@
   "seo": {
     "publisherName": "Anthus AI Solutions",
     "jsonLdTypes": {
-      "AI": "Article",
-      "AWS": "Article",
-      "Azure": "Article",
-      "Gaming": "Article",
-      "Mission": "Article",
-      "Newsroom": "Article"
+      "ai": "Article",
+      "aws": "Article",
+      "azure": "Article",
+      "gaming": "Article",
+      "mission": "Article",
+      "newsroom": "Article"
     }
   },
   "fonts": {
