@@ -474,7 +474,7 @@ of trusting this README as the layout source of truth.
 ## Commands
 
 ```bash
-npm run dev
+npm run dev          # local dev server; see the development policy in AGENTS.md
 npm run dev:127
 npm run lint
 npm run typecheck
