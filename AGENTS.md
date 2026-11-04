@@ -23,15 +23,13 @@ edition layout plans, responsive page grids, regions, block geometry, cut
 policies, page heights, furniture variants, scoring, continuation labels, and
 rendering contracts.
 
-## Continuous integration on `develop` (promote to `main`)
+## Development policy (Ryan, 2026-11-04)
 
-- **`develop` on GitHub (`AnthusAI/Threat-Intelligence`) is the integration
-  branch.** Feature work should land on `develop` first.
-- **`main` is the release/production branch.** Promote reviewed integration work
-  with `develop -> main` PRs.
-- Keep integration and release state explicit: report whether a change has
-  landed in `develop`, whether a `develop -> main` PR exists, and whether it has
-  merged.
+- Develop and verify on a local dev server: `npm run dev` (port 3001) or `npm run dev:127` (127.0.0.1). Both write `amplify_outputs.json` from the sandbox through `scripts/ensure-sandbox-amplify-outputs.mjs`, so they need a sandbox or backend; `npm run dev:production` points at the production backend. Do not deploy to see whether something works.
+- **Merge** means merging a pull request into `develop` (`AnthusAI/Threat-Intelligence`); that is where things are reviewed. `develop` builds nothing in Amplify.
+- **Release** means merging `develop` into `main`, which deploys. Aim for once or twice a day, batching what is ready. An extra release needs Ryan's say-so.
+- Papyrus version bumps go to this site's `develop` and ship in this site's release. A Papyrus release can add a GSI and a deploy can add only one per table, so a site cannot skip a release that adds one.
+- Say "merged to develop" or "released" precisely, and report whether a change is merged to `develop` and whether it has been released.
 
 ## Core Rules
 
@@ -40,7 +38,7 @@ rendering contracts.
   Treat `AGENTS.local.md` as required preflight context for cloud operations on
   this machine.
 - Papyrus is an Amplify Gen 2 project. Production backend/frontend deployment is
-  done from `main` through the configured DevOps/Amplify pipeline. Do not run
+  done from `main` (a release) through the configured DevOps/Amplify pipeline. Do not run
   `ampx pipeline-deploy` (or other direct production `ampx` deploy commands)
   from local agents unless the user explicitly asks for that exact override. Use
   `ampx` locally for sandbox workflows only.
