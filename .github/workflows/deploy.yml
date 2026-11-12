@@ -6,6 +6,7 @@
 name: CI and deploy
 
 on:
+  workflow_dispatch: # the Papyrus bump workflow starts CI on its branch; pull requests made with GITHUB_TOKEN start no checks
   push:
     branches: [main]
   pull_request:

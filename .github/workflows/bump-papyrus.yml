@@ -1,0 +1,20 @@
+# Opens "chore: bump Papyrus to X" when a newer release exists on PyPI and npm. One shared implementation:
+# https://github.com/AnthusAI/Papyrus/blob/main/docs/site-hosting.md (Automated Papyrus bumps). It never merges.
+name: Bump Papyrus
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  bump:
+    uses: AnthusAI/Papyrus/.github/workflows/bump-consumer.yml@main
+    with:
+      base: main
+      ci-workflow: deploy.yml
