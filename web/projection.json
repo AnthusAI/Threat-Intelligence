@@ -1,0 +1,125 @@
+{
+  "theme": null,
+  "site": {
+    "name": "Threat Intelligence",
+    "publisher": "Anthus AI Solutions",
+    "tagline": "Practical advice for staying secure as the threat landscape shifts.",
+    "description": "Practical advice for staying secure as the threat landscape shifts.",
+    "productionUrl": "https://threat-intelligence.anth.us",
+    "language": "en",
+    "componentsCss": false
+  },
+  "urls": {
+    "style": "directory",
+    "sections": {
+      "ai": {
+        "base": "ai",
+        "label": "AI",
+        "aliases": ["AI"]
+      },
+      "aws": {
+        "base": "aws",
+        "label": "AWS",
+        "aliases": ["AWS"]
+      },
+      "azure": {
+        "base": "azure",
+        "label": "Azure",
+        "aliases": ["Azure"]
+      },
+      "gaming": {
+        "base": "gaming",
+        "label": "Gaming",
+        "aliases": ["Gaming"]
+      },
+      "mission": {
+        "base": "mission",
+        "label": "Mission",
+        "aliases": ["Mission"]
+      },
+      "newsroom": {
+        "base": "inside-the-newsroom",
+        "label": "Newsroom",
+        "aliases": ["Newsroom"]
+      }
+    }
+  },
+  "nav": {
+    "links": [
+      {
+        "label": "Posts",
+        "href": "/"
+      }
+    ]
+  },
+  "seo": {
+    "publisherName": "Anthus AI Solutions",
+    "jsonLdTypes": {
+      "ai": "Article",
+      "aws": "Article",
+      "azure": "Article",
+      "gaming": "Article",
+      "mission": "Article",
+      "newsroom": "Article"
+    }
+  },
+  "fonts": {
+    "stylesheet": "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+  },
+  "icons": {
+    "icon": "/assets/icon.png",
+    "iconType": "image/png"
+  },
+  "listings": {
+    "pageSize": 100,
+    "homeCount": 100,
+    "tags": false
+  },
+  "sitemap": {
+    "style": "single",
+    "lastmod": true
+  },
+  "feeds": {
+    "formats": [
+      "rss",
+      "atom"
+    ],
+    "count": 30,
+    "title": "Threat Intelligence"
+  },
+  "components": {
+    "breadcrumbs": false
+  },
+  "pageActions": {
+    "enabled": true,
+    "types": ["AI", "AWS", "Azure", "Gaming", "Mission", "Newsroom"],
+    "ai": ["chatgpt", "claude", "perplexity"]
+  },
+  "redirects": {
+    "exact": {
+      "/settings": "/",
+      "/settings/": "/",
+      "/icon.png": "/assets/icon.png",
+      "/icon-light.png": "/assets/icon-light.png"
+    }
+  },
+  "chrome": {
+    "ga_measurement_id": "G-31SC26SDGX",
+    "consent_mode": {
+      "privacy_policy_url": "https://anth.us/privacy/"
+    },
+    "stylesheets": [
+      "css/site-theme.css"
+    ],
+    "scripts": [
+      "assets/theme.js"
+    ],
+    "title_template": "{title} | {site}"
+  },
+  "hooks": "hooks.py",
+  "agents": {
+    "markdown": true,
+    "llmsTxt": true,
+    "llmsFull": true
+  }
+}
