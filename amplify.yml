@@ -3,18 +3,16 @@ backend:
   phases:
     build:
       commands:
-        - npm install --cache .npm --prefer-offline
-        - |
-          if [ -z "${PAPYRUS_CONSOLE_RESPONDER_IMAGE_URI:-}" ]; then
-            export PAPYRUS_CONSOLE_RESPONDER_ALLOW_LOCAL_BUILD=true
-          fi
-        - npx ampx pipeline-deploy --debug --branch $AWS_BRANCH --app-id $AWS_APP_ID
+        - test "$AWS_APP_ID" = "d12wnrx15qbcc2"
+        - npm ci --cache .npm --prefer-offline
+        - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
 frontend:
   phases:
     build:
       commands:
-        - env | grep -e '^PAPYRUS_CONTENT_SOURCE=' -e '^PAPYRUS_EDITION_SLUG=' -e '^PAPYRUS_REVALIDATE_SECRET=' >> .env.production
-        - npm run build
+        - env | grep -e '^PAPYRUS_' -e '^SITE_ENV=' -e '^NEXT_PUBLIC_' >> .env.production
+        - NODE_OPTIONS=--max-old-space-size=6144 npx papyrus-app sync && NODE_OPTIONS=--max-old-space-size=6144 npm run build
+        - cp amplify_outputs.json .next/amplify_outputs.json
   artifacts:
     baseDirectory: .next
     files:

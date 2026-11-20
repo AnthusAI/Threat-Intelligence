@@ -1,14 +1,9 @@
-import type { Metadata } from "next";
-import { SettingsPage } from "../../components/settings-page";
-import { SITE_BRAND } from "../../lib/site-brand";
+import { SETTINGS_METADATA, SettingsRoute } from "@/publication/redesign/routes/settings-routes";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: `Settings | ${SITE_BRAND.articleTitleSuffix}`,
-  description: `Reader presentation and theme settings for ${SITE_BRAND.articleTitleSuffix}.`,
-};
+export const metadata = SETTINGS_METADATA;
 
-export default function Settings() {
-  return <SettingsPage />;
+export default function SettingsPage() {
+  return <SettingsRoute />;
 }
